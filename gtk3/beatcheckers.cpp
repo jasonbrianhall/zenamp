@@ -681,7 +681,17 @@ void update_beat_checkers(void *vis_ptr, double dt) {
             
             usleep(50000);  // Give thread time to stop
             
+            // Remember current game mode before reset
+            bool was_player_vs_ai = checkers->player_vs_ai;
+            
             init_beat_checkers_system(vis_ptr);
+            
+            // Restore game mode after reset
+            checkers->player_vs_ai = was_player_vs_ai;
+            if (was_player_vs_ai) {
+                strcpy(checkers->status_text, "Red to move");
+            }
+            
             checkers->auto_reset_timer = 0;  // Reset timer
         }
     }
