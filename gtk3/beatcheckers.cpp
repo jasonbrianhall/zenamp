@@ -882,11 +882,6 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                     CheckersMove move = {from_row, from_col, to_row, to_col, 0, {0}, {0}, false};
                     
                     if (checkers_is_valid_move(&checkers->game, &move)) {
-                        printf("DEBUG: move.jump_count = %d\n", move.jump_count);
-                        if (move.jump_count > 0) {
-                            printf("DEBUG: jumped_rows[0] = %d, jumped_cols[0] = %d\n", move.jumped_rows[0], move.jumped_cols[0]);
-                            printf("DEBUG: color at that position = %d\n", checkers->game.board[move.jumped_rows[0]][move.jumped_cols[0]].color);
-                        }
                         
                         // Store captured piece colors BEFORE making the move
                         CheckersColor temp_captured_colors[MAX_JUMP_CHAIN];
@@ -895,7 +890,6 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                             temp_captured_count = move.jump_count;
                             for (int i = 0; i < move.jump_count; i++) {
                                 temp_captured_colors[i] = checkers->game.board[move.jumped_rows[i]][move.jumped_cols[i]].color;
-                                printf("DEBUG: Saving color %d for jumped piece %d\n", temp_captured_colors[i], i);
                             }
                         }
                         
@@ -1479,7 +1473,6 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
             int r = idx / CHECKERS_BOARD_SIZE;
             int c = idx % CHECKERS_BOARD_SIZE;
             CheckersColor piece_color = checkers->captured_colors[i];
-            printf("DEBUG DRAW: captured_colors[%d] = %d (1=RED, 2=BLACK)\n", i, piece_color);
             
             double x = ox + c * cell;
             double y = oy + r * cell;
