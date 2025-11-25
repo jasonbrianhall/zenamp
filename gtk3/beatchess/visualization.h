@@ -12,6 +12,9 @@ typedef struct {
     int width, height;
     double volume_level;
     BeatChessVisualization beat_chess;
+    int mouse_x;
+    int mouse_y;
+    bool mouse_left_pressed;
 } Visualizer;
 
 bool chess_is_in_bounds(int r, int c);
