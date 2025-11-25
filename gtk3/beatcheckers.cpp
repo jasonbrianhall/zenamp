@@ -636,6 +636,7 @@ void init_beat_checkers_system(void *vis_ptr) {
     checkers->current_move_start_time = 0.0;
     checkers->last_move_end_time = 0.0;
     checkers->move_history_count = 0;
+    checkers->auto_reset_timer = 0.0;  // No auto-reset on initial start
     checkers_clear_move_history(checkers);
     
     // Start thinking with the already-created thread
@@ -666,6 +667,22 @@ void update_beat_checkers(void *vis_ptr, double dt) {
         checkers->king_promotion_glow -= dt;
         if (checkers->king_promotion_glow < 0) {
             checkers->king_promotion_active = false;
+        }
+    }
+    
+    // Handle auto-reset timer
+    if (checkers->auto_reset_timer > 0) {
+        checkers->auto_reset_timer -= dt;
+        if (checkers->auto_reset_timer <= 0) {
+            // Auto-reset: stop thinking, reinitialize game
+            pthread_mutex_lock(&checkers->thinking_state.lock);
+            checkers->thinking_state.thinking = false;
+            pthread_mutex_unlock(&checkers->thinking_state.lock);
+            
+            usleep(50000);  // Give thread time to stop
+            
+            init_beat_checkers_system(vis_ptr);
+            checkers->auto_reset_timer = 0;  // Reset timer
         }
     }
     
@@ -866,6 +883,15 @@ void update_beat_checkers(void *vis_ptr, double dt) {
     checkers->reset_button_was_pressed = reset_is_pressed;
     
     if (reset_clicked) {
+        // Stop current thinking
+        pthread_mutex_lock(&checkers->thinking_state.lock);
+        checkers->thinking_state.thinking = false;
+        pthread_mutex_unlock(&checkers->thinking_state.lock);
+        
+        // Give thread time to stop
+        usleep(50000);
+        
+        // Now reinitialize the board and restart
         init_beat_checkers_system(vis_ptr);
         checkers->reset_button_glow = 1.0;
     }
@@ -927,6 +953,9 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                         checkers->status_flash_color[2] = 0.7;
                     }
                     checkers->status_flash_timer = 2.0;
+                    
+                    // Auto-reset after 2 seconds
+                    checkers->auto_reset_timer = 2.0;
                 } else {
                     checkers_start_thinking(&checkers->thinking_state, &checkers->game);
                 }
@@ -984,6 +1013,9 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                     checkers->status_flash_color[2] = 0.7;
                 }
                 checkers->status_flash_timer = 2.0;
+                
+                // Auto-reset after 2 seconds
+                checkers->auto_reset_timer = 2.0;
             } else {
                 strcpy(checkers->status_text, "Red to move");
                 checkers_start_thinking(&checkers->thinking_state, &checkers->game);

@@ -94,6 +94,7 @@ typedef struct {
     char status_text[256];
     double status_flash_timer;
     double status_flash_color[3];
+    double auto_reset_timer;
     
     // Beat detection
     double beat_volume_history[CHECKERS_BEAT_HISTORY];
