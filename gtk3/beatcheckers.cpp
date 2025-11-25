@@ -583,7 +583,19 @@ void init_beat_checkers_system(void *vis_ptr) {
     
     checkers->beat_history_index = 0;
     checkers->time_since_last_move = 0;
-    checkers->beat_threshold = 0.3;
+    
+    // Calculate beat threshold based on sensitivity
+    // Higher sensitivity = lower threshold = more frequent moves
+    checkers->beat_threshold = 0.3 / vis->sensitivity;
+    
+    // Clamp to reasonable bounds to prevent extreme behavior
+    if (checkers->beat_threshold > 0.5) {
+        checkers->beat_threshold = 0.5;  // Max threshold (hardest)
+    }
+    if (checkers->beat_threshold < 0.05) {
+        checkers->beat_threshold = 0.05;  // Min threshold (easiest)
+    }
+    
     checkers->move_count = 0;
     
     checkers->beats_since_game_over = 0;
