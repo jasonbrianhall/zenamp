@@ -89,6 +89,7 @@ typedef struct {
     // Captured pieces fade out
     int captured_pieces[MAX_JUMP_CHAIN * 2];
     double captured_fade[MAX_JUMP_CHAIN * 2];
+    CheckersColor captured_colors[MAX_JUMP_CHAIN * 2];  // Store the color of each captured piece
     int captured_count;
     
     // Status

@@ -698,27 +698,60 @@ void update_beat_checkers(void *vis_ptr, double dt) {
     
     // Update animation
     if (checkers->is_animating) {
-        // Adjust animation speed based on number of jumps in this move
-        // More jumps = slower animation so you can see each captured piece
-        double animation_speed = 3.0;  // Default speed for regular moves (~0.33 seconds)
+        // For jump chains, we need to animate each segment separately
+        // and fade out captured pieces at the right moment
         
         if (checkers->current_move_jump_count > 0) {
-            // For jump chains: approximately 0.4 seconds per jump segment
-            animation_speed = 2.5 * (checkers->current_move_jump_count + 1);
+            // Multi-jump animation: divide time among jumps
+            // Each jump gets its own time segment
+            double time_per_jump = 0.4;  // 0.4 seconds per jump
+            double total_animation_time = time_per_jump * (checkers->current_move_jump_count + 1);
+            
+            // Track which jump we're currently animating
+            double current_time = checkers->animation_progress * total_animation_time;
+            int current_jump_segment = (int)(current_time / time_per_jump);
+            double segment_progress = fmod(current_time, time_per_jump) / time_per_jump;
+            
+            // Clamp segment progress
+            if (segment_progress < 0) segment_progress = 0;
+            if (segment_progress > 1.0) segment_progress = 1.0;
+            
+            // Update which captured pieces should be fading
+            // Pieces fade out as we pass them
+            if (checkers->current_jump_chain.jump_count > 0) {
+                for (int i = 0; i < checkers->current_jump_chain.jump_count; i++) {
+                    if (i < current_jump_segment) {
+                        // This piece has been jumped, fade it out
+                        checkers->captured_fade[i] = 0;
+                    } else if (i == current_jump_segment) {
+                        // We're jumping this piece right now, start fading
+                        checkers->captured_fade[i] = 1.0 - segment_progress;
+                    } else {
+                        // Haven't jumped this piece yet
+                        checkers->captured_fade[i] = 1.0;
+                    }
+                }
+            }
+            
+            checkers->animation_progress += dt / ((double)checkers->current_move_jump_count + 1) / 0.4;
+        } else {
+            // Regular move (no jumps) - normal speed
+            checkers->animation_progress += dt * 3.0;
         }
         
-        checkers->animation_progress += dt * animation_speed;
         if (checkers->animation_progress >= 1.0) {
             checkers->animation_progress = 1.0;
             checkers->is_animating = false;
         }
     }
     
-    // Update captured pieces fade
-    for (int i = 0; i < checkers->captured_count; i++) {
-        checkers->captured_fade[i] -= dt * 2;
-        if (checkers->captured_fade[i] < 0) {
-            checkers->captured_fade[i] = 0;
+    // Update captured pieces fade (only if not currently animating jumps)
+    if (checkers->current_move_jump_count == 0) {
+        for (int i = 0; i < checkers->captured_count; i++) {
+            checkers->captured_fade[i] -= dt * 2;
+            if (checkers->captured_fade[i] < 0) {
+                checkers->captured_fade[i] = 0;
+            }
         }
     }
     
@@ -849,6 +882,23 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                     CheckersMove move = {from_row, from_col, to_row, to_col, 0, {0}, {0}, false};
                     
                     if (checkers_is_valid_move(&checkers->game, &move)) {
+                        printf("DEBUG: move.jump_count = %d\n", move.jump_count);
+                        if (move.jump_count > 0) {
+                            printf("DEBUG: jumped_rows[0] = %d, jumped_cols[0] = %d\n", move.jumped_rows[0], move.jumped_cols[0]);
+                            printf("DEBUG: color at that position = %d\n", checkers->game.board[move.jumped_rows[0]][move.jumped_cols[0]].color);
+                        }
+                        
+                        // Store captured piece colors BEFORE making the move
+                        CheckersColor temp_captured_colors[MAX_JUMP_CHAIN];
+                        int temp_captured_count = 0;
+                        if (move.jump_count > 0) {
+                            temp_captured_count = move.jump_count;
+                            for (int i = 0; i < move.jump_count; i++) {
+                                temp_captured_colors[i] = checkers->game.board[move.jumped_rows[i]][move.jumped_cols[i]].color;
+                                printf("DEBUG: Saving color %d for jumped piece %d\n", temp_captured_colors[i], i);
+                            }
+                        }
+                        
                         checkers_make_move(&checkers->game, &move);
                         checkers_save_move_history(checkers, move, checkers->current_move_start_time);
                         
@@ -862,7 +912,23 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                         checkers->animating_from_col = from_col;
                         checkers->animating_to_row = to_row;
                         checkers->animating_to_col = to_col;
-                        checkers->current_move_jump_count = move.jump_count;  // Store jump count for animation speed
+                        checkers->current_move_jump_count = move.jump_count;
+                        checkers->current_jump_chain = move;  // Store the complete move for animation
+                        
+                        // Initialize captured piece fade for jump animation with saved colors
+                        if (temp_captured_count > 0) {
+                            checkers->captured_count = temp_captured_count;
+                            for (int i = 0; i < temp_captured_count; i++) {
+                                int jumped_r = move.jumped_rows[i];
+                                int jumped_c = move.jumped_cols[i];
+                                checkers->captured_pieces[i] = jumped_r * CHECKERS_BOARD_SIZE + jumped_c;
+                                checkers->captured_colors[i] = temp_captured_colors[i];
+                                checkers->captured_fade[i] = 1.0;
+                            }
+                        } else {
+                            checkers->captured_count = 0;
+                        }
+                        
                         checkers->animation_progress = 0;
                         checkers->is_animating = true;
                         
@@ -952,6 +1018,16 @@ void update_beat_checkers(void *vis_ptr, double dt) {
             CheckersMove best_move = checkers_get_best_move_now(&checkers->thinking_state);
             
             if (best_move.from_row >= 0) {
+                // Store captured piece colors BEFORE making the move
+                CheckersColor temp_captured_colors[MAX_JUMP_CHAIN];
+                int temp_captured_count = 0;
+                if (best_move.jump_count > 0) {
+                    temp_captured_count = best_move.jump_count;
+                    for (int i = 0; i < best_move.jump_count; i++) {
+                        temp_captured_colors[i] = checkers->game.board[best_move.jumped_rows[i]][best_move.jumped_cols[i]].color;
+                    }
+                }
+                
                 checkers_make_move(&checkers->game, &best_move);
                 checkers_save_move_history(checkers, best_move, checkers->time_since_last_move);
                 
@@ -965,7 +1041,23 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                 checkers->animating_from_col = best_move.from_col;
                 checkers->animating_to_row = best_move.to_row;
                 checkers->animating_to_col = best_move.to_col;
-                checkers->current_move_jump_count = best_move.jump_count;  // Store jump count for animation speed
+                checkers->current_move_jump_count = best_move.jump_count;
+                checkers->current_jump_chain = best_move;  // Store the complete move for animation
+                
+                // Initialize captured piece fade for jump animation with saved colors
+                if (temp_captured_count > 0) {
+                    checkers->captured_count = temp_captured_count;
+                    for (int i = 0; i < temp_captured_count; i++) {
+                        int jumped_r = best_move.jumped_rows[i];
+                        int jumped_c = best_move.jumped_cols[i];
+                        checkers->captured_pieces[i] = jumped_r * CHECKERS_BOARD_SIZE + jumped_c;
+                        checkers->captured_colors[i] = temp_captured_colors[i];
+                        checkers->captured_fade[i] = 1.0;
+                    }
+                } else {
+                    checkers->captured_count = 0;
+                }
+                
                 checkers->animation_progress = 0;
                 checkers->is_animating = true;
                 
@@ -1013,6 +1105,16 @@ void update_beat_checkers(void *vis_ptr, double dt) {
         CheckersMove best_move = checkers_get_best_move_now(&checkers->thinking_state);
         
         if (best_move.from_row >= 0) {
+            // Store captured piece colors BEFORE making the move
+            CheckersColor temp_captured_colors[MAX_JUMP_CHAIN];
+            int temp_captured_count = 0;
+            if (best_move.jump_count > 0) {
+                temp_captured_count = best_move.jump_count;
+                for (int i = 0; i < best_move.jump_count; i++) {
+                    temp_captured_colors[i] = checkers->game.board[best_move.jumped_rows[i]][best_move.jumped_cols[i]].color;
+                }
+            }
+            
             checkers_make_move(&checkers->game, &best_move);
             checkers_save_move_history(checkers, best_move, checkers->time_since_last_move);
             
@@ -1026,7 +1128,23 @@ void update_beat_checkers(void *vis_ptr, double dt) {
             checkers->animating_from_col = best_move.from_col;
             checkers->animating_to_row = best_move.to_row;
             checkers->animating_to_col = best_move.to_col;
-            checkers->current_move_jump_count = best_move.jump_count;  // Store jump count for animation speed
+            checkers->current_move_jump_count = best_move.jump_count;
+            checkers->current_jump_chain = best_move;  // Store the complete move for animation
+            
+            // Initialize captured piece fade for jump animation with saved colors
+            if (temp_captured_count > 0) {
+                checkers->captured_count = temp_captured_count;
+                for (int i = 0; i < temp_captured_count; i++) {
+                    int jumped_r = best_move.jumped_rows[i];
+                    int jumped_c = best_move.jumped_cols[i];
+                    checkers->captured_pieces[i] = jumped_r * CHECKERS_BOARD_SIZE + jumped_c;
+                    checkers->captured_colors[i] = temp_captured_colors[i];
+                    checkers->captured_fade[i] = 1.0;
+                }
+            } else {
+                checkers->captured_count = 0;
+            }
+            
             checkers->animation_progress = 0;
             checkers->is_animating = true;
             
@@ -1360,14 +1478,53 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
             int idx = checkers->captured_pieces[i];
             int r = idx / CHECKERS_BOARD_SIZE;
             int c = idx % CHECKERS_BOARD_SIZE;
+            CheckersColor piece_color = checkers->captured_colors[i];
+            printf("DEBUG DRAW: captured_colors[%d] = %d (1=RED, 2=BLACK)\n", i, piece_color);
             
             double x = ox + c * cell;
             double y = oy + r * cell;
             
             cairo_save(cr);
-            cairo_set_source_rgba(cr, 0.5, 0.5, 0.5, checkers->captured_fade[i]);
-            cairo_arc(cr, x + cell/2, y + cell/2, cell * 0.35, 0, 2 * M_PI);
+            
+            double cx = x + cell / 2;
+            double cy = y + cell / 2;
+            double radius = cell * 0.35;
+            double fade = checkers->captured_fade[i];
+            
+            // Shadow - full opacity
+            cairo_set_source_rgba(cr, 0, 0, 0, 0.3 * fade);
+            cairo_arc(cr, cx + 3, cy + 3, radius, 0, 2 * M_PI);
             cairo_fill(cr);
+            
+            // Piece body with gradient - full color, only alpha fades
+            cairo_pattern_t *gradient = cairo_pattern_create_radial(
+                cx - radius * 0.3, cy - radius * 0.3, radius * 0.1,
+                cx, cy, radius);
+            
+            if (piece_color == CHECKERS_RED) {
+                cairo_pattern_add_color_stop_rgba(gradient, 0, 0.95, 0.3, 0.2, fade);
+                cairo_pattern_add_color_stop_rgba(gradient, 1, 0.7, 0.1, 0.05, fade);
+            } else {  // BLACK
+                cairo_pattern_add_color_stop_rgba(gradient, 0, 0.3, 0.3, 0.3, fade);
+                cairo_pattern_add_color_stop_rgba(gradient, 1, 0.1, 0.1, 0.1, fade);
+            }
+            
+            cairo_set_source(cr, gradient);
+            cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+            cairo_fill(cr);
+            cairo_pattern_destroy(gradient);
+            
+            // Highlight - full opacity with fade
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.4 * fade);
+            cairo_arc(cr, cx - radius * 0.25, cy - radius * 0.25, radius * 0.2, 0, 2 * M_PI);
+            cairo_fill(cr);
+            
+            // Outline - full color with fade
+            cairo_set_source_rgba(cr, 0.2, 0.2, 0.2, fade);
+            cairo_set_line_width(cr, 2.0);
+            cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            
             cairo_restore(cr);
         }
     }
@@ -1379,10 +1536,10 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
         for (int c = 0; c < CHECKERS_BOARD_SIZE; c++) {
             CheckersPiece piece = checkers->game.board[r][c];
             
-            // Skip animating piece
+            // Skip animating piece - don't show it at either from or to position during animation
             if (checkers->is_animating && 
-                r == checkers->animating_from_row && 
-                c == checkers->animating_from_col) {
+                ((r == checkers->animating_from_row && c == checkers->animating_from_col) ||
+                 (r == checkers->animating_to_row && c == checkers->animating_to_col))) {
                 continue;
             }
             
@@ -1425,18 +1582,69 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
     
     // Draw animating piece
     if (checkers->is_animating) {
-        int fr = checkers->animating_from_row;
-        int fc = checkers->animating_from_col;
-        int tr = checkers->animating_to_row;
-        int tc = checkers->animating_to_col;
-        
-        CheckersPiece piece = checkers->game.board[tr][tc];
+        CheckersPiece piece = checkers->game.board[checkers->animating_to_row][checkers->animating_to_col];
         
         double t = checkers->animation_progress;
-        t = t * t * (3.0 - 2.0 * t);  // Smoothstep
+        double x, y;
         
-        double x = ox + (fc + t * (tc - fc)) * cell;
-        double y = oy + (fr + t * (tr - fr)) * cell;
+        if (checkers->current_move_jump_count > 0) {
+            // For jump chains, animate through each jump point
+            double time_per_jump = 0.4;
+            double total_time = time_per_jump * (checkers->current_move_jump_count + 1);
+            double current_time = t * total_time;
+            int current_segment = (int)(current_time / time_per_jump);
+            double segment_t = fmod(current_time, time_per_jump) / time_per_jump;
+            
+            // Clamp values
+            if (current_segment < 0) current_segment = 0;
+            if (current_segment > checkers->current_move_jump_count) current_segment = checkers->current_move_jump_count;
+            if (segment_t < 0) segment_t = 0;
+            if (segment_t > 1.0) segment_t = 1.0;
+            
+            // Get current segment's from and to positions
+            int from_r, from_c, to_r, to_c;
+            
+            if (current_segment == 0) {
+                // First segment: from start to first jumped piece
+                from_r = checkers->animating_from_row;
+                from_c = checkers->animating_from_col;
+                to_r = checkers->current_jump_chain.jumped_rows[0];
+                to_c = checkers->current_jump_chain.jumped_cols[0];
+            } else if (current_segment <= checkers->current_move_jump_count) {
+                // Middle segments: from jumped piece to next jumped piece
+                from_r = checkers->current_jump_chain.jumped_rows[current_segment - 1];
+                from_c = checkers->current_jump_chain.jumped_cols[current_segment - 1];
+                if (current_segment < checkers->current_move_jump_count) {
+                    to_r = checkers->current_jump_chain.jumped_rows[current_segment];
+                    to_c = checkers->current_jump_chain.jumped_cols[current_segment];
+                } else {
+                    to_r = checkers->animating_to_row;
+                    to_c = checkers->animating_to_col;
+                }
+            } else {
+                // Final position
+                from_r = checkers->animating_to_row;
+                from_c = checkers->animating_to_col;
+                to_r = checkers->animating_to_row;
+                to_c = checkers->animating_to_col;
+                segment_t = 1.0;
+            }
+            
+            // Smooth interpolation
+            double smooth_t = segment_t * segment_t * (3.0 - 2.0 * segment_t);
+            x = ox + (from_c + smooth_t * (to_c - from_c)) * cell;
+            y = oy + (from_r + smooth_t * (to_r - from_r)) * cell;
+        } else {
+            // Regular move (no jumps)
+            int fr = checkers->animating_from_row;
+            int fc = checkers->animating_from_col;
+            int tr = checkers->animating_to_row;
+            int tc = checkers->animating_to_col;
+            
+            double smooth_t = t * t * (3.0 - 2.0 * t);  // Smoothstep
+            x = ox + (fc + smooth_t * (tc - fc)) * cell;
+            y = oy + (fr + smooth_t * (tr - fr)) * cell;
+        }
         
         double dance = sin(checkers->time_since_last_move * 18.0) * volume * cell * 0.25;
         
