@@ -212,6 +212,33 @@ int checkers_get_all_moves(CheckersGameState *game, CheckersColor color, Checker
     return move_count;
 }
 
+// Helper function to check if a move is valid
+bool checkers_is_valid_move(CheckersGameState *game, CheckersMove *move) {
+    if (move->from_row == move->to_row && move->from_col == move->to_col) {
+        return false;  // No movement
+    }
+    
+    CheckersPiece piece = game->board[move->from_row][move->from_col];
+    if (piece.color == CHECKERS_NONE) {
+        return false;  // No piece at source
+    }
+    
+    CheckersMove moves[MAX_CHECKERS_MOVES];
+    int count = checkers_get_all_moves(game, piece.color, moves);
+    
+    for (int i = 0; i < count; i++) {
+        if (moves[i].from_row == move->from_row && 
+            moves[i].from_col == move->from_col &&
+            moves[i].to_row == move->to_row && 
+            moves[i].to_col == move->to_col) {
+            *move = moves[i];  // Update move with complete info (jumps, etc)
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 void checkers_make_move(CheckersGameState *game, CheckersMove *move) {
     CheckersPiece piece = game->board[move->from_row][move->from_col];
     
@@ -306,6 +333,64 @@ CheckersGameStatus checkers_check_game_status(CheckersGameState *game) {
 }
 
 // ============================================================================
+// INTERACTIVE FEATURES - MOVE HISTORY
+// ============================================================================
+
+void checkers_save_move_history(BeatCheckersVisualization *checkers, 
+                                 CheckersMove move, double time_elapsed) {
+    if (checkers->move_history_count >= MAX_CHECKERS_MOVES) {
+        return;
+    }
+    
+    CheckersMoveHistory *history_entry = 
+        &checkers->move_history[checkers->move_history_count];
+    
+    history_entry->game = checkers->game;
+    history_entry->move = move;
+    history_entry->time_elapsed = time_elapsed;
+    
+    checkers->move_history_count++;
+}
+
+void checkers_clear_move_history(BeatCheckersVisualization *checkers) {
+    checkers->move_history_count = 0;
+    memset(checkers->move_history, 0, 
+           sizeof(CheckersMoveHistory) * MAX_CHECKERS_MOVES);
+}
+
+bool checkers_can_undo(BeatCheckersVisualization *checkers) {
+    return checkers->move_history_count >= 2 && checkers->player_vs_ai;
+}
+
+void checkers_undo_last_move(BeatCheckersVisualization *checkers) {
+    if (!checkers_can_undo(checkers)) return;
+    
+    if (checkers->move_history_count >= 2) {
+        CheckersMoveHistory *history_before_ai = 
+            &checkers->move_history[checkers->move_history_count - 2];
+        checkers->game = history_before_ai->game;
+        checkers->move_history_count -= 2;
+    }
+    
+    checkers->is_animating = false;
+    checkers->animation_progress = 0;
+    checkers->last_move_glow = 0;
+    checkers->status = CHECKERS_PLAYING;
+    strcpy(checkers->status_text, "Move undone - Red to move");
+    checkers->status_flash_timer = 1.5;
+    checkers->status_flash_color[0] = 1.0;
+    checkers->status_flash_color[1] = 0.8;
+    checkers->status_flash_color[2] = 0.0;
+    
+    checkers_start_thinking(&checkers->thinking_state, &checkers->game);
+}
+
+bool checkers_is_player_turn(BeatCheckersVisualization *checkers) {
+    if (!checkers->player_vs_ai) return false;
+    return checkers->game.turn == CHECKERS_RED;
+}
+
+// ============================================================================
 // AI / THINKING
 // ============================================================================
 
@@ -351,9 +436,11 @@ void* checkers_think_continuously(void* arg) {
     
     while (true) {
         pthread_mutex_lock(&ts->lock);
+        
+        // Sleep if not thinking
         if (!ts->thinking) {
             pthread_mutex_unlock(&ts->lock);
-            usleep(10000);
+            usleep(100000);  // Sleep 100ms when idle to prevent CPU spinning
             continue;
         }
         
@@ -368,6 +455,7 @@ void* checkers_think_continuously(void* arg) {
             ts->has_move = false;
             ts->thinking = false;
             pthread_mutex_unlock(&ts->lock);
+            usleep(100000);
             continue;
         }
         
@@ -421,23 +509,21 @@ void* checkers_think_continuously(void* arg) {
                 ts->has_move = true;
             }
             pthread_mutex_unlock(&ts->lock);
+            
+            // Allow main thread to check for cancellation
+            usleep(1000);
         }
         
-        pthread_mutex_lock(&ts->lock);
-        ts->thinking = false;
-        pthread_mutex_unlock(&ts->lock);
+        usleep(100000);  // Sleep briefly between thinking sessions
     }
     
     return NULL;
 }
 
 void checkers_init_thinking_state(CheckersThinkingState *ts) {
+    pthread_mutex_init(&ts->lock, NULL);
     ts->thinking = false;
     ts->has_move = false;
-    ts->current_depth = 0;
-    ts->best_score = 0;
-    pthread_mutex_init(&ts->lock, NULL);
-    pthread_create(&ts->thread, NULL, checkers_think_continuously, ts);
 }
 
 void checkers_start_thinking(CheckersThinkingState *ts, CheckersGameState *game) {
@@ -445,24 +531,18 @@ void checkers_start_thinking(CheckersThinkingState *ts, CheckersGameState *game)
     ts->game = *game;
     ts->thinking = true;
     ts->has_move = false;
-    ts->current_depth = 0;
     pthread_mutex_unlock(&ts->lock);
 }
 
 CheckersMove checkers_get_best_move_now(CheckersThinkingState *ts) {
-    pthread_mutex_lock(&ts->lock);
-    CheckersMove move = ts->best_move;
-    bool has_move = ts->has_move;
-    ts->thinking = false;
-    pthread_mutex_unlock(&ts->lock);
+    CheckersMove move = {0};
     
-    if (!has_move) {
-        CheckersMove moves[MAX_CHECKERS_MOVES];
-        int count = checkers_get_all_moves(&ts->game, ts->game.turn, moves);
-        if (count > 0) {
-            move = moves[rand() % count];
-        }
+    pthread_mutex_lock(&ts->lock);
+    if (ts->has_move) {
+        move = ts->best_move;
+        ts->has_move = false;
     }
+    pthread_mutex_unlock(&ts->lock);
     
     return move;
 }
@@ -478,90 +558,300 @@ void checkers_stop_thinking(CheckersThinkingState *ts) {
 // ============================================================================
 
 void init_beat_checkers_system(void *vis_ptr) {
-    Visualizer *vis = (Visualizer*)vis_ptr;
+    Visualizer *vis = (Visualizer *)vis_ptr;
     BeatCheckersVisualization *checkers = &vis->beat_checkers;
     
     checkers_init_board(&checkers->game);
-    checkers_init_thinking_state(&checkers->thinking_state);
+    
+    // Initialize thinking state only once (first time)
+    static bool thinking_initialized = false;
+    if (!thinking_initialized) {
+        checkers_init_thinking_state(&checkers->thinking_state);
+        pthread_create(&checkers->thinking_state.thread, NULL, checkers_think_continuously, 
+                       &checkers->thinking_state);
+        thinking_initialized = true;
+    }
+    
     checkers->status = CHECKERS_PLAYING;
+    strcpy(checkers->status_text, "AI vs AI mode");
+    checkers->status_flash_timer = 0;
     
-    checkers_start_thinking(&checkers->thinking_state, &checkers->game);
-    
+    checkers->animating_from_row = -1;
+    checkers->is_animating = false;
     checkers->last_from_row = -1;
-    checkers->last_from_col = -1;
-    checkers->last_to_row = -1;
-    checkers->last_to_col = -1;
     checkers->last_move_glow = 0;
     
-    checkers->is_animating = false;
-    checkers->animation_progress = 0;
-    checkers->jump_animation_index = 0;
-    
-    checkers->captured_count = 0;
-    
-    strcpy(checkers->status_text, "Red to move");
-    checkers->status_flash_timer = 0;
-    checkers->status_flash_color[0] = 1.0;
-    checkers->status_flash_color[1] = 1.0;
-    checkers->status_flash_color[2] = 1.0;
-    
-    for (int i = 0; i < CHECKERS_BEAT_HISTORY; i++) {
-        checkers->beat_volume_history[i] = 0;
-    }
     checkers->beat_history_index = 0;
     checkers->time_since_last_move = 0;
-    checkers->beat_threshold = 1.3;
-    
+    checkers->beat_threshold = 0.3;
     checkers->move_count = 0;
+    
     checkers->beats_since_game_over = 0;
     checkers->waiting_for_restart = false;
     
     checkers->time_thinking = 0;
-    checkers->min_think_time = 0.4;
-    checkers->good_move_threshold = 100;
+    checkers->min_think_time = 0.5;
+    checkers->good_move_threshold = 200;
     checkers->auto_play_enabled = true;
     
     checkers->king_promotion_active = false;
     checkers->king_promotion_glow = 0;
+    checkers->captured_count = 0;
     
-    // Reset button
+    // Initialize interactive features
+    checkers->game_mode = CHECKERS_MODE_AI_VS_AI;
+    checkers->player_vs_ai = false;
+    
+    checkers->selected_piece_row = -1;
+    checkers->selected_piece_col = -1;
+    checkers->has_selected_piece = false;
+    checkers->selected_piece_was_pressed = 0;
+    
+    checkers->pvsa_button_x = 20;
+    checkers->pvsa_button_y = 20;
+    checkers->pvsa_button_width = 100;
+    checkers->pvsa_button_height = 40;
+    checkers->pvsa_button_hovered = false;
+    checkers->pvsa_button_glow = 0;
+    checkers->pvsa_button_was_pressed = false;
+    
+    checkers->undo_button_x = 20;
+    checkers->undo_button_y = 70;
+    checkers->undo_button_width = 100;
+    checkers->undo_button_height = 40;
+    checkers->undo_button_hovered = false;
+    checkers->undo_button_glow = 0;
+    checkers->undo_button_was_pressed = false;
+    
+    checkers->reset_button_x = 20;
+    checkers->reset_button_y = 120;
+    checkers->reset_button_width = 120;
+    checkers->reset_button_height = 40;
     checkers->reset_button_hovered = false;
     checkers->reset_button_glow = 0;
     checkers->reset_button_was_pressed = false;
     
-    printf("Beat checkers system initialized\n");
-}
-
-bool beat_checkers_detect_beat(void *vis_ptr) {
-    Visualizer *vis = (Visualizer*)vis_ptr;
-    BeatCheckersVisualization *checkers = &vis->beat_checkers;
+    checkers->white_total_time = 0.0;
+    checkers->black_total_time = 0.0;
+    checkers->current_move_start_time = 0.0;
+    checkers->last_move_end_time = 0.0;
+    checkers->move_history_count = 0;
+    checkers_clear_move_history(checkers);
     
-    checkers->beat_volume_history[checkers->beat_history_index] = vis->volume_level;
-    checkers->beat_history_index = (checkers->beat_history_index + 1) % CHECKERS_BEAT_HISTORY;
-    
-    double avg = 0;
-    for (int i = 0; i < CHECKERS_BEAT_HISTORY; i++) {
-        avg += checkers->beat_volume_history[i];
-    }
-    avg /= CHECKERS_BEAT_HISTORY;
-    
-    if (vis->volume_level > avg * checkers->beat_threshold && 
-        vis->volume_level > 0.05 &&
-        checkers->time_since_last_move > 0.15) {
-        return true;
-    }
-    
-    return false;
+    // Start thinking with the already-created thread
+    checkers_start_thinking(&checkers->thinking_state, &checkers->game);
 }
 
 void update_beat_checkers(void *vis_ptr, double dt) {
-    Visualizer *vis = (Visualizer*)vis_ptr;
+    Visualizer *vis = (Visualizer *)vis_ptr;
     BeatCheckersVisualization *checkers = &vis->beat_checkers;
     
+    // Update time
     checkers->time_since_last_move += dt;
+    checkers->time_thinking += dt;
+    checkers->current_move_start_time += dt;
     
-    // ===== CHECK RESET BUTTON INTERACTION =====
-    // Detect if mouse is over button (for hover effects)
+    // Update beat history
+    checkers->beat_volume_history[checkers->beat_history_index] = vis->volume_level;
+    checkers->beat_history_index = (checkers->beat_history_index + 1) % CHECKERS_BEAT_HISTORY;
+    
+    // Update glow effects
+    if (checkers->status_flash_timer > 0) {
+        checkers->status_flash_timer -= dt;
+    }
+    if (checkers->last_move_glow > 0) {
+        checkers->last_move_glow -= dt * 2;
+    }
+    if (checkers->king_promotion_active) {
+        checkers->king_promotion_glow -= dt;
+        if (checkers->king_promotion_glow < 0) {
+            checkers->king_promotion_active = false;
+        }
+    }
+    
+    // Update animation
+    if (checkers->is_animating) {
+        checkers->animation_progress += dt * 5;
+        if (checkers->animation_progress >= 1.0) {
+            checkers->animation_progress = 1.0;
+            checkers->is_animating = false;
+        }
+    }
+    
+    // Update captured pieces fade
+    for (int i = 0; i < checkers->captured_count; i++) {
+        checkers->captured_fade[i] -= dt * 2;
+        if (checkers->captured_fade[i] < 0) {
+            checkers->captured_fade[i] = 0;
+        }
+    }
+    
+    // ===== PVSA BUTTON INTERACTION =====
+    bool is_over_pvsa = (vis->mouse_x >= checkers->pvsa_button_x && 
+                         vis->mouse_x <= checkers->pvsa_button_x + checkers->pvsa_button_width &&
+                         vis->mouse_y >= checkers->pvsa_button_y && 
+                         vis->mouse_y <= checkers->pvsa_button_y + checkers->pvsa_button_height);
+    
+    checkers->pvsa_button_hovered = is_over_pvsa;
+    
+    bool pvsa_was_pressed = checkers->pvsa_button_was_pressed;
+    bool pvsa_is_pressed = vis->mouse_left_pressed;
+    bool pvsa_clicked = (pvsa_was_pressed && !pvsa_is_pressed && is_over_pvsa);
+    checkers->pvsa_button_was_pressed = pvsa_is_pressed;
+    
+    if (pvsa_clicked) {
+        checkers->player_vs_ai = !checkers->player_vs_ai;
+        
+        // Reset game
+        checkers_init_board(&checkers->game);
+        checkers->status = CHECKERS_PLAYING;
+        checkers->beats_since_game_over = 0;
+        checkers->waiting_for_restart = false;
+        checkers->move_count = 0;
+        checkers->time_thinking = 0;
+        checkers->last_move_glow = 0;
+        checkers->animation_progress = 0;
+        checkers->is_animating = false;
+        checkers->last_from_row = -1;
+        
+        checkers->white_total_time = 0.0;
+        checkers->black_total_time = 0.0;
+        checkers->current_move_start_time = 0.0;
+        checkers->last_move_end_time = 0.0;
+        checkers_clear_move_history(checkers);
+        
+        checkers->has_selected_piece = false;
+        checkers->selected_piece_row = -1;
+        checkers->selected_piece_col = -1;
+        
+        if (checkers->player_vs_ai) {
+            strcpy(checkers->status_text, "Player vs AI - Red to move");
+            checkers->status_flash_color[0] = 1.0;
+            checkers->status_flash_color[1] = 0.2;
+            checkers->status_flash_color[2] = 0.2;
+        } else {
+            strcpy(checkers->status_text, "AI vs AI");
+            checkers->status_flash_color[0] = 1.0;
+            checkers->status_flash_color[1] = 0.65;
+            checkers->status_flash_color[2] = 0.0;
+        }
+        checkers->status_flash_timer = 2.0;
+        checkers->pvsa_button_glow = 1.0;
+        
+        checkers_start_thinking(&checkers->thinking_state, &checkers->game);
+    }
+    
+    checkers->pvsa_button_glow *= 0.95;
+    // =====================================
+    
+    // ===== UNDO BUTTON INTERACTION =====
+    if (checkers->player_vs_ai) {
+        bool is_over_undo = (vis->mouse_x >= checkers->undo_button_x && 
+                             vis->mouse_x <= checkers->undo_button_x + checkers->undo_button_width &&
+                             vis->mouse_y >= checkers->undo_button_y && 
+                             vis->mouse_y <= checkers->undo_button_y + checkers->undo_button_height);
+        
+        checkers->undo_button_hovered = is_over_undo && checkers_can_undo(checkers);
+        
+        bool undo_was_pressed = checkers->undo_button_was_pressed;
+        bool undo_is_pressed = vis->mouse_left_pressed;
+        bool undo_clicked = (undo_was_pressed && !undo_is_pressed && is_over_undo && 
+                            checkers_can_undo(checkers));
+        
+        checkers->undo_button_was_pressed = undo_is_pressed;
+        
+        if (undo_clicked) {
+            checkers_undo_last_move(checkers);
+            checkers->undo_button_glow = 1.0;
+        }
+    } else {
+        checkers->undo_button_hovered = false;
+        checkers->undo_button_was_pressed = false;
+    }
+    
+    checkers->undo_button_glow *= 0.95;
+    // =====================================
+    
+    // ===== PLAYER PIECE SELECTION (if player's turn) =====
+    if (checkers->player_vs_ai && checkers_is_player_turn(checkers) && !checkers->is_animating) {
+        double cell = checkers->cell_size;
+        double ox = checkers->board_offset_x;
+        double oy = checkers->board_offset_y;
+        
+        int mouse_row = -1, mouse_col = -1;
+        if (vis->mouse_x >= ox && vis->mouse_x < ox + cell * CHECKERS_BOARD_SIZE &&
+            vis->mouse_y >= oy && vis->mouse_y < oy + cell * CHECKERS_BOARD_SIZE) {
+            mouse_row = (int)((vis->mouse_y - oy) / cell);
+            mouse_col = (int)((vis->mouse_x - ox) / cell);
+        }
+        
+        bool is_pressed = vis->mouse_left_pressed;
+        bool was_pressed = checkers->selected_piece_was_pressed;
+        bool just_clicked = (was_pressed && !is_pressed);
+        
+        checkers->selected_piece_was_pressed = is_pressed;
+        
+        if (just_clicked && mouse_row >= 0 && mouse_col >= 0) {
+            if (!checkers->has_selected_piece) {
+                CheckersPiece piece = checkers->game.board[mouse_row][mouse_col];
+                if (piece.color == CHECKERS_RED) {
+                    checkers->selected_piece_row = mouse_row;
+                    checkers->selected_piece_col = mouse_col;
+                    checkers->has_selected_piece = true;
+                    strcpy(checkers->status_text, "Piece selected");
+                }
+            } else {
+                int from_row = checkers->selected_piece_row;
+                int from_col = checkers->selected_piece_col;
+                int to_row = mouse_row;
+                int to_col = mouse_col;
+                
+                if (from_row == to_row && from_col == to_col) {
+                    checkers->has_selected_piece = false;
+                    strcpy(checkers->status_text, "Deselected");
+                } else {
+                    CheckersMove move = {from_row, from_col, to_row, to_col, 0, {0}, {0}, false};
+                    
+                    if (checkers_is_valid_move(&checkers->game, &move)) {
+                        checkers_make_move(&checkers->game, &move);
+                        checkers_save_move_history(checkers, move, checkers->current_move_start_time);
+                        
+                        checkers->last_from_row = from_row;
+                        checkers->last_from_col = from_col;
+                        checkers->last_to_row = to_row;
+                        checkers->last_to_col = to_col;
+                        checkers->last_move_glow = 1.0;
+                        
+                        checkers->animating_from_row = from_row;
+                        checkers->animating_from_col = from_col;
+                        checkers->animating_to_row = to_row;
+                        checkers->animating_to_col = to_col;
+                        checkers->animation_progress = 0;
+                        checkers->is_animating = true;
+                        
+                        checkers->move_count++;
+                        checkers->time_since_last_move = 0;
+                        checkers->current_move_start_time = 0;
+                        
+                        checkers->status = checkers_check_game_status(&checkers->game);
+                        if (checkers->status != CHECKERS_PLAYING) {
+                            checkers->waiting_for_restart = true;
+                        } else {
+                            checkers_start_thinking(&checkers->thinking_state, &checkers->game);
+                        }
+                        
+                        checkers->has_selected_piece = false;
+                    } else {
+                        strcpy(checkers->status_text, "Illegal move");
+                        checkers->has_selected_piece = false;
+                    }
+                }
+            }
+        }
+    }
+    // ================================================
+    
+    // ===== RESET BUTTON INTERACTION =====
     bool is_over_reset = (vis->mouse_x >= checkers->reset_button_x && 
                           vis->mouse_x <= checkers->reset_button_x + checkers->reset_button_width &&
                           vis->mouse_y >= checkers->reset_button_y && 
@@ -569,268 +859,139 @@ void update_beat_checkers(void *vis_ptr, double dt) {
     
     checkers->reset_button_hovered = is_over_reset;
     
-    // Detect click: button was pressed last frame AND released this frame
     bool reset_was_pressed = checkers->reset_button_was_pressed;
     bool reset_is_pressed = vis->mouse_left_pressed;
     bool reset_clicked = (reset_was_pressed && !reset_is_pressed && is_over_reset);
     
-    // Update for next frame
     checkers->reset_button_was_pressed = reset_is_pressed;
     
-    // Handle the click if it happened
     if (reset_clicked) {
-        // Reset the game
-        checkers_init_board(&checkers->game);
-        checkers->status = CHECKERS_PLAYING;
-        checkers->beats_since_game_over = 0;
-        checkers->waiting_for_restart = false;
-        checkers->move_count = 0;
-        checkers->time_thinking = 0;
-        checkers->captured_count = 0;
-        checkers->last_move_glow = 0;
-        checkers->animation_progress = 0;
-        checkers->is_animating = false;
-        checkers->last_from_row = -1;
-        checkers->king_promotion_active = false;
-        
-        strcpy(checkers->status_text, "Game Reset! Red to move");
-        checkers->status_flash_color[0] = 1.0;
-        checkers->status_flash_color[1] = 0.3;
-        checkers->status_flash_color[2] = 0.3;
-        checkers->status_flash_timer = 1.5;
-        
+        init_beat_checkers_system(vis_ptr);
         checkers->reset_button_glow = 1.0;
+    }
+    
+    checkers->reset_button_glow *= 0.95;
+    // =====================================
+    
+    // ===== AI MOVE LOGIC (AI vs AI mode) =====
+    if (!checkers->player_vs_ai && checkers->status == CHECKERS_PLAYING && !checkers->is_animating) {
+        double avg_volume = 0;
+        for (int i = 0; i < CHECKERS_BEAT_HISTORY; i++) {
+            avg_volume += checkers->beat_volume_history[i];
+        }
+        avg_volume /= CHECKERS_BEAT_HISTORY;
         
-        // Start thinking for new game
-        checkers_start_thinking(&checkers->thinking_state, &checkers->game);
-    }
-    // ========================================
-    
-    // Update glow effects
-    if (checkers->last_move_glow > 0) {
-        checkers->last_move_glow -= dt * 2.0;
-        if (checkers->last_move_glow < 0) checkers->last_move_glow = 0;
-    }
-    
-    if (checkers->status_flash_timer > 0) {
-        checkers->status_flash_timer -= dt * 2.0;
-        if (checkers->status_flash_timer < 0) checkers->status_flash_timer = 0;
-    }
-    
-    if (checkers->king_promotion_glow > 0) {
-        checkers->king_promotion_glow -= dt * 1.5;
-        if (checkers->king_promotion_glow < 0) {
-            checkers->king_promotion_glow = 0;
-            checkers->king_promotion_active = false;
-        }
-    }
-    
-    if (checkers->reset_button_glow > 0) {
-        checkers->reset_button_glow -= dt * 2.0;
-        if (checkers->reset_button_glow < 0) checkers->reset_button_glow = 0;
-    }
-    
-    // Fade out captured pieces
-    for (int i = 0; i < checkers->captured_count; i++) {
-        checkers->captured_fade[i] -= dt * 2.0;
-        if (checkers->captured_fade[i] < 0) checkers->captured_fade[i] = 0;
-    }
-    
-    // Animate piece movement
-    if (checkers->is_animating) {
-        checkers->animation_progress += dt * 5.0;
-        if (checkers->animation_progress >= 1.0) {
-            checkers->animation_progress = 1.0;
-            checkers->is_animating = false;
-        }
-    }
-    
-    // Handle game over
-    if (checkers->status != CHECKERS_PLAYING) {
-        if (checkers->waiting_for_restart) {
-            if (beat_checkers_detect_beat(vis)) {
-                checkers->beats_since_game_over++;
+        if (avg_volume > checkers->beat_threshold) {
+            CheckersMove best_move = checkers_get_best_move_now(&checkers->thinking_state);
+            
+            if (best_move.from_row >= 0) {
+                checkers_make_move(&checkers->game, &best_move);
+                checkers_save_move_history(checkers, best_move, checkers->time_since_last_move);
+                
+                checkers->last_from_row = best_move.from_row;
+                checkers->last_from_col = best_move.from_col;
+                checkers->last_to_row = best_move.to_row;
+                checkers->last_to_col = best_move.to_col;
+                checkers->last_move_glow = 1.0;
+                
+                checkers->animating_from_row = best_move.from_row;
+                checkers->animating_from_col = best_move.from_col;
+                checkers->animating_to_row = best_move.to_row;
+                checkers->animating_to_col = best_move.to_col;
+                checkers->animation_progress = 0;
+                checkers->is_animating = true;
+                
+                checkers->move_count++;
                 checkers->time_since_last_move = 0;
                 
-                if (checkers->beats_since_game_over >= 2) {
-                    checkers_init_board(&checkers->game);
-                    checkers->status = CHECKERS_PLAYING;
+                // Check game status after move
+                checkers->status = checkers_check_game_status(&checkers->game);
+                if (checkers->status != CHECKERS_PLAYING) {
+                    checkers->waiting_for_restart = true;
                     checkers->beats_since_game_over = 0;
-                    checkers->waiting_for_restart = false;
-                    checkers->move_count = 0;
-                    checkers->time_thinking = 0;
-                    checkers->captured_count = 0;
-                    strcpy(checkers->status_text, "New game! Red to move");
-                    checkers->status_flash_color[0] = 1.0;
-                    checkers->status_flash_color[1] = 0.3;
-                    checkers->status_flash_color[2] = 0.3;
-                    checkers->status_flash_timer = 1.0;
                     
+                    if (checkers->status == CHECKERS_RED_WINS) {
+                        strcpy(checkers->status_text, "Red wins!");
+                        checkers->status_flash_color[0] = 1.0;
+                        checkers->status_flash_color[1] = 0.2;
+                        checkers->status_flash_color[2] = 0.2;
+                    } else if (checkers->status == CHECKERS_BLACK_WINS) {
+                        strcpy(checkers->status_text, "Black wins!");
+                        checkers->status_flash_color[0] = 0.2;
+                        checkers->status_flash_color[1] = 0.2;
+                        checkers->status_flash_color[2] = 0.2;
+                    } else {
+                        strcpy(checkers->status_text, "Draw!");
+                        checkers->status_flash_color[0] = 0.7;
+                        checkers->status_flash_color[1] = 0.7;
+                        checkers->status_flash_color[2] = 0.7;
+                    }
+                    checkers->status_flash_timer = 2.0;
+                } else {
                     checkers_start_thinking(&checkers->thinking_state, &checkers->game);
                 }
             }
         }
-        return;
     }
+    // ============================================
     
-    // Track thinking time
-    pthread_mutex_lock(&checkers->thinking_state.lock);
-    bool is_thinking = checkers->thinking_state.thinking;
-    bool has_move = checkers->thinking_state.has_move;
-    int current_depth = checkers->thinking_state.current_depth;
-    int best_score = checkers->thinking_state.best_score;
-    pthread_mutex_unlock(&checkers->thinking_state.lock);
-    
-    if (is_thinking || has_move) {
-        checkers->time_thinking += dt;
-    }
-    
-    // Auto-play logic
-    bool should_auto_play = false;
-    if (checkers->auto_play_enabled && has_move && 
-        checkers->time_thinking >= checkers->min_think_time) {
+    // ===== AI MOVE IN PLAYER MODE =====
+    if (checkers->player_vs_ai && checkers->status == CHECKERS_PLAYING &&
+        !checkers_is_player_turn(checkers) && !checkers->is_animating) {
         
-        if (checkers->time_thinking >= 3.0) {
-            should_auto_play = true;
-        } else if (current_depth >= 4) {
-            should_auto_play = true;
-        } else {
-            int eval_before = checkers_evaluate_position(&checkers->game);
-            int advantage = (checkers->game.turn == CHECKERS_RED) ? 
-                           (best_score - eval_before) : (eval_before - best_score);
+        CheckersMove best_move = checkers_get_best_move_now(&checkers->thinking_state);
+        
+        if (best_move.from_row >= 0) {
+            checkers_make_move(&checkers->game, &best_move);
+            checkers_save_move_history(checkers, best_move, checkers->time_since_last_move);
             
-            if (advantage > checkers->good_move_threshold && current_depth >= 3) {
-                should_auto_play = true;
-            }
-        }
-    }
-    
-    // Detect beat or auto-play
-    bool beat_detected = beat_checkers_detect_beat(vis);
-    
-    if (beat_detected || should_auto_play) {
-        CheckersMove move = checkers_get_best_move_now(&checkers->thinking_state);
-        
-        pthread_mutex_lock(&checkers->thinking_state.lock);
-        int depth_reached = checkers->thinking_state.current_depth;
-        pthread_mutex_unlock(&checkers->thinking_state.lock);
-        
-        CheckersColor moving_color = checkers->game.turn;
-        
-        // Store captured pieces for fade animation
-        checkers->captured_count = move.jump_count;
-        for (int i = 0; i < move.jump_count; i++) {
-            int idx = move.jumped_rows[i] * CHECKERS_BOARD_SIZE + move.jumped_cols[i];
-            checkers->captured_pieces[i] = idx;
-            checkers->captured_fade[i] = 1.0;
-        }
-        
-        // Make the move
-        bool was_king_promotion = move.becomes_king;
-        checkers_make_move(&checkers->game, &move);
-        
-        // King promotion celebration
-        if (was_king_promotion) {
-            checkers->king_promotion_active = true;
-            checkers->king_promotion_glow = 1.5;
-            checkers->king_promotion_row = move.to_row;
-            checkers->king_promotion_col = move.to_col;
-        }
-        
-        // Update display
-        checkers->last_from_row = move.from_row;
-        checkers->last_from_col = move.from_col;
-        checkers->last_to_row = move.to_row;
-        checkers->last_to_col = move.to_col;
-        checkers->last_move_glow = 1.0;
-        
-        // Animation
-        checkers->animating_from_row = move.from_row;
-        checkers->animating_from_col = move.from_col;
-        checkers->animating_to_row = move.to_row;
-        checkers->animating_to_col = move.to_col;
-        checkers->animation_progress = 0;
-        checkers->is_animating = true;
-        checkers->current_jump_chain = move;
-        checkers->jump_animation_index = 0;
-        
-        // Status text
-        const char *trigger = should_auto_play ? "AUTO" : "BEAT";
-        const char *color_name = (moving_color == CHECKERS_RED) ? "Red" : "Black";
-        
-        if (move.jump_count > 0) {
-            if (move.jump_count > 2) {
-                snprintf(checkers->status_text, sizeof(checkers->status_text),
-                        "[%s] %s: Multi-jump x%d! %c%d->%c%d (depth %d)",
-                        trigger, color_name, move.jump_count,
-                        'a' + move.from_col, 8 - move.from_row,
-                        'a' + move.to_col, 8 - move.to_row, depth_reached);
-                checkers->status_flash_color[0] = 1.0;
-                checkers->status_flash_color[1] = 0.5;
-                checkers->status_flash_color[2] = 0.0;
-                checkers->status_flash_timer = 1.0;
-            } else {
-                snprintf(checkers->status_text, sizeof(checkers->status_text),
-                        "[%s] %s: Jump %c%d->%c%d (depth %d)",
-                        trigger, color_name,
-                        'a' + move.from_col, 8 - move.from_row,
-                        'a' + move.to_col, 8 - move.to_row, depth_reached);
-            }
-        } else {
-            snprintf(checkers->status_text, sizeof(checkers->status_text),
-                    "[%s] %s: %c%d->%c%d (depth %d)",
-                    trigger, color_name,
-                    'a' + move.from_col, 8 - move.from_row,
-                    'a' + move.to_col, 8 - move.to_row, depth_reached);
-        }
-        
-        if (was_king_promotion) {
-            strcat(checkers->status_text, " - KING!");
-            checkers->status_flash_color[0] = 1.0;
-            checkers->status_flash_color[1] = 0.8;
-            checkers->status_flash_color[2] = 0.0;
-            checkers->status_flash_timer = 1.5;
-        }
-        
-        checkers->move_count++;
-        checkers->time_since_last_move = 0;
-        checkers->time_thinking = 0;
-        
-        // Check game status
-        checkers->status = checkers_check_game_status(&checkers->game);
-        
-        if (checkers->status != CHECKERS_PLAYING) {
-            checkers->waiting_for_restart = true;
-            checkers->beats_since_game_over = 0;
+            checkers->last_from_row = best_move.from_row;
+            checkers->last_from_col = best_move.from_col;
+            checkers->last_to_row = best_move.to_row;
+            checkers->last_to_col = best_move.to_col;
+            checkers->last_move_glow = 1.0;
             
-            if (checkers->status == CHECKERS_RED_WINS) {
-                strcpy(checkers->status_text, "Red wins! New game in 2 beats...");
-                checkers->status_flash_color[0] = 1.0;
-                checkers->status_flash_color[1] = 0.2;
-                checkers->status_flash_color[2] = 0.2;
-                checkers->status_flash_timer = 2.0;
-            } else if (checkers->status == CHECKERS_BLACK_WINS) {
-                strcpy(checkers->status_text, "Black wins! New game in 2 beats...");
-                checkers->status_flash_color[0] = 0.2;
-                checkers->status_flash_color[1] = 0.2;
-                checkers->status_flash_color[2] = 0.2;
+            checkers->animating_from_row = best_move.from_row;
+            checkers->animating_from_col = best_move.from_col;
+            checkers->animating_to_row = best_move.to_row;
+            checkers->animating_to_col = best_move.to_col;
+            checkers->animation_progress = 0;
+            checkers->is_animating = true;
+            
+            checkers->move_count++;
+            checkers->time_since_last_move = 0;
+            
+            // Check game status after AI moves
+            checkers->status = checkers_check_game_status(&checkers->game);
+            if (checkers->status != CHECKERS_PLAYING) {
+                checkers->waiting_for_restart = true;
+                checkers->beats_since_game_over = 0;
+                
+                if (checkers->status == CHECKERS_RED_WINS) {
+                    strcpy(checkers->status_text, "Red (you) wins!");
+                    checkers->status_flash_color[0] = 1.0;
+                    checkers->status_flash_color[1] = 0.2;
+                    checkers->status_flash_color[2] = 0.2;
+                } else if (checkers->status == CHECKERS_BLACK_WINS) {
+                    strcpy(checkers->status_text, "Black (AI) wins!");
+                    checkers->status_flash_color[0] = 0.2;
+                    checkers->status_flash_color[1] = 0.2;
+                    checkers->status_flash_color[2] = 0.2;
+                } else {
+                    strcpy(checkers->status_text, "Draw!");
+                    checkers->status_flash_color[0] = 0.7;
+                    checkers->status_flash_color[1] = 0.7;
+                    checkers->status_flash_color[2] = 0.7;
+                }
                 checkers->status_flash_timer = 2.0;
             } else {
-                strcpy(checkers->status_text, "Draw! New game in 2 beats...");
-                checkers->status_flash_color[0] = 0.7;
-                checkers->status_flash_color[1] = 0.7;
-                checkers->status_flash_color[2] = 0.7;
-                checkers->status_flash_timer = 2.0;
+                strcpy(checkers->status_text, "Red to move");
+                checkers_start_thinking(&checkers->thinking_state, &checkers->game);
             }
-        } else {
-            checkers_start_thinking(&checkers->thinking_state, &checkers->game);
         }
     }
+    // ====================================
 }
-
-// ============================================================================
-// DRAWING
-// ============================================================================
 
 void draw_checkers_piece(cairo_t *cr, CheckersColor color, bool is_king, 
                          double x, double y, double size, double dance_offset) {
@@ -909,17 +1070,13 @@ void draw_checkers_piece(cairo_t *cr, CheckersColor color, bool is_king,
 }
 
 void draw_checkers_reset_button(BeatCheckersVisualization *checkers, cairo_t *cr, int width, int height) {
-    // Button position and size - LEFT SIDE
-    double button_width = 120;
-    double button_height = 40;
-    double button_x = 20;  // LEFT side, 20px from edge
-    double button_y = 20;
+    (void)width;   // Unused parameter
+    (void)height;  // Unused parameter
     
-    // Store button position for hit detection
-    checkers->reset_button_x = button_x;
-    checkers->reset_button_y = button_y;
-    checkers->reset_button_width = button_width;
-    checkers->reset_button_height = button_height;
+    double button_x = checkers->reset_button_x;
+    double button_y = checkers->reset_button_y;
+    double button_width = checkers->reset_button_width;
+    double button_height = checkers->reset_button_height;
     
     // Background
     cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
@@ -959,6 +1116,90 @@ void draw_checkers_reset_button(BeatCheckersVisualization *checkers, cairo_t *cr
                          checkers->reset_button_hovered ? 0.3 : 0.4);
     cairo_move_to(cr, text_x, text_y);
     cairo_show_text(cr, "RESET");
+}
+
+void draw_checkers_pvsa_button(BeatCheckersVisualization *checkers, cairo_t *cr) {
+    double x = checkers->pvsa_button_x;
+    double y = checkers->pvsa_button_y;
+    double w = checkers->pvsa_button_width;
+    double h = checkers->pvsa_button_height;
+    
+    if (checkers->pvsa_button_glow > 0) {
+        cairo_set_source_rgba(cr, 1.0, 0.8, 0.0, checkers->pvsa_button_glow * 0.3);
+        cairo_rectangle(cr, x - 3, y - 3, w + 6, h + 6);
+        cairo_stroke(cr);
+    }
+    
+    if (checkers->pvsa_button_hovered) {
+        cairo_set_source_rgb(cr, 0.3, 0.5, 0.9);
+    } else {
+        cairo_set_source_rgb(cr, 0.2, 0.4, 0.8);
+    }
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_fill(cr);
+    
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_set_line_width(cr, 2);
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_stroke(cr);
+    
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 11);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    
+    const char *text = checkers->player_vs_ai ? "PvsA" : "AvsA";
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, text, &extents);
+    
+    double text_x = x + (w - extents.width) / 2;
+    double text_y = y + (h + extents.height) / 2;
+    
+    cairo_move_to(cr, text_x, text_y);
+    cairo_show_text(cr, text);
+}
+
+void draw_checkers_undo_button(BeatCheckersVisualization *checkers, cairo_t *cr) {
+    if (!checkers->player_vs_ai) return;
+    
+    double x = checkers->undo_button_x;
+    double y = checkers->undo_button_y;
+    double w = checkers->undo_button_width;
+    double h = checkers->undo_button_height;
+    bool can_undo = checkers_can_undo(checkers);
+    
+    if (checkers->undo_button_glow > 0 && can_undo) {
+        cairo_set_source_rgba(cr, 1.0, 0.8, 0.0, checkers->undo_button_glow * 0.3);
+        cairo_rectangle(cr, x - 3, y - 3, w + 6, h + 6);
+        cairo_stroke(cr);
+    }
+    
+    if (!can_undo) {
+        cairo_set_source_rgb(cr, 0.4, 0.4, 0.4);
+    } else if (checkers->undo_button_hovered) {
+        cairo_set_source_rgb(cr, 0.8, 0.3, 0.3);
+    } else {
+        cairo_set_source_rgb(cr, 0.7, 0.2, 0.2);
+    }
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_fill(cr);
+    
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_set_line_width(cr, 2);
+    cairo_rectangle(cr, x, y, w, h);
+    cairo_stroke(cr);
+    
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 11);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, "UNDO", &extents);
+    
+    double text_x = x + (w - extents.width) / 2;
+    double text_y = y + (h + extents.height) / 2;
+    
+    cairo_move_to(cr, text_x, text_y);
+    cairo_show_text(cr, "UNDO");
 }
 
 void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
@@ -1079,6 +1320,20 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
                 double time_wave = sin(checkers->time_since_last_move * 12.0 + phase);
                 double dance_amount = time_wave * volume * cell * 0.15;
                 
+                // Highlight selected piece
+                if (checkers->has_selected_piece && 
+                    r == checkers->selected_piece_row && 
+                    c == checkers->selected_piece_col) {
+                    cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, 0.3);
+                    cairo_arc(cr, x + cell/2, y + cell/2, cell * 0.42, 0, 2 * M_PI);
+                    cairo_fill(cr);
+                    
+                    cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, 0.8);
+                    cairo_set_line_width(cr, 3);
+                    cairo_arc(cr, x + cell/2, y + cell/2, cell * 0.42, 0, 2 * M_PI);
+                    cairo_stroke(cr);
+                }
+                
                 // King promotion glow
                 if (checkers->king_promotion_active && 
                     r == checkers->king_promotion_row && 
@@ -1161,20 +1416,18 @@ void draw_beat_checkers(void *vis_ptr, cairo_t *cr) {
     cairo_move_to(cr, (width - extents.width) / 2, oy + cell * 8 + 35);
     cairo_show_text(cr, count_text);
     
-    // Draw reset button
+    // Draw buttons
     draw_checkers_reset_button(checkers, cr, width, height);
+    draw_checkers_pvsa_button(checkers, cr);
+    draw_checkers_undo_button(checkers, cr);
 }
 
 void checkers_cleanup_thinking_state(CheckersThinkingState *ts) {
-    // Stop thinking
     pthread_mutex_lock(&ts->lock);
     ts->thinking = false;
     pthread_mutex_unlock(&ts->lock);
     
-    // Cancel and wait for thread to finish
-    pthread_cancel(ts->thread);
+    // Wait for thread to finish (with timeout)
     pthread_join(ts->thread, NULL);
-    
-    // Destroy mutex
     pthread_mutex_destroy(&ts->lock);
 }

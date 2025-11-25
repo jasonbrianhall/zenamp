@@ -13,6 +13,11 @@
 
 typedef enum { CHECKERS_NONE, CHECKERS_RED, CHECKERS_BLACK } CheckersColor;
 
+typedef enum {
+    CHECKERS_MODE_PLAYER_VS_AI,
+    CHECKERS_MODE_AI_VS_AI
+} CheckersGameMode;
+
 typedef struct {
     CheckersColor color;
     bool is_king;
@@ -51,6 +56,13 @@ typedef enum {
     CHECKERS_BLACK_WINS,
     CHECKERS_DRAW
 } CheckersGameStatus;
+
+// Move history structure for undo functionality
+typedef struct {
+    CheckersGameState game;
+    CheckersMove move;
+    double time_elapsed;
+} CheckersMoveHistory;
 
 typedef struct {
     // Game state
@@ -115,6 +127,42 @@ typedef struct {
     bool reset_button_hovered;
     double reset_button_glow;
     bool reset_button_was_pressed;  // Track previous frame state for click detection
+    
+    // ===== INTERACTIVE FEATURES =====
+    // Game mode
+    CheckersGameMode game_mode;
+    bool player_vs_ai;
+    
+    // Player piece selection
+    int selected_piece_row, selected_piece_col;
+    bool has_selected_piece;
+    int selected_piece_was_pressed;
+    
+    // Player vs AI toggle button
+    double pvsa_button_x, pvsa_button_y;
+    double pvsa_button_width, pvsa_button_height;
+    bool pvsa_button_hovered;
+    double pvsa_button_glow;
+    bool pvsa_button_was_pressed;
+    
+    // Undo button (Player vs AI only)
+    double undo_button_x, undo_button_y;
+    double undo_button_width, undo_button_height;
+    bool undo_button_hovered;
+    double undo_button_glow;
+    bool undo_button_was_pressed;
+    
+    // Move history
+    CheckersMoveHistory move_history[MAX_CHECKERS_MOVES];
+    int move_history_count;
+    
+    // Time tracking
+    double white_total_time;  // Red
+    double black_total_time;  // Black
+    double current_move_start_time;
+    double last_move_end_time;
+    // ===== END INTERACTIVE FEATURES =====
+    
 } BeatCheckersVisualization;
 
 // Core game functions
@@ -136,5 +184,23 @@ void init_beat_checkers_system(void *vis_ptr);
 void update_beat_checkers(void *vis_ptr, double dt);
 void draw_beat_checkers(void *vis_ptr, cairo_t *cr);
 void draw_checkers_reset_button(BeatCheckersVisualization *checkers, cairo_t *cr, int width, int height);
+
+// ===== INTERACTIVE FEATURE DECLARATIONS =====
+// Move history functions
+void checkers_save_move_history(BeatCheckersVisualization *checkers, 
+                                 CheckersMove move, double time_elapsed);
+bool checkers_can_undo(BeatCheckersVisualization *checkers);
+void checkers_undo_last_move(BeatCheckersVisualization *checkers);
+void checkers_clear_move_history(BeatCheckersVisualization *checkers);
+
+// Helper functions
+bool checkers_is_player_turn(BeatCheckersVisualization *checkers);
+
+// Button drawing functions
+void checkers_draw_pvsa_button(BeatCheckersVisualization *checkers, cairo_t *cr, 
+                               int width, int height);
+void checkers_draw_undo_button(BeatCheckersVisualization *checkers, cairo_t *cr, 
+                               int width, int height);
+// ===== END INTERACTIVE DECLARATIONS =====
 
 #endif // BEATCHECKERS_H
