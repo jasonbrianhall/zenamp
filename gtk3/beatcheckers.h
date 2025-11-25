@@ -79,6 +79,7 @@ typedef struct {
     // Jump animation - for multi-jump sequences
     CheckersMove current_jump_chain;
     int jump_animation_index;  // Which jump in the chain we're animating
+    int current_move_jump_count;  // Number of jumps in current move for animation speed
     
     // Last move highlight
     int last_from_row, last_from_col;

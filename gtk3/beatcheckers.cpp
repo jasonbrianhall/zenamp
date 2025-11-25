@@ -698,7 +698,16 @@ void update_beat_checkers(void *vis_ptr, double dt) {
     
     // Update animation
     if (checkers->is_animating) {
-        checkers->animation_progress += dt * 5;
+        // Adjust animation speed based on number of jumps in this move
+        // More jumps = slower animation so you can see each captured piece
+        double animation_speed = 3.0;  // Default speed for regular moves (~0.33 seconds)
+        
+        if (checkers->current_move_jump_count > 0) {
+            // For jump chains: approximately 0.4 seconds per jump segment
+            animation_speed = 2.5 * (checkers->current_move_jump_count + 1);
+        }
+        
+        checkers->animation_progress += dt * animation_speed;
         if (checkers->animation_progress >= 1.0) {
             checkers->animation_progress = 1.0;
             checkers->is_animating = false;
@@ -853,6 +862,7 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                         checkers->animating_from_col = from_col;
                         checkers->animating_to_row = to_row;
                         checkers->animating_to_col = to_col;
+                        checkers->current_move_jump_count = move.jump_count;  // Store jump count for animation speed
                         checkers->animation_progress = 0;
                         checkers->is_animating = true;
                         
@@ -901,9 +911,30 @@ void update_beat_checkers(void *vis_ptr, double dt) {
         // Give thread time to stop
         usleep(50000);
         
+        // Save current game mode before reinitializing
+        bool current_player_vs_ai = checkers->player_vs_ai;
+        
         // Now reinitialize the board and restart
         init_beat_checkers_system(vis_ptr);
+        
+        // Restore the game mode
+        checkers->player_vs_ai = current_player_vs_ai;
+        if (current_player_vs_ai) {
+            strcpy(checkers->status_text, "Player vs AI - Red to move");
+            checkers->status_flash_color[0] = 1.0;
+            checkers->status_flash_color[1] = 0.2;
+            checkers->status_flash_color[2] = 0.2;
+        } else {
+            strcpy(checkers->status_text, "AI vs AI mode");
+            checkers->status_flash_color[0] = 1.0;
+            checkers->status_flash_color[1] = 0.65;
+            checkers->status_flash_color[2] = 0.0;
+        }
+        checkers->status_flash_timer = 1.5;
         checkers->reset_button_glow = 1.0;
+        
+        // Start AI thinking if needed
+        checkers_start_thinking(&checkers->thinking_state, &checkers->game);
     }
     
     checkers->reset_button_glow *= 0.95;
@@ -934,6 +965,7 @@ void update_beat_checkers(void *vis_ptr, double dt) {
                 checkers->animating_from_col = best_move.from_col;
                 checkers->animating_to_row = best_move.to_row;
                 checkers->animating_to_col = best_move.to_col;
+                checkers->current_move_jump_count = best_move.jump_count;  // Store jump count for animation speed
                 checkers->animation_progress = 0;
                 checkers->is_animating = true;
                 
@@ -994,6 +1026,7 @@ void update_beat_checkers(void *vis_ptr, double dt) {
             checkers->animating_from_col = best_move.from_col;
             checkers->animating_to_row = best_move.to_row;
             checkers->animating_to_col = best_move.to_col;
+            checkers->current_move_jump_count = best_move.jump_count;  // Store jump count for animation speed
             checkers->animation_progress = 0;
             checkers->is_animating = true;
             
