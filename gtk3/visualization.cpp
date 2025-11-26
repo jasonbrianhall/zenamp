@@ -92,6 +92,7 @@ Visualizer* visualizer_new(void) {
     init_beat_chess_system(vis);
     init_beat_checkers_system(vis);
     init_maze3d_system(vis);
+    init_minesweeper(vis);
     pong_init(vis);
     
     vis->track_info_display_time = 0.0;
@@ -496,6 +497,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_PONG:
           pong_draw(vis, cr);
           break;    
+       case VIS_MINESWEEPER:
+          minesweeper_draw(vis, cr);
+          break;    
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -669,6 +673,10 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 // Game continues regardless of music playback
                 pong_update(vis, dt);
                 break;                                                                               
+            case VIS_MINESWEEPER:
+                minesweeper_update(vis, dt);
+                break;
+
             case VIS_KARAOKE:
             case VIS_KARAOKE_EXCITING:
                 if (vis->cdg_display) {
@@ -762,6 +770,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Kaleidoscope (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Mandelbrot Fractal");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Matrix Rain (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Minesweeper (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");

@@ -31,6 +31,7 @@
 #include "bouncingcircle.h"
 #include "mandelbrot.h"
 #include "pong.h"
+#include "minesweeper.h"
 
 #define VIS_SAMPLES 512
 #define VIS_FREQUENCY_BARS 32
@@ -59,6 +60,7 @@ typedef enum {
     VIS_KALEIDOSCOPE,
     VIS_MANDELBROT,
     VIS_MATRIX,
+    VIS_MINESWEEPER,
     VIS_OSCILLOSCOPE,
     VIS_PONG,
     VIS_RADIAL_BARS,
@@ -353,6 +355,9 @@ typedef struct {
 
     // Pong
     PongGame pong_game;
+
+    // Minesweeper
+    MinesweeperGame minesweeper_game; 
 
 } Visualizer;
 
@@ -691,4 +696,9 @@ void pong_init(void *vis);
 void pong_update(void *vis, double dt);
 void pong_draw(void *vis, cairo_t *cr);
 
+// Minesweeper
+
+void init_minesweeper(Visualizer *vis);
+void minesweeper_draw(Visualizer *vis, cairo_t *cr);
+void minesweeper_update(Visualizer *vis, double dt);
 #endif
