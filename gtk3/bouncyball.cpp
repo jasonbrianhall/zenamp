@@ -12,6 +12,8 @@ void init_bouncy_ball_system(Visualizer *vis) {
     for (int i = 0; i < MAX_BOUNCY_BALLS; i++) {
         vis->bouncy_balls[i].active = FALSE;
         vis->bouncy_balls[i].trail_index = 0;
+        vis->bouncy_balls[i].user_created = FALSE;
+        vis->bouncy_balls[i].click_type = 0;
     }
 }
 
@@ -70,6 +72,88 @@ void spawn_bouncy_ball(Visualizer *vis, double intensity, int frequency_band) {
     ball->spawn_time = vis->time_offset;
     ball->last_bounce_time = 0.0;
     ball->energy = intensity;
+    ball->user_created = FALSE;
+    ball->click_type = 0;  // Audio-responsive balls
+    
+    // Clear trail
+    ball->trail_index = 0;
+    for (int i = 0; i < 20; i++) {
+        ball->trail_x[i] = ball->x;
+        ball->trail_y[i] = ball->y;
+    }
+    
+    if (slot >= vis->bouncy_ball_count) {
+        vis->bouncy_ball_count = slot + 1;
+    }
+}
+
+void spawn_bouncy_ball_at_position(Visualizer *vis, double x, double y, int click_type) {
+    // click_type: 1=left click, 2=right click, 3=middle click
+    
+    // Find inactive ball slot
+    int slot = -1;
+    for (int i = 0; i < MAX_BOUNCY_BALLS; i++) {
+        if (!vis->bouncy_balls[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    
+    if (slot == -1) {
+        // Replace oldest ball if no free slots
+        slot = 0;
+        double oldest_time = vis->bouncy_balls[0].spawn_time;
+        for (int i = 1; i < MAX_BOUNCY_BALLS; i++) {
+            if (vis->bouncy_balls[i].spawn_time < oldest_time) {
+                oldest_time = vis->bouncy_balls[i].spawn_time;
+                slot = i;
+            }
+        }
+    }
+    
+    BouncyBall *ball = &vis->bouncy_balls[slot];
+    
+    // Initialize ball properties
+    ball->x = x;
+    ball->y = y;
+    
+    // Common physics for all user-created balls
+    ball->vx = (((double)rand() / RAND_MAX) - 0.5) * 150.0;
+    ball->vy = -100.0 - ((double)rand() / RAND_MAX) * 100.0;  // Upward initial velocity
+    ball->base_radius = 12.0;  // Slightly larger than audio-responsive ones
+    ball->bounce_damping = 0.70;
+    ball->energy = 1.0;
+    ball->radius = ball->base_radius;
+    
+    // Set colors based on click type
+    ball->saturation = 0.9;  // High saturation for visibility
+    ball->brightness = 0.8;  // Bright
+    
+    switch(click_type) {
+        case 1:  // Left click - Cyan
+            ball->hue = 180.0 + ((double)rand() / RAND_MAX) * 60.0;  // Cyan to light blue (180-240°)
+            break;
+        case 2:  // Right click - Magenta/Pink
+            ball->hue = 300.0 + ((double)rand() / RAND_MAX) * 60.0;  // Magenta to pink (300-360°)
+            break;
+        case 3:  // Middle click - Orange/Yellow
+            ball->hue = 30.0 + ((double)rand() / RAND_MAX) * 60.0;  // Orange to yellow (30-90°)
+            break;
+        default:
+            ball->hue = ((double)rand() / RAND_MAX) * 360.0;
+    }
+    
+    // Physics properties
+    ball->gravity = vis->bouncy_gravity_strength;
+    ball->audio_intensity = 0.0;
+    
+    // Metadata
+    ball->frequency_band = 0;
+    ball->active = TRUE;
+    ball->spawn_time = vis->time_offset;
+    ball->last_bounce_time = 0.0;
+    ball->user_created = TRUE;
+    ball->click_type = click_type;
     
     // Clear trail
     ball->trail_index = 0;
@@ -122,6 +206,22 @@ void bouncy_ball_update_trail(BouncyBall *ball) {
 void update_bouncy_balls(Visualizer *vis, double dt) {
     vis->bouncy_spawn_timer += dt;
     
+    // Handle mouse clicks to spawn user-created balls
+    if (vis->mouse_left_pressed) {
+        spawn_bouncy_ball_at_position(vis, (double)vis->mouse_x, (double)vis->mouse_y, 1);  // Left click
+        vis->mouse_left_pressed = FALSE;
+    }
+    
+    if (vis->mouse_right_pressed) {
+        spawn_bouncy_ball_at_position(vis, (double)vis->mouse_x, (double)vis->mouse_y, 2);  // Right click
+        vis->mouse_right_pressed = FALSE;
+    }
+    
+    if (vis->mouse_middle_pressed) {
+        spawn_bouncy_ball_at_position(vis, (double)vis->mouse_x, (double)vis->mouse_y, 3);  // Middle click
+        vis->mouse_middle_pressed = FALSE;
+    }
+    
     // Spawn new balls on audio beats
     for (int band = 0; band < VIS_FREQUENCY_BARS; band++) {
         if (vis->frequency_bands[band] > vis->bouncy_beat_threshold && 
@@ -153,9 +253,11 @@ void update_bouncy_balls(Visualizer *vis, double dt) {
         // Handle collisions
         bouncy_ball_wall_collision(ball, vis->width, vis->height);
         
-        // Update audio responsiveness
-        double current_intensity = vis->frequency_bands[ball->frequency_band];
-        ball->audio_intensity = fmax(current_intensity, ball->audio_intensity * 0.95);
+        // Update audio responsiveness (only for non-user-created balls)
+        if (!ball->user_created) {
+            double current_intensity = vis->frequency_bands[ball->frequency_band];
+            ball->audio_intensity = fmax(current_intensity, ball->audio_intensity * 0.95);
+        }
         
         // Radius pulsing based on audio
         ball->radius = ball->base_radius * (1.0 + ball->audio_intensity * vis->bouncy_size_multiplier);
@@ -243,6 +345,35 @@ void draw_bouncy_balls(Visualizer *vis, cairo_t *cr) {
             cairo_set_line_width(cr, 2.0);
             cairo_arc(cr, ball->x, ball->y, ring_radius, 0, 2 * M_PI);
             cairo_stroke(cr);
+        }
+        
+        // Draw a distinct border for user-created balls
+        if (ball->user_created) {
+            // Different border styles based on click type
+            if (ball->click_type == 1) {
+                // Left click - Solid cyan border
+                cairo_set_source_rgba(cr, r, g, b, 0.9);
+                cairo_set_line_width(cr, 3.0);
+                cairo_arc(cr, ball->x, ball->y, ball->radius, 0, 2 * M_PI);
+                cairo_stroke(cr);
+            } else if (ball->click_type == 2) {
+                // Right click - Dashed magenta border
+                double dashes[] = {5.0, 3.0};
+                cairo_set_source_rgba(cr, r, g, b, 0.9);
+                cairo_set_line_width(cr, 3.0);
+                cairo_set_dash(cr, dashes, 2, 0);
+                cairo_arc(cr, ball->x, ball->y, ball->radius, 0, 2 * M_PI);
+                cairo_stroke(cr);
+                cairo_set_dash(cr, NULL, 0, 0);  // Reset dash pattern
+            } else if (ball->click_type == 3) {
+                // Middle click - Double border orange
+                cairo_set_source_rgba(cr, r, g, b, 0.9);
+                cairo_set_line_width(cr, 2.0);
+                cairo_arc(cr, ball->x, ball->y, ball->radius + 2, 0, 2 * M_PI);
+                cairo_stroke(cr);
+                cairo_arc(cr, ball->x, ball->y, ball->radius - 2, 0, 2 * M_PI);
+                cairo_stroke(cr);
+            }
         }
     }
 }

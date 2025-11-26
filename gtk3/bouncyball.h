@@ -19,4 +19,6 @@ typedef struct {
     double spawn_time;         // When ball was created
     double last_bounce_time;   // Last wall/floor bounce
     double energy;             // Current kinetic energy level
+    gboolean user_created;     // TRUE if created by mouse click
+    int click_type;            // 0=audio, 1=left click (cyan), 2=right click (magenta), 3=middle click (orange)
 } BouncyBall;

@@ -756,7 +756,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fourier Transform");    
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Ripples (i)");    
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Kaleidoscope");    
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Bouncy Balls");    
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Bouncy Balls (i)");    
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Digital Clock");    
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Analog Clock");    
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Robot Chaser");
