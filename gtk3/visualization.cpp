@@ -185,6 +185,7 @@ static gboolean is_interactive_game(VisualizationType type) {
         case VIS_RABBITHARE:
         case VIS_FIREWORKS:
         case VIS_BOUNCY_BALLS:
+        case VIS_MINESWEEPER:
             return TRUE;
         default:
             return FALSE;
@@ -831,7 +832,7 @@ void visualizer_next_mode(Visualizer *vis) {
     
     // Skip to first mode if we go past the last
     if (next > VIS_KARAOKE_EXCITING) {
-        next = VIS_WAVEFORM;
+        next = VIS_MAZE_3D;
     }
     
     visualizer_set_type(vis, (VisualizationType)next);
@@ -844,7 +845,7 @@ void visualizer_prev_mode(Visualizer *vis) {
     int prev = current - 1;
     
     // Wrap to last mode if we go below first
-    if (prev < VIS_WAVEFORM) {
+    if (prev < VIS_MAZE_3D) {
         prev = VIS_KARAOKE_EXCITING;
     }
     
