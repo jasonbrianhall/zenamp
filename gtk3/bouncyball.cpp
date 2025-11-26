@@ -87,6 +87,77 @@ void spawn_bouncy_ball(Visualizer *vis, double intensity, int frequency_band) {
     }
 }
 
+void spawn_bouncy_ball_beat(Visualizer *vis, double x, double y) {
+    // Spawn a special beat-triggered ball at mouse position with random color and larger size
+    
+    // Find inactive ball slot
+    int slot = -1;
+    for (int i = 0; i < MAX_BOUNCY_BALLS; i++) {
+        if (!vis->bouncy_balls[i].active) {
+            slot = i;
+            break;
+        }
+    }
+    
+    if (slot == -1) {
+        // Replace oldest ball if no free slots
+        slot = 0;
+        double oldest_time = vis->bouncy_balls[0].spawn_time;
+        for (int i = 1; i < MAX_BOUNCY_BALLS; i++) {
+            if (vis->bouncy_balls[i].spawn_time < oldest_time) {
+                oldest_time = vis->bouncy_balls[i].spawn_time;
+                slot = i;
+            }
+        }
+    }
+    
+    BouncyBall *ball = &vis->bouncy_balls[slot];
+    
+    // Initialize ball properties at mouse position
+    ball->x = x;
+    ball->y = y;
+    
+    // Beat balls spawn with explosive outward velocity
+    double angle = ((double)rand() / RAND_MAX) * 2.0 * M_PI;  // Random direction
+    double speed = 250.0 + ((double)rand() / RAND_MAX) * 150.0;  // Fast outward movement
+    ball->vx = cos(angle) * speed;
+    ball->vy = -fabs(sin(angle) * speed);  // Bias upward
+    
+    // Beat balls are significantly larger than regular ones
+    ball->base_radius = 20.0;  // Much bigger!
+    ball->radius = ball->base_radius;
+    
+    // Physics properties
+    ball->bounce_damping = 0.65;  // Slightly bouncier than user balls
+    ball->gravity = vis->bouncy_gravity_strength;
+    ball->audio_intensity = 0.0;
+    
+    // Random color spectrum (full hue range for beat balls)
+    ball->hue = ((double)rand() / RAND_MAX) * 360.0;  // Any color!
+    ball->saturation = 0.95;  // Very saturated
+    ball->brightness = 0.9;   // Bright
+    
+    // Metadata
+    ball->frequency_band = 0;
+    ball->active = TRUE;
+    ball->spawn_time = vis->time_offset;
+    ball->last_bounce_time = 0.0;
+    ball->user_created = FALSE;  // These are audio-triggered, not user-created
+    ball->click_type = 0;  // Beat balls (no click type)
+    ball->energy = 1.0;
+    
+    // Clear trail
+    ball->trail_index = 0;
+    for (int i = 0; i < 20; i++) {
+        ball->trail_x[i] = ball->x;
+        ball->trail_y[i] = ball->y;
+    }
+    
+    if (slot >= vis->bouncy_ball_count) {
+        vis->bouncy_ball_count = slot + 1;
+    }
+}
+
 void spawn_bouncy_ball_at_position(Visualizer *vis, double x, double y, int click_type) {
     // click_type: 1=left click, 2=right click, 3=middle click
     
@@ -228,6 +299,12 @@ void update_bouncy_balls(Visualizer *vis, double dt) {
             vis->bouncy_spawn_timer > 0.2) {  // Limit spawn rate
             
             spawn_bouncy_ball(vis, vis->frequency_bands[band], band);
+            
+            // Also spawn a special beat ball at mouse position with random color
+            if (vis->mouse_over) {  // Only if mouse is over the visualization
+                spawn_bouncy_ball_beat(vis, (double)vis->mouse_x, (double)vis->mouse_y);
+            }
+            
             vis->bouncy_spawn_timer = 0.0;
             break;  // Only spawn one ball per frame
         }

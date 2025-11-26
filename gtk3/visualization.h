@@ -468,6 +468,9 @@ void update_bouncy_balls(Visualizer *vis, double dt);
 void draw_bouncy_balls(Visualizer *vis, cairo_t *cr);
 void bouncy_ball_wall_collision(BouncyBall *ball, double width, double height);
 void bouncy_ball_update_trail(BouncyBall *ball);
+void spawn_bouncy_ball_beat(Visualizer *vis, double x, double y);
+void spawn_bouncy_ball_at_position(Visualizer *vis, double x, double y, int click_type);
+
 
 // Digital Clock
 void init_clock_system(Visualizer *vis);

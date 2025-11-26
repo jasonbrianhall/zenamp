@@ -1132,6 +1132,20 @@ void toggle_pause(AudioPlayer *player) {
     
     if (player->is_paused) {
         SDL_PauseAudioDevice(player->audio_device, 1);
+        
+        // Zero out frequency bands when paused so visualizations stop
+        if (player->visualizer && player->visualizer->frequency_bands) {
+            for (int i = 0; i < VIS_FREQUENCY_BARS; i++) {
+                player->visualizer->frequency_bands[i] = 0.0;
+            }
+        }
+        
+        // Also zero peak data
+        if (player->visualizer && player->visualizer->peak_data) {
+            for (int i = 0; i < VIS_FREQUENCY_BARS; i++) {
+                player->visualizer->peak_data[i] = 0.0;
+            }
+        }
     } else {
         SDL_PauseAudioDevice(player->audio_device, 0);
     }
