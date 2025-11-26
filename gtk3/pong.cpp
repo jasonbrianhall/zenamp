@@ -180,12 +180,15 @@ void pong_update(void *vis_ptr, double dt) {
     double player_center = game->player.y + game->player.height / 2.0;
     double player_diff = player_target - player_center;
     
-    if (fabs(player_diff) > 5) {
-        double move_speed = PONG_PADDLE_SPEED;
+    double move_speed = PONG_PADDLE_SPEED;
+    double move_amount = move_speed * dt;
+    
+    // Move toward target, but don't overshoot
+    if (fabs(player_diff) > 0.1) {
         if (player_diff > 0) {
-            game->player.y += move_speed * dt;
+            game->player.y += fmin(move_amount, player_diff);
         } else {
-            game->player.y -= move_speed * dt;
+            game->player.y -= fmin(move_amount, -player_diff);
         }
     }
     
@@ -227,12 +230,15 @@ void pong_update(void *vis_ptr, double dt) {
     double ai_center = game->ai.y + game->ai.height / 2.0;
     double ai_diff = game->ai.target_y - ai_center;
     
-    if (fabs(ai_diff) > 5) {
-        double move_speed = PONG_PADDLE_SPEED * (game->ai_difficulty / 10.0);
+    double ai_move_speed = PONG_PADDLE_SPEED * (game->ai_difficulty / 10.0);
+    double ai_move_amount = ai_move_speed * dt;
+    
+    // Move toward target, but don't overshoot
+    if (fabs(ai_diff) > 0.1) {
         if (ai_diff > 0) {
-            game->ai.y += move_speed * dt;
+            game->ai.y += fmin(ai_move_amount, ai_diff);
         } else {
-            game->ai.y -= move_speed * dt;
+            game->ai.y -= fmin(ai_move_amount, -ai_diff);
         }
     }
     
@@ -329,10 +335,10 @@ void pong_update(void *vis_ptr, double dt) {
             game->player.score=0;
             game->ai.score=0;            
         } else {
-            // Reset ball for next round
+            // Reset ball for next round - AI scored, so AI serves
             game->ball.x = game->width / 2.0;
             game->ball.y = game->height / 2.0;
-            game->ball.vx = PONG_BALL_SPEED;
+            game->ball.vx = -PONG_BALL_SPEED;  // AI serves toward player (leftward)
             game->ball.vy = PONG_BALL_SPEED * 0.5;
             game->ball.current_speed = PONG_BALL_SPEED;
             game->ball.hit_count = 0;
@@ -348,10 +354,10 @@ void pong_update(void *vis_ptr, double dt) {
             game->player.score=0;
             game->ai.score=0;            
         } else {
-            // Reset ball for next round
+            // Reset ball for next round - Player scored, so player serves
             game->ball.x = game->width / 2.0;
             game->ball.y = game->height / 2.0;
-            game->ball.vx = -PONG_BALL_SPEED;
+            game->ball.vx = PONG_BALL_SPEED;  // Player serves toward AI (rightward)
             game->ball.vy = PONG_BALL_SPEED * 0.5;
             game->ball.current_speed = PONG_BALL_SPEED;
             game->ball.hit_count = 0;
