@@ -23,6 +23,27 @@ typedef struct {
 #define MINESWEEPER_MAX_GRID_SIZE 12
 #define MINESWEEPER_CELL_PADDING 2
 
+// Particle system
+#define MAX_EXPLOSION_PARTICLES 500
+
+typedef enum {
+    PARTICLE_SPARK,
+    PARTICLE_DEBRIS,
+    PARTICLE_SMOKE
+} ParticleType;
+
+typedef struct {
+    double x, y;
+    double vx, vy;  // velocity
+    double life;    // 0.0 to 1.0
+    ParticleType type;
+} ExplosionParticle;
+
+typedef struct {
+    ExplosionParticle particles[MAX_EXPLOSION_PARTICLES];
+    int particle_count;
+} ExplosionSystem;
+
 typedef enum {
     CELL_HIDDEN,
     CELL_REVEALED_EMPTY,
@@ -37,6 +58,8 @@ typedef struct {
     int adjacent_mines;
     double reveal_animation;  // 0.0 to 1.0
     double pulse_intensity;   // Beat reactivity
+    double beat_phase;        // For beat-based wave effects
+    double distance_glow;     // Glow based on distance from epicenter
 } MinesweeperCell;
 
 typedef struct {
@@ -62,6 +85,26 @@ typedef struct {
     
     // First click tracking
     bool first_click_made;
+    
+    // Beat reactivity
+    double beat_magnitude;      // Current beat strength (0-1)
+    double bass_energy;         // Low frequency energy
+    double mid_energy;          // Mid frequency energy
+    double high_energy;         // High frequency energy
+    double beat_time;           // Time since last beat
+    int last_beat_x, last_beat_y;  // Epicenter of last beat
+    double wave_expansion;      // For expanding beat waves
+    
+    // Background explosion system
+    ExplosionSystem explosion_system;
+    
+    // Timer
+    double elapsed_time;        // Elapsed time in seconds
+    
+    // Idle hint system
+    double idle_time;           // Time since last move
+    double idle_threshold;      // Seconds before showing hints (3 seconds)
+    double hint_intensity;      // 0.0 to 1.0, how red the mines glow
 } MinesweeperGame;
 
 #endif

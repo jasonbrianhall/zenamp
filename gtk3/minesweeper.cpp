@@ -79,7 +79,8 @@ void init_minesweeper(Visualizer *vis) {
             game->grid[y][x].is_mine = false;
             game->grid[y][x].reveal_animation = 0.0;
             game->grid[y][x].pulse_intensity = 0.0;
-            game->grid[y][x].adjacent_mines = 0;
+            game->grid[y][x].beat_phase = 0.0;
+            game->grid[y][x].distance_glow = 0.0;
         }
     }
     
@@ -92,7 +93,28 @@ void init_minesweeper(Visualizer *vis) {
     game->last_revealed_x = -1;
     game->last_revealed_y = -1;
     game->show_difficulty_menu = false;
-    game->first_click_made = false;  // Reset first click flag
+    game->first_click_made = false;
+    
+    // Initialize beat properties
+    game->beat_magnitude = 0.0;
+    game->bass_energy = 0.0;
+    game->mid_energy = 0.0;
+    game->high_energy = 0.0;
+    game->beat_time = 0.0;
+    game->last_beat_x = game->grid_size / 2;
+    game->last_beat_y = game->grid_size / 2;
+    game->wave_expansion = 0.0;
+    
+    // Initialize explosion system
+    game->explosion_system.particle_count = 0;
+    
+    // Initialize timer
+    game->elapsed_time = 0.0;
+    
+    // Initialize idle hint system
+    game->idle_time = 0.0;
+    game->idle_threshold = 8.0;  // Show hints after 8 seconds of idle
+    game->hint_intensity = 0.0;
 }
 
 void minesweeper_reveal_cell(Visualizer *vis, int x, int y) {
@@ -107,6 +129,9 @@ void minesweeper_reveal_cell(Visualizer *vis, int x, int y) {
     if (cell->state != CELL_HIDDEN) {
         return;
     }
+    
+    // Reset idle timer on move
+    game->idle_time = 0.0;
     
     // If this is the first click, place mines avoiding this cell
     if (!game->first_click_made) {
@@ -170,6 +195,9 @@ void minesweeper_flag_cell(Visualizer *vis, int x, int y) {
     
     MinesweeperCell *cell = &game->grid[y][x];
     
+    // Reset idle timer on move
+    game->idle_time = 0.0;
+    
     if (cell->state == CELL_HIDDEN) {
         cell->state = CELL_FLAGGED;
         game->flags_placed++;
@@ -223,10 +251,93 @@ void minesweeper_middle_click(Visualizer *vis, int x, int y) {
     }
 }
 
+void spawn_explosion(MinesweeperGame *game, double beat_magnitude, double bass_energy, double width, double height) {
+    // Spawn 1-15 particles based on beat magnitude
+    int num_particles = 1 + (int)(beat_magnitude * 14.0);
+    if (num_particles > 15) num_particles = 15;
+    
+    ExplosionSystem *sys = &game->explosion_system;
+    
+    for (int i = 0; i < num_particles; i++) {
+        if (sys->particle_count >= MAX_EXPLOSION_PARTICLES) break;
+        
+        ExplosionParticle *p = &sys->particles[sys->particle_count++];
+        
+        // Random position on screen
+        p->x = (rand() % (int)width);
+        p->y = (rand() % (int)height);
+        
+        // Random velocity in all directions
+        double angle = (rand() / (double)RAND_MAX) * 2.0 * M_PI;
+        double speed = 100.0 + (bass_energy * 200.0);  // Bass affects speed
+        p->vx = cos(angle) * speed;
+        p->vy = sin(angle) * speed;
+        
+        // Random particle type
+        int type_rand = rand() % 3;
+        p->type = (ParticleType)type_rand;
+        
+        // Life based on frequency - bass particles live longer
+        p->life = 0.8 + (bass_energy * 0.5);
+    }
+}
+
 void minesweeper_update(Visualizer *vis, double dt) {
     MinesweeperGame *game = &vis->minesweeper_game;
     
-    // Update animations
+    // ===== FREQUENCY ANALYSIS FOR BEAT RESPONSIVENESS =====
+    // Break frequency spectrum into bass, mid, and high
+    int bass_start = 0;
+    int bass_end = VIS_FREQUENCY_BARS / 4;        // Lower 25%
+    int mid_start = bass_end;
+    int mid_end = (VIS_FREQUENCY_BARS * 3) / 4;   // Middle 50%
+    int high_start = mid_end;
+    int high_end = VIS_FREQUENCY_BARS;             // Upper 25%
+    
+    // Calculate band energies
+    double bass_total = 0, mid_total = 0, high_total = 0;
+    for (int i = bass_start; i < bass_end; i++) {
+        bass_total += vis->frequency_bands[i];
+    }
+    for (int i = mid_start; i < mid_end; i++) {
+        mid_total += vis->frequency_bands[i];
+    }
+    for (int i = high_start; i < high_end; i++) {
+        high_total += vis->frequency_bands[i];
+    }
+    
+    game->bass_energy = bass_total / (bass_end - bass_start);
+    game->mid_energy = mid_total / (mid_end - mid_start);
+    game->high_energy = high_total / (high_end - high_start);
+    
+    // Overall beat magnitude (weighted average)
+    game->beat_magnitude = (game->bass_energy * 0.5 + game->mid_energy * 0.3 + game->high_energy * 0.2);
+    
+    // ===== BEAT DETECTION WITH HYSTERESIS =====
+    double beat_threshold = vis->beat_threshold * 0.8;
+    bool is_beat = game->beat_magnitude > beat_threshold;
+    
+    if (is_beat && game->beat_time > 0.1) {  // Prevent beat spam
+        game->beat_time = 0.0;
+        game->beat_glow = 1.0;
+        game->wave_expansion = 0.0;
+        
+        // Spawn background explosions
+        spawn_explosion(game, game->beat_magnitude, game->bass_energy, vis->width, vis->height);
+        
+        // New beat epicenter (random or recent interaction)
+        if (game->last_revealed_x >= 0) {
+            game->last_beat_x = game->last_revealed_x;
+            game->last_beat_y = game->last_revealed_y;
+        } else {
+            game->last_beat_x = game->grid_size / 2;
+            game->last_beat_y = game->grid_size / 2;
+        }
+    }
+    
+    game->beat_time += dt;
+    
+    // ===== UPDATE ALL CELLS =====
     for (int y = 0; y < game->grid_size; y++) {
         for (int x = 0; x < game->grid_size; x++) {
             MinesweeperCell *cell = &game->grid[y][x];
@@ -234,48 +345,138 @@ void minesweeper_update(Visualizer *vis, double dt) {
             // Reveal animation
             if (cell->state != CELL_HIDDEN && cell->state != CELL_FLAGGED) {
                 if (cell->reveal_animation < 1.0) {
-                    cell->reveal_animation += dt * 4.0;  // 0.25 second reveal
+                    cell->reveal_animation += dt * 4.0;
                     if (cell->reveal_animation > 1.0) {
                         cell->reveal_animation = 1.0;
                     }
                 }
             }
             
-            // Pulse animation decay
-            cell->pulse_intensity *= 0.92;
+            // ===== BEAT-WAVE PROPAGATION =====
+            // Calculate distance from beat epicenter
+            int dx = x - game->last_beat_x;
+            int dy = y - game->last_beat_y;
+            double distance = sqrt(dx * dx + dy * dy);
+            
+            // Wave that expands from epicenter
+            double wave_distance = game->wave_expansion;
+            double wave_width = 1.5;  // How "thick" the wave is
+            
+            if (distance < wave_distance + wave_width && distance > wave_distance - wave_width) {
+                // Cell is in the wave zone
+                double wave_intensity = 1.0 - fabs(distance - wave_distance) / wave_width;
+                cell->pulse_intensity = fmax(cell->pulse_intensity, wave_intensity * game->beat_magnitude);
+            }
+            
+            // ===== FREQUENCY-SPECIFIC CELL RESPONSE =====
+            // Bass cells: Hidden cells pulse with bass
+            if (cell->state == CELL_HIDDEN) {
+                cell->pulse_intensity += game->bass_energy * 0.15;
+            }
+            // Mid cells: Number cells react to mids
+            else if (cell->state == CELL_REVEALED_NUMBER) {
+                cell->pulse_intensity += game->mid_energy * 0.1;
+            }
+            // High cells: Flagged cells react to highs
+            else if (cell->state == CELL_FLAGGED) {
+                cell->pulse_intensity += game->high_energy * 0.15;
+            }
+            
+            // Clamp and decay pulse
+            if (cell->pulse_intensity > 1.0) cell->pulse_intensity = 1.0;
+            cell->pulse_intensity *= 0.90;  // Decay
+            
+            // Distance glow: stronger closer to epicenter
+            if (game->beat_glow > 0.1) {
+                double dist_to_center = sqrt(dx * dx + dy * dy);
+                double max_dist = sqrt(game->grid_size * game->grid_size + game->grid_size * game->grid_size) / 2.0;
+                cell->distance_glow = (1.0 - (dist_to_center / max_dist)) * game->beat_glow;
+            }
+            cell->distance_glow *= 0.92;
+            
+            // Beat phase for oscillations
+            cell->beat_phase += dt * (2.0 + game->beat_magnitude * 5.0);
         }
     }
     
-    // Beat detection for pulse effect
-    double total_intensity = 0.0;
-    for (int i = 0; i < VIS_FREQUENCY_BARS; i++) {
-        if (vis->frequency_bands[i] > 0) {
-            total_intensity += vis->frequency_bands[i];
+    // ===== OVERALL BEAT EFFECTS =====
+    game->beat_glow *= 0.95;
+    game->wave_expansion += dt * (10.0 + game->beat_magnitude * 15.0);  // Wave speed increases with beat
+    
+    // ===== UPDATE PARTICLES =====
+    ExplosionSystem *sys = &game->explosion_system;
+    int alive_count = 0;
+    for (int i = 0; i < sys->particle_count; i++) {
+        ExplosionParticle *p = &sys->particles[i];
+        
+        // Update position
+        p->x += p->vx * dt;
+        p->y += p->vy * dt;
+        
+        // Apply gravity/deceleration
+        p->vy += 200.0 * dt;  // Gravity
+        p->vx *= 0.98;        // Air resistance
+        p->vy *= 0.98;
+        
+        // Fade out life
+        p->life -= dt * 2.0;
+        if (p->life < 0.0) p->life = 0.0;
+        
+        // Keep particles on screen
+        if (p->x < 0) p->x = 0;
+        if (p->x > vis->width) p->x = vis->width;
+        if (p->y < 0) p->y = 0;
+        if (p->y > vis->height) p->y = vis->height;
+        
+        // Only keep alive particles
+        if (p->life > 0.01) {
+            alive_count++;
         }
     }
-    double avg_intensity = total_intensity / VIS_FREQUENCY_BARS;
     
-    if (avg_intensity > vis->beat_threshold) {
-        game->beat_glow = 0.8;
-        // Pulse the last revealed cell
-        if (game->last_revealed_x >= 0 && game->last_revealed_y >= 0) {
-            game->grid[game->last_revealed_y][game->last_revealed_x].pulse_intensity = 1.0;
+    // Remove dead particles by shifting array
+    if (alive_count < sys->particle_count) {
+        int write_idx = 0;
+        for (int i = 0; i < sys->particle_count; i++) {
+            if (sys->particles[i].life > 0.01) {
+                sys->particles[write_idx] = sys->particles[i];
+                write_idx++;
+            }
         }
+        sys->particle_count = write_idx;
     }
     
-    game->beat_glow *= 0.94;
+    // ===== UPDATE TIMER =====
+    if (!game->game_over) {
+        game->elapsed_time += dt;
+    }
+    
+    // ===== UPDATE IDLE HINT SYSTEM =====
+    if (!game->game_over) {
+        game->idle_time += dt;
+    }
+    
+    // Calculate hint intensity based on idle time
+    if (game->idle_time > game->idle_threshold) {
+        // After threshold, slowly increase hint intensity
+        double time_over_threshold = game->idle_time - game->idle_threshold;
+        game->hint_intensity = fmin(1.0, time_over_threshold / 22.0);  // Full opacity after 22 more seconds (30 total)
+    } else {
+        // Cool down while player is active
+        game->hint_intensity = fmax(0.0, game->hint_intensity - dt / 3.0);  // Fully cool after 3 seconds
+    }
     
     // Handle game over timer
     if (game->game_over) {
         game->game_over_time -= dt;
         if (game->game_over_time <= 0) {
-            init_minesweeper(vis);  // Reset game
+            init_minesweeper(vis);
         }
     }
     
     // Calculate cell size responsively based on window dimensions
     int cell_size_w = (vis->width / game->grid_size);
-    int cell_size_h = ((vis->height - 60) / game->grid_size);  // Leave space for buttons
+    int cell_size_h = ((vis->height - 60) / game->grid_size);
     int cell_size = (cell_size_w < cell_size_h) ? cell_size_w : cell_size_h;
     
     // Calculate grid offset
@@ -371,6 +572,46 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
     cairo_set_source_rgb(cr, 0.1, 0.12, 0.15);
     cairo_paint(cr);
     
+    // ===== DRAW BACKGROUND EXPLOSION PARTICLES =====
+    ExplosionSystem *sys = &game->explosion_system;
+    for (int i = 0; i < sys->particle_count; i++) {
+        ExplosionParticle *p = &sys->particles[i];
+        
+        // Color and size based on particle type
+        double size = 2.0;
+        double r, g, b, a;
+        
+        a = p->life;  // Fade out as life decreases
+        
+        switch (p->type) {
+            case PARTICLE_SPARK:
+                // Yellow/orange sparks
+                r = 1.0;
+                g = 0.7 + (p->life * 0.3);
+                b = 0.0;
+                size = 2.5;
+                break;
+            case PARTICLE_DEBRIS:
+                // Gray debris
+                r = 0.5;
+                g = 0.5;
+                b = 0.5;
+                size = 3.5;
+                break;
+            case PARTICLE_SMOKE:
+                // White/gray smoke
+                r = 0.8 + (p->life * 0.2);
+                g = 0.8 + (p->life * 0.2);
+                b = 0.8 + (p->life * 0.2);
+                size = 4.0 + ((1.0 - p->life) * 2.0);  // Grows as it fades
+                break;
+        }
+        
+        cairo_set_source_rgba(cr, r, g, b, a * 0.8);
+        cairo_arc(cr, p->x, p->y, size, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+    
     // Draw difficulty buttons at the top left
     double button_y = 10;
     double button_height = 40;
@@ -448,14 +689,6 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
             cairo_set_line_width(cr, 1.0);
             cairo_stroke(cr);
             
-            // Beat glow effect
-            if (cell->pulse_intensity > 0.01) {
-                double glow_intensity = cell->pulse_intensity * 0.3;
-                cairo_set_source_rgba(cr, 0.2, 0.8, 1.0, glow_intensity);
-                cairo_rectangle(cr, px + 2, py + 2, cell_size - 4, cell_size - 4);
-                cairo_fill(cr);
-            }
-            
             // Draw cell content based on state
             if (cell->state == CELL_HIDDEN) {
                 // 3D button effect
@@ -463,6 +696,13 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
                 cairo_set_source_rgb(cr, brightness * 0.8, brightness * 0.9, brightness);
                 cairo_rectangle(cr, px + 3, py + 3, cell_size - 6, cell_size - 6);
                 cairo_fill(cr);
+                
+                // Idle hint: glow mines red if player is idle too long
+                if (game->hint_intensity > 0.01 && cell->is_mine) {
+                    cairo_set_source_rgba(cr, 1.0, 0.2, 0.2, game->hint_intensity);
+                    cairo_rectangle(cr, px + 3, py + 3, cell_size - 6, cell_size - 6);
+                    cairo_fill(cr);
+                }
                 
                 // Highlight
                 cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.2);
@@ -493,14 +733,14 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
                 cairo_fill(cr);
                 
             } else if (cell->state == CELL_REVEALED_EMPTY) {
-                // Empty cell - light background
-                cairo_set_source_rgb(cr, 0.25, 0.28, 0.35);
+                // Empty cell - very very transparent
+                cairo_set_source_rgba(cr, 0.25, 0.28, 0.35, 0.05);
                 cairo_rectangle(cr, px + 2, py + 2, cell_size - 4, cell_size - 4);
                 cairo_fill(cr);
                 
             } else if (cell->state == CELL_REVEALED_NUMBER) {
-                // Number cell
-                cairo_set_source_rgb(cr, 0.25, 0.28, 0.35);
+                // Number cell - very very transparent
+                cairo_set_source_rgba(cr, 0.25, 0.28, 0.35, 0.05);
                 cairo_rectangle(cr, px + 2, py + 2, cell_size - 4, cell_size - 4);
                 cairo_fill(cr);
                 
@@ -539,10 +779,12 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
                 cairo_show_text(cr, num_str);
                 
             } else if (cell->state == CELL_REVEALED_MINE) {
-                // Mine explosion effect
-                double pulse = game->beat_glow * 0.5;
+                // Mine explosion effect with beat reactivity
+                double pulse = game->beat_glow * 0.8;
+                double bass_pulse = game->bass_energy * 0.4;
                 
-                cairo_set_source_rgb(cr, 0.8 + pulse * 0.2, 0.1, 0.1);
+                // Red background intensifies with beat
+                cairo_set_source_rgb(cr, 0.9 + pulse * 0.1 + bass_pulse * 0.1, 0.1, 0.1);
                 cairo_rectangle(cr, px + 2, py + 2, cell_size - 4, cell_size - 4);
                 cairo_fill(cr);
                 
@@ -551,16 +793,23 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
                 cairo_arc(cr, px + cell_size / 2.0, py + cell_size / 2.0, cell_size * 0.3, 0, 2 * M_PI);
                 cairo_fill(cr);
                 
-                // Mine spikes
-                cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
-                for (int spike = 0; spike < 8; spike++) {
-                    double angle = (spike / 8.0) * 2.0 * M_PI;
-                    double spike_len = cell_size * 0.35;
+                // Mine spikes - dynamic based on beat with slower rotation
+                int spike_count = 8 + (int)(game->beat_magnitude * 4);  // More spikes with beat
+                for (int spike = 0; spike < spike_count; spike++) {
+                    double angle = (spike / (double)spike_count) * 2.0 * M_PI + (cell->beat_phase * 0.5);  // Slower: 0.5 instead of 2.0
+                    
+                    // Spike length pulses with beat
+                    double base_len = cell_size * 0.35;
+                    double spike_len = base_len + (game->bass_energy * cell_size * 0.15);
+                    
                     double sx = px + cell_size / 2.0 + cos(angle) * spike_len;
                     double sy = py + cell_size / 2.0 + sin(angle) * spike_len;
                     cairo_move_to(cr, px + cell_size / 2.0, py + cell_size / 2.0);
                     cairo_line_to(cr, sx, sy);
-                    cairo_set_line_width(cr, 2.0);
+                    
+                    // Spike color varies: yellow on high energy, red on low
+                    cairo_set_source_rgb(cr, 0.3 + game->high_energy * 0.7, 0.2, 0.1);
+                    cairo_set_line_width(cr, 2.0 + game->beat_magnitude * 1.5);
                     cairo_stroke(cr);
                 }
             }
@@ -611,4 +860,15 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
             game->total_cells - game->total_mines);
     cairo_move_to(cr, 10, vis->height - 5);
     cairo_show_text(cr, stats);
+    
+    // Draw timer at bottom right
+    int minutes = (int)game->elapsed_time / 60;
+    int seconds = (int)game->elapsed_time % 60;
+    char timer_str[16];
+    sprintf(timer_str, "%02d:%02d", minutes, seconds);
+    
+    cairo_text_extents_t timer_extents;
+    cairo_text_extents(cr, timer_str, &timer_extents);
+    cairo_move_to(cr, vis->width - timer_extents.width - 10, vis->height - 5);
+    cairo_show_text(cr, timer_str);
 }
