@@ -4,6 +4,63 @@
 #include <stdlib.h>
 #include <string.h>
 
+void calculate_distances_to_revealed(MinesweeperGame *game) {
+    // Initialize all distances to max
+    for (int y = 0; y < game->grid_size; y++) {
+        for (int x = 0; x < game->grid_size; x++) {
+            if (game->grid[y][x].state == CELL_HIDDEN || game->grid[y][x].state == CELL_FLAGGED) {
+                game->grid[y][x].dist_to_revealed = 999;
+            } else {
+                game->grid[y][x].dist_to_revealed = 0;
+            }
+        }
+    }
+    
+    // BFS to find distances
+    int queue_x[MINESWEEPER_MAX_GRID_SIZE * MINESWEEPER_MAX_GRID_SIZE];
+    int queue_y[MINESWEEPER_MAX_GRID_SIZE * MINESWEEPER_MAX_GRID_SIZE];
+    int queue_front = 0, queue_back = 0;
+    
+    // Add all revealed cells to queue
+    for (int y = 0; y < game->grid_size; y++) {
+        for (int x = 0; x < game->grid_size; x++) {
+            if (game->grid[y][x].dist_to_revealed == 0) {
+                queue_x[queue_back] = x;
+                queue_y[queue_back] = y;
+                queue_back++;
+            }
+        }
+    }
+    
+    // BFS
+    while (queue_front < queue_back) {
+        int x = queue_x[queue_front];
+        int y = queue_y[queue_front];
+        queue_front++;
+        
+        int current_dist = game->grid[y][x].dist_to_revealed;
+        
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) continue;
+                
+                int nx = x + dx;
+                int ny = y + dy;
+                
+                if (nx >= 0 && nx < game->grid_size && ny >= 0 && ny < game->grid_size) {
+                    int new_dist = current_dist + 1;
+                    if (new_dist < game->grid[ny][nx].dist_to_revealed) {
+                        game->grid[ny][nx].dist_to_revealed = new_dist;
+                        queue_x[queue_back] = nx;
+                        queue_y[queue_back] = ny;
+                        queue_back++;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void place_mines_avoiding_cell(Visualizer *vis, int avoid_x, int avoid_y) {
     MinesweeperGame *game = &vis->minesweeper_game;
     
@@ -81,6 +138,7 @@ void init_minesweeper(Visualizer *vis) {
             game->grid[y][x].pulse_intensity = 0.0;
             game->grid[y][x].beat_phase = 0.0;
             game->grid[y][x].distance_glow = 0.0;
+            game->grid[y][x].dist_to_revealed = 999;
         }
     }
     
@@ -183,6 +241,9 @@ void minesweeper_reveal_cell(Visualizer *vis, int x, int y) {
             game->game_over_time = 3.0;
             game->game_over = true;
         }
+        
+        // Recalculate distances from revealed cells
+        calculate_distances_to_revealed(game);
     }
 }
 
@@ -456,7 +517,7 @@ void minesweeper_update(Visualizer *vis, double dt) {
         game->idle_time += dt;
     }
     
-    // Calculate hint intensity based on idle time
+    // Calculate hint intensity based on idle time and distance
     if (game->idle_time > game->idle_threshold) {
         // After threshold, slowly increase hint intensity
         double time_over_threshold = game->idle_time - game->idle_threshold;
@@ -698,10 +759,16 @@ void minesweeper_draw(Visualizer *vis, cairo_t *cr) {
                 cairo_fill(cr);
                 
                 // Idle hint: glow mines red if player is idle too long
+                // Cells further from revealed space take longer to glow
                 if (game->hint_intensity > 0.01 && cell->is_mine) {
-                    cairo_set_source_rgba(cr, 1.0, 0.2, 0.2, game->hint_intensity);
-                    cairo_rectangle(cr, px + 3, py + 3, cell_size - 6, cell_size - 6);
-                    cairo_fill(cr);
+                    // Distance delays the hint - each cell distance adds ~1 second delay
+                    double distance_delay = cell->dist_to_revealed * 1.0;
+                    double adjusted_intensity = fmax(0.0, game->hint_intensity - distance_delay / 22.0);
+                    if (adjusted_intensity > 0.01) {
+                        cairo_set_source_rgba(cr, 1.0, 0.2, 0.2, adjusted_intensity);
+                        cairo_rectangle(cr, px + 3, py + 3, cell_size - 6, cell_size - 6);
+                        cairo_fill(cr);
+                    }
                 }
                 
                 // Highlight

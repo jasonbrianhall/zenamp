@@ -60,6 +60,7 @@ typedef struct {
     double pulse_intensity;   // Beat reactivity
     double beat_phase;        // For beat-based wave effects
     double distance_glow;     // Glow based on distance from epicenter
+    int dist_to_revealed;     // Distance to nearest revealed cell (for hint delay)
 } MinesweeperCell;
 
 typedef struct {
