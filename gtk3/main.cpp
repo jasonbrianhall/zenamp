@@ -1160,6 +1160,10 @@ gboolean on_vis_fullscreen_delete_event(GtkWidget *widget, GdkEvent *event, gpoi
     return TRUE; // Prevent actual close, just exit fullscreen
 }
 
+bool is_visualizer_fullscreen() {
+    return is_vis_fullscreen;
+}
+
 void toggle_vis_fullscreen(AudioPlayer *player) {
     if (!player->visualizer || !player->visualizer->drawing_area) {
         printf("No visualizer available for fullscreen mode\n");

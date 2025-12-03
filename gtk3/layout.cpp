@@ -930,9 +930,20 @@ gboolean on_visualizer_button_press(GtkWidget *widget, GdkEventButton *event, gp
     vis->mouse_y = (int)event->y;
     vis->mouse_press_time = g_get_monotonic_time() / 1000000.0;
     
-    // Handle double-click for fullscreen toggle
+    // Handle double-click for fullscreen toggle (only enter fullscreen, don't exit)
     if (event->type == GDK_2BUTTON_PRESS && event->button == 1) {
-        printf("Visualizer double-clicked - toggling fullscreen\n");
+        printf("Visualizer double-clicked\n");
+        
+        // Check if visualizer is already in fullscreen mode
+        extern bool is_visualizer_fullscreen();
+        if (is_visualizer_fullscreen()) {
+            // Already fullscreen, don't toggle to avoid interfering with games
+            printf("Visualizer already in fullscreen - ignoring double-click\n");
+            return TRUE;
+        }
+        
+        // Not in fullscreen, so enable it
+        printf("Entering fullscreen mode\n");
         extern void toggle_vis_fullscreen(AudioPlayer *player);
         toggle_vis_fullscreen(player);
         return TRUE;

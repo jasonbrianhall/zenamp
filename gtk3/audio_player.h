@@ -463,6 +463,8 @@ gboolean on_vis_fullscreen_key_press(GtkWidget *widget, GdkEventKey *event, gpoi
 gboolean on_vis_fullscreen_delete_event(GtkWidget *widget, GdkEvent *event, gpointer user_data);
 gboolean on_visualizer_button_press(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
 
+bool is_visualizer_fullscreen();
+
 void add_to_recent_files(const char* filepath, const char* mime_type);
 void on_recent_playlist_activated(GtkRecentChooser *chooser, gpointer user_data);
 bool save_last_playlist_path(const char *playlist_path);
