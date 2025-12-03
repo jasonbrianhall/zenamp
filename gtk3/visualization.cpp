@@ -94,6 +94,7 @@ Visualizer* visualizer_new(void) {
     init_maze3d_system(vis);
     init_minesweeper(vis);
     pong_init(vis);
+    init_comet_buster_system(vis);
     
     vis->track_info_display_time = 0.0;
     vis->track_info_fade_alpha = 1.0;
@@ -459,6 +460,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_PARROT:
           draw_parrot(vis, cr);
           break;
+       case VIS_COMET_BUSTER:
+          draw_comet_buster(vis, cr);
+          break;          
        case VIS_EYE_OF_SAURON:
           draw_eye_of_sauron(vis, cr);
           break;
@@ -639,6 +643,9 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_PARROT:
                 update_parrot(vis, dt);
                 break;
+            case VIS_COMET_BUSTER:
+                update_comet_buster(vis, dt);
+                break;
             case VIS_EYE_OF_SAURON:
                 update_eye_of_sauron(vis, dt);
                 break;
@@ -760,6 +767,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Bouncy Balls (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Bubbles (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Circle");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Comet Buster (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "DNA Helix");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "DNA Helix Alternative");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Dancing Parrot");

@@ -1,0 +1,173 @@
+#ifndef COMETBUSTER_H
+#define COMETBUSTER_H
+
+#include <stdbool.h>
+#include <math.h>
+#include <time.h>
+
+// Static memory allocation constants
+#define MAX_COMETS 32
+#define MAX_BULLETS 128
+#define MAX_PARTICLES 512
+#define MAX_HIGH_SCORES 10
+
+typedef enum {
+    COMET_SMALL = 0,
+    COMET_MEDIUM = 1,
+    COMET_LARGE = 2,
+    COMET_SPECIAL = 3
+} CometSize;
+
+typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    double radius;
+    CometSize size;
+    int frequency_band;         // 0=bass, 1=mid, 2=treble
+    double rotation;            // For rotating visual (degrees)
+    double rotation_speed;      // degrees per second
+    double base_angle;          // Base rotation angle (radians) for vector asteroids
+    double color[3];            // RGB
+    bool active;
+    int health;                 // For special comets
+} Comet;
+
+typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    double angle;               // Direction
+    double lifetime;            // Seconds remaining
+    double max_lifetime;
+    bool active;
+} Bullet;
+
+typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    double lifetime;            // Seconds remaining
+    double max_lifetime;
+    double size;                // Radius
+    double color[3];            // RGB
+    bool active;
+} Particle;
+
+typedef struct {
+    int score;
+    int wave;
+    char player_name[32];       // Static string buffer
+    time_t timestamp;
+} HighScore;
+
+typedef struct {
+    // Ship state
+    double ship_x, ship_y;
+    double ship_vx, ship_vy;
+    double ship_angle;          // Radians
+    double ship_speed;          // Current velocity magnitude
+    double ship_rotation_angle; // Target angle toward mouse
+    int ship_lives;
+    double invulnerability_time; // Seconds of invincibility after being hit
+    
+    // Game state
+    int score;
+    int comets_destroyed;
+    double score_multiplier;    // Current multiplier (1.0 - 5.0+)
+    int consecutive_hits;       // Hits without being damage for multiplier
+    int current_wave;
+    int wave_comets;            // Comets destroyed this wave
+    bool game_over;
+    bool game_won;              // Optional: wave complete
+    
+    // Arrays
+    Comet comets[MAX_COMETS];
+    int comet_count;
+    Bullet bullets[MAX_BULLETS];
+    int bullet_count;
+    Particle particles[MAX_PARTICLES];
+    int particle_count;
+    
+    // Timing & difficulty
+    double spawn_timer;         // Seconds until next spawn
+    double base_spawn_rate;     // Seconds between spawns
+    double beat_fire_cooldown;  // Cooldown on beat fire
+    double last_beat_time;
+    bool auto_fire_enabled;
+    double difficulty_timer;    // Tracks when to increase difficulty
+    
+    // Audio data (updated each frame from visualizer)
+    double frequency_bands[3];  // Bass, Mid, Treble [0.0-1.0]
+    double volume_level;        // Current volume [0.0-1.0]
+    
+    // UI & timers
+    bool show_game_over;
+    double game_over_timer;
+    double wave_complete_timer;
+    
+    // Muzzle flash animation
+    double muzzle_flash_timer;
+    
+    // Mouse input for shooting
+    bool mouse_left_pressed;       // Left mouse button state
+    double mouse_fire_cooldown;    // Cooldown between shots
+    
+    // High scores (static array)
+    HighScore high_scores[MAX_HIGH_SCORES];
+    int high_score_count;
+    
+} CometBusterGame;
+
+// Initialization and cleanup
+void init_comet_buster_system(void *vis);
+void comet_buster_cleanup(CometBusterGame *game);
+void comet_buster_reset_game(CometBusterGame *game);
+
+// Main update
+void update_comet_buster(void *vis, double dt);
+
+// Update sub-systems
+void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y);
+void comet_buster_update_comets(CometBusterGame *game, double dt);
+void comet_buster_update_shooting(CometBusterGame *game, double dt);  // New: click-to-shoot
+void comet_buster_update_bullets(CometBusterGame *game, double dt);
+void comet_buster_update_particles(CometBusterGame *game, double dt);
+
+// Spawning
+void comet_buster_spawn_comet(CometBusterGame *game, int frequency_band);
+void comet_buster_spawn_random_comets(CometBusterGame *game, int count);
+void comet_buster_spawn_bullet(CometBusterGame *game);
+void comet_buster_spawn_explosion(CometBusterGame *game, double x, double y, int frequency_band, int particle_count);
+
+// Collision & physics
+bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
+bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
+void comet_buster_destroy_comet(CometBusterGame *game, int comet_index);
+
+// Audio integration
+void comet_buster_fire_on_beat(CometBusterGame *game);
+bool comet_buster_detect_beat(void *vis);
+
+// Difficulty management
+void comet_buster_increase_difficulty(CometBusterGame *game);
+void comet_buster_update_wave_progression(CometBusterGame *game);
+
+// Rendering
+void draw_comet_buster(void *vis, cairo_t *cr);
+void draw_comet_buster_ship(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_comets(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_bullets(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_particles(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_game_over(CometBusterGame *game, cairo_t *cr, int width, int height);
+
+// Helper functions
+void comet_buster_wrap_position(double *x, double *y, int width, int height);
+double comet_buster_distance(double x1, double y1, double x2, double y2);
+void comet_buster_get_frequency_color(int frequency_band, double *r, double *g, double *b);
+
+// High score management
+void comet_buster_load_high_scores(CometBusterGame *game);
+void comet_buster_save_high_scores(CometBusterGame *game);
+void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name);
+bool comet_buster_is_high_score(CometBusterGame *game, int score);
+
+#endif // COMETBUSTER_H

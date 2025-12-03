@@ -122,7 +122,7 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp main.cpp midiplayer.cpp \
 	hanoi.cpp beatchess.cpp beatcheckers.cpp queue.cpp drawfractalbloom.cpp \
 	drawsymmetrycascade.cpp lrc2cdg.cpp drawtrippy.cpp drawwormhole.cpp \
 	drawbd.cpp drawrabbithare.cpp audio_cache.cpp maze3d.cpp drawradialbars.cpp \
-	icon.cpp bouncingcircle.cpp mandelbrot.cpp pong.cpp minesweeper.cpp
+	icon.cpp bouncingcircle.cpp mandelbrot.cpp pong.cpp minesweeper.cpp cometbuster.cpp
 
 # Platform-specific source files
 SOURCES_CPP_LINUX = $(SOURCES_CPP_COMMON) \
