@@ -69,6 +69,21 @@ typedef struct {
 } HighScore;
 
 typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    double angle;               // Direction facing
+    int health;                 // 1 hit = destroyed
+    double shoot_cooldown;      // Time until next shot
+    double path_time;           // Time along sine wave path (for wave motion)
+    double base_vx, base_vy;    // Original velocity direction (for sine calculation)
+    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red)
+    bool active;
+} EnemyShip;
+
+#define MAX_ENEMY_SHIPS 4
+#define MAX_ENEMY_BULLETS 64
+
+typedef struct {
     // Ship state
     double ship_x, ship_y;
     double ship_vx, ship_vy;
@@ -98,6 +113,10 @@ typedef struct {
     int particle_count;
     FloatingText floating_texts[MAX_FLOATING_TEXT];
     int floating_text_count;
+    EnemyShip enemy_ships[MAX_ENEMY_SHIPS];
+    int enemy_ship_count;
+    Bullet enemy_bullets[MAX_ENEMY_BULLETS];
+    int enemy_bullet_count;
     
     // Timing & difficulty
     double spawn_timer;         // Seconds until next spawn
@@ -106,6 +125,8 @@ typedef struct {
     double last_beat_time;
     bool auto_fire_enabled;
     double difficulty_timer;    // Tracks when to increase difficulty
+    double enemy_ship_spawn_timer;  // Time until next enemy ship spawn
+    double enemy_ship_spawn_rate;   // Base rate for enemy ship spawning
     
     // Audio data (updated each frame from visualizer)
     double frequency_bands[3];  // Bass, Mid, Treble [0.0-1.0]
@@ -157,6 +178,8 @@ void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, in
 void comet_buster_update_particles(CometBusterGame *game, double dt);
 void comet_buster_update_floating_text(CometBusterGame *game, double dt);
 void comet_buster_update_fuel(CometBusterGame *game, double dt);  // Advanced thrusters fuel system
+void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height);
 
 // Spawning
 void comet_buster_spawn_comet(CometBusterGame *game, int frequency_band, int screen_width, int screen_height);
@@ -168,6 +191,8 @@ void comet_buster_spawn_bullet(CometBusterGame *game);
 void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game);
 void comet_buster_spawn_explosion(CometBusterGame *game, double x, double y, int frequency_band, int particle_count);
 void comet_buster_spawn_floating_text(CometBusterGame *game, double x, double y, const char *text, double r, double g, double b);
+void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height);
+void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy);
 
 // Collision & physics
 bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
@@ -175,6 +200,9 @@ bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
 void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double dy, 
                                          double dist, double min_dist);
 void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height);
+bool comet_buster_check_bullet_enemy_ship(Bullet *b, EnemyShip *e);
+bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b);
+void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height);
 
 // Audio integration
 void comet_buster_fire_on_beat(CometBusterGame *game);
@@ -192,6 +220,8 @@ void draw_comet_buster_bullets(CometBusterGame *game, cairo_t *cr, int width, in
 void draw_comet_buster_particles(CometBusterGame *game, cairo_t *cr, int width, int height);
 void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int height);
 void draw_comet_buster_game_over(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width, int height);
+void draw_comet_buster_enemy_bullets(CometBusterGame *game, cairo_t *cr, int width, int height);
 
 // Helper functions
 void comet_buster_wrap_position(double *x, double *y, int width, int height);

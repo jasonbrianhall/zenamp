@@ -43,6 +43,8 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->particle_count = 0;
     game->floating_text_count = 0;
     game->high_score_count = 0;
+    game->enemy_ship_count = 0;
+    game->enemy_bullet_count = 0;
     
     // Initialize non-zero values - use defaults, will be set by visualizer if needed
     game->ship_x = 400.0;
@@ -78,6 +80,8 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->beat_fire_cooldown = 0;
     game->last_beat_time = -1;
     game->difficulty_timer = 0;
+    game->enemy_ship_spawn_timer = 5.0;  // Start spawning enemy ships after 5 seconds
+    game->enemy_ship_spawn_rate = 8.0;   // Spawn a new enemy ship every 8 seconds on average
     
     // Mouse state
     game->mouse_left_pressed = false;
@@ -206,6 +210,95 @@ void comet_buster_spawn_random_comets(CometBusterGame *game, int count, int scre
         int band = rand() % 3;
         comet_buster_spawn_comet(game, band, screen_width, screen_height);
     }
+}
+
+// ============================================================================
+// ENEMY SHIP SPAWNING
+// ============================================================================
+
+void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game || game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
+        return;
+    }
+    
+    int slot = game->enemy_ship_count;
+    EnemyShip *ship = &game->enemy_ships[slot];
+    
+    memset(ship, 0, sizeof(EnemyShip));
+    
+    // Random edge to spawn from
+    int edge = rand() % 4;
+    double speed = 80.0 + (rand() % 40);  // 80-120 pixels per second
+    
+    // Randomly decide if this is an aggressive (red) or patrol (blue) ship
+    // 30% chance of aggressive red ship, 70% chance of patrol blue ship
+    ship->ship_type = (rand() % 100 < 30) ? 1 : 0;
+    
+    switch (edge) {
+        case 0:  // From left to right
+            ship->x = -20;
+            ship->y = 50 + (rand() % (screen_height - 100));
+            ship->vx = speed;
+            ship->vy = 0;
+            ship->angle = 0;  // Facing right
+            ship->base_vx = speed;
+            ship->base_vy = 0;
+            break;
+        case 1:  // From right to left
+            ship->x = screen_width + 20;
+            ship->y = 50 + (rand() % (screen_height - 100));
+            ship->vx = -speed;
+            ship->vy = 0;
+            ship->angle = M_PI;  // Facing left
+            ship->base_vx = -speed;
+            ship->base_vy = 0;
+            break;
+        case 2:  // From top to bottom
+            ship->x = 50 + (rand() % (screen_width - 100));
+            ship->y = -20;
+            ship->vx = 0;
+            ship->vy = speed;
+            ship->angle = M_PI / 2;  // Facing down
+            ship->base_vx = 0;
+            ship->base_vy = speed;
+            break;
+        case 3:  // From bottom to top
+            ship->x = 50 + (rand() % (screen_width - 100));
+            ship->y = screen_height + 20;
+            ship->vx = 0;
+            ship->vy = -speed;
+            ship->angle = 3 * M_PI / 2;  // Facing up
+            ship->base_vx = 0;
+            ship->base_vy = -speed;
+            break;
+    }
+    
+    ship->health = 1;
+    ship->shoot_cooldown = 1.0 + (rand() % 20) / 10.0;  // Shoot after 1-3 seconds
+    ship->path_time = 0.0;  // Start at beginning of sine wave
+    ship->active = true;
+    
+    game->enemy_ship_count++;
+}
+
+void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy) {
+    if (!game || game->enemy_bullet_count >= MAX_ENEMY_BULLETS) {
+        return;
+    }
+    
+    int slot = game->enemy_bullet_count;
+    Bullet *bullet = &game->enemy_bullets[slot];
+    
+    bullet->x = x;
+    bullet->y = y;
+    bullet->vx = vx;
+    bullet->vy = vy;
+    bullet->angle = atan2(vy, vx);
+    bullet->lifetime = 10.0;  // Bullets live for 10 seconds
+    bullet->max_lifetime = 10.0;
+    bullet->active = true;
+    
+    game->enemy_bullet_count++;
 }
 
 // ============================================================================
@@ -624,6 +717,193 @@ void comet_buster_update_floating_text(CometBusterGame *game, double dt) {
     }
 }
 
+void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height) {
+    if (!game) return;
+    
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *ship = &game->enemy_ships[i];
+        
+        if (!ship->active) continue;
+        
+        if (ship->ship_type == 1) {
+            // AGGRESSIVE RED SHIP: Chase player
+            double dx = game->ship_x - ship->x;
+            double dy = game->ship_y - ship->y;
+            double dist_to_player = sqrt(dx*dx + dy*dy);
+            
+            if (dist_to_player > 0.1) {
+                // Move toward player at constant speed
+                double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                if (base_speed < 1.0) base_speed = 100.0;  // Default speed if not set
+                
+                ship->vx = (dx / dist_to_player) * base_speed;
+                ship->vy = (dy / dist_to_player) * base_speed;
+                
+                // Update angle to face player
+                ship->angle = atan2(dy, dx);
+            }
+        } else {
+            // PATROL BLUE SHIP: Follow sine wave pattern
+            ship->path_time += dt;
+            
+            double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+            
+            if (base_speed > 0.1) {
+                // Normalize base direction
+                double dir_x = ship->base_vx / base_speed;
+                double dir_y = ship->base_vy / base_speed;
+                
+                // Perpendicular direction (for sine wave oscillation)
+                double perp_x = -dir_y;
+                double perp_y = dir_x;
+                
+                // Sine wave motion (classic Asteroids-style pattern)
+                double wave_amplitude = 50.0;  // Pixels left/right to oscillate
+                double wave_frequency = 1.5;   // Oscillations per second
+                double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
+                
+                // Calculate velocity: base direction + sine wave perpendicular motion
+                ship->vx = dir_x * base_speed + perp_x * sine_offset;
+                ship->vy = dir_y * base_speed + perp_y * sine_offset;
+            }
+        }
+        
+        // Emergency collision avoidance (only when VERY close)
+        double avoid_x = 0.0;
+        double avoid_y = 0.0;
+        double max_avoidance = 0.0;
+        
+        for (int j = 0; j < game->comet_count; j++) {
+            Comet *comet = &game->comets[j];
+            if (!comet->active) continue;
+            
+            double dx = ship->x - comet->x;
+            double dy = ship->y - comet->y;
+            double dist = sqrt(dx*dx + dy*dy);
+            
+            double collision_radius = 50.0;  // Only emergency dodge when very close
+            
+            if (dist < collision_radius && dist > 0.1) {
+                double strength = (1.0 - (dist / collision_radius)) * 0.3;
+                double norm_x = dx / dist;
+                double norm_y = dy / dist;
+                
+                avoid_x += norm_x * strength;
+                avoid_y += norm_y * strength;
+                max_avoidance = (strength > max_avoidance) ? strength : max_avoidance;
+            }
+        }
+        
+        // Apply emergency avoidance only if collision imminent
+        if (max_avoidance > 0.1) {
+            double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+            if (base_speed < 1.0) base_speed = 100.0;
+            
+            double blend_factor = 0.2;
+            ship->vx = ship->vx * (1.0 - blend_factor) + avoid_x * base_speed * blend_factor;
+            ship->vy = ship->vy * (1.0 - blend_factor) + avoid_y * base_speed * blend_factor;
+            
+            // Normalize to maintain base speed
+            double new_speed = sqrt(ship->vx*ship->vx + ship->vy*ship->vy);
+            if (new_speed > 0.1) {
+                ship->vx = (ship->vx / new_speed) * base_speed;
+                ship->vy = (ship->vy / new_speed) * base_speed;
+            }
+        }
+        
+        // Update position
+        ship->x += ship->vx * dt;
+        ship->y += ship->vy * dt;
+        
+        // Remove if goes off screen
+        if (ship->x < -50 || ship->x > width + 50 ||
+            ship->y < -50 || ship->y > height + 50) {
+            ship->active = false;
+            
+            if (i != game->enemy_ship_count - 1) {
+                game->enemy_ships[i] = game->enemy_ships[game->enemy_ship_count - 1];
+            }
+            game->enemy_ship_count--;
+            i--;
+            continue;
+        }
+        
+        // Update shooting
+        ship->shoot_cooldown -= dt;
+        if (ship->shoot_cooldown <= 0) {
+            double dx = game->ship_x - ship->x;
+            double dy = game->ship_y - ship->y;
+            double dist = sqrt(dx*dx + dy*dy);
+            
+            if (dist > 0.01) {
+                double bullet_speed = 150.0;
+                double vx = (dx / dist) * bullet_speed;
+                double vy = (dy / dist) * bullet_speed;
+                
+                comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                
+                // Aggressive ships shoot more frequently
+                if (ship->ship_type == 1) {
+                    ship->shoot_cooldown = 0.3 + (rand() % 50) / 100.0;  // 0.3-0.8 sec (faster)
+                } else {
+                    ship->shoot_cooldown = 0.5 + (rand() % 100) / 100.0;  // 0.5-1.5 sec (normal)
+                }
+            }
+        }
+    }
+    
+    // Spawn new enemy ships randomly
+    if (!game->game_over) {
+        game->enemy_ship_spawn_timer -= dt;
+        if (game->enemy_ship_spawn_timer <= 0) {
+            if (game->enemy_ship_count < MAX_ENEMY_SHIPS) {
+                comet_buster_spawn_enemy_ship(game, width, height);
+            }
+            game->enemy_ship_spawn_timer = game->enemy_ship_spawn_rate + (rand() % 300) / 100.0;
+        }
+    }
+}
+
+void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height) {
+    if (!game) return;
+    
+    for (int i = 0; i < game->enemy_bullet_count; i++) {
+        Bullet *b = &game->enemy_bullets[i];
+        
+        // Update lifetime
+        b->lifetime -= dt;
+        if (b->lifetime <= 0) {
+            b->active = false;
+            
+            // Swap with last bullet
+            if (i != game->enemy_bullet_count - 1) {
+                game->enemy_bullets[i] = game->enemy_bullets[game->enemy_bullet_count - 1];
+            }
+            game->enemy_bullet_count--;
+            i--;
+            continue;
+        }
+        
+        // Update position
+        b->x += b->vx * dt;
+        b->y += b->vy * dt;
+        
+        // Remove if goes off screen
+        if (b->x < -50 || b->x > width + 50 ||
+            b->y < -50 || b->y > height + 50) {
+            b->active = false;
+            
+            // Swap with last
+            if (i != game->enemy_bullet_count - 1) {
+                game->enemy_bullets[i] = game->enemy_bullets[game->enemy_bullet_count - 1];
+            }
+            game->enemy_bullet_count--;
+            i--;
+            continue;
+        }
+    }
+}
+
 void comet_buster_update_shooting(CometBusterGame *game, double dt) {
     if (!game || game->game_over) return;
     
@@ -735,6 +1015,8 @@ void update_comet_buster(void *vis, double dt) {
     comet_buster_update_bullets(game, dt, width, height);
     comet_buster_update_particles(game, dt);
     comet_buster_update_floating_text(game, dt);  // Update floating text popups
+    comet_buster_update_enemy_ships(game, dt, width, height);  // Update enemy ships
+    comet_buster_update_enemy_bullets(game, dt, width, height);  // Update enemy bullets
     
     // Update fuel system
     comet_buster_update_fuel(game, dt);
@@ -761,6 +1043,24 @@ void update_comet_buster(void *vis, double dt) {
     // Check ship-comet collisions
     for (int i = 0; i < game->comet_count; i++) {
         if (comet_buster_check_ship_comet(game, &game->comets[i])) {
+            comet_buster_on_ship_hit(game, visualizer);
+        }
+    }
+    
+    // Check bullet-enemy ship collisions
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        for (int j = 0; j < game->bullet_count; j++) {
+            if (comet_buster_check_bullet_enemy_ship(&game->bullets[j], &game->enemy_ships[i])) {
+                comet_buster_destroy_enemy_ship(game, i, width, height);
+                game->bullets[j].active = false;  // Bullet is consumed
+                break;
+            }
+        }
+    }
+    
+    // Check enemy bullet-ship collisions
+    for (int i = 0; i < game->enemy_bullet_count; i++) {
+        if (comet_buster_check_enemy_bullet_ship(game, &game->enemy_bullets[i])) {
             comet_buster_on_ship_hit(game, visualizer);
         }
     }
@@ -852,6 +1152,26 @@ bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c) {
     double dist = sqrt(dx*dx + dy*dy);
     
     return dist < (c->radius + 15.0);
+}
+
+bool comet_buster_check_bullet_enemy_ship(Bullet *b, EnemyShip *e) {
+    if (!b->active || !e->active) return false;
+    
+    double dx = b->x - e->x;
+    double dy = b->y - e->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    
+    return dist < 15.0;  // Enemy ship collision radius is 15 pixels
+}
+
+bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b) {
+    if (!b->active) return false;
+    
+    double dx = game->ship_x - b->x;
+    double dy = game->ship_y - b->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    
+    return dist < 15.0;  // Player ship collision radius
 }
 
 void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height) {
@@ -984,6 +1304,41 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     game->comet_count--;
 }
 
+void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height) {
+    (void)width;
+    (void)height;
+    if (ship_index < 0 || ship_index >= game->enemy_ship_count) return;
+    
+    EnemyShip *ship = &game->enemy_ships[ship_index];
+    if (!ship->active) return;
+    
+    // Create explosion
+    comet_buster_spawn_explosion(game, ship->x, ship->y, 1, 12);  // Mid-frequency explosion
+    
+    // Award points
+    int points = 300;  // Enemy ships worth 300 points
+    int score_add = (int)(points * game->score_multiplier);
+    game->score += score_add;
+    game->consecutive_hits++;
+    
+    // Floating text
+    char text[32];
+    snprintf(text, sizeof(text), "+%d", score_add);
+    comet_buster_spawn_floating_text(game, ship->x, ship->y, text, 0.0, 1.0, 0.0);  // Green
+    
+    // Increase multiplier
+    if (game->consecutive_hits % 5 == 0) {
+        game->score_multiplier += 0.1;
+        if (game->score_multiplier > 5.0) game->score_multiplier = 5.0;
+    }
+    
+    // Swap with last and remove
+    if (ship_index != game->enemy_ship_count - 1) {
+        game->enemy_ships[ship_index] = game->enemy_ships[game->enemy_ship_count - 1];
+    }
+    game->enemy_ship_count--;
+}
+
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
     if (game->invulnerability_time > 0) return;
     
@@ -1096,6 +1451,8 @@ void draw_comet_buster(void *vis, cairo_t *cr) {
     // Draw game elements
     draw_comet_buster_comets(game, cr, width, height);
     draw_comet_buster_bullets(game, cr, width, height);
+    draw_comet_buster_enemy_ships(game, cr, width, height);
+    draw_comet_buster_enemy_bullets(game, cr, width, height);
     draw_comet_buster_particles(game, cr, width, height);
     draw_comet_buster_ship(game, cr, width, height);
     
@@ -1302,6 +1659,80 @@ void draw_comet_buster_bullets(CometBusterGame *game, cairo_t *cr, int width, in
             cairo_move_to(cr, trail_x, trail_y);
             cairo_line_to(cr, b->x, b->y);
             cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, 0.3);
+            cairo_set_line_width(cr, 0.5);
+            cairo_stroke(cr);
+        }
+    }
+}
+
+void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width, int height) {
+    if (!game) return;
+    (void)width;    // Suppress unused parameter warning
+    (void)height;   // Suppress unused parameter warning
+    
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *ship = &game->enemy_ships[i];
+        
+        if (!ship->active) continue;
+        
+        // Draw enemy ship as a triangle (pointing in direction angle)
+        cairo_save(cr);
+        cairo_translate(cr, ship->x, ship->y);
+        cairo_rotate(cr, ship->angle);
+        
+        // Choose color based on ship type
+        if (ship->ship_type == 1) {
+            // Aggressive red ship
+            cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);  // Bright red
+        } else {
+            // Patrol blue ship
+            cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);  // Blue
+        }
+        
+        cairo_set_line_width(cr, 1.5);
+        
+        // Draw ship body as triangle
+        double ship_size = 12;
+        cairo_move_to(cr, ship_size, 0);              // Front point
+        cairo_line_to(cr, -ship_size, -ship_size/1.5);  // Back left
+        cairo_line_to(cr, -ship_size, ship_size/1.5);   // Back right
+        cairo_close_path(cr);
+        cairo_fill_preserve(cr);
+        cairo_stroke(cr);
+        
+        // Draw health indicator (single bar at top of ship)
+        cairo_set_source_rgb(cr, 0.2, 1.0, 0.2);  // Green
+        cairo_set_line_width(cr, 1.0);
+        cairo_move_to(cr, ship_size - 5, -ship_size - 3);
+        cairo_line_to(cr, ship_size - 5, -ship_size);
+        cairo_stroke(cr);
+        
+        cairo_restore(cr);
+    }
+}
+
+void draw_comet_buster_enemy_bullets(CometBusterGame *game, cairo_t *cr, int width, int height) {
+    if (!game) return;
+    (void)width;    // Suppress unused parameter warning
+    (void)height;   // Suppress unused parameter warning
+    
+    for (int i = 0; i < game->enemy_bullet_count; i++) {
+        Bullet *b = &game->enemy_bullets[i];
+        
+        // Draw enemy bullets as small cyan circles (different from player's yellow)
+        cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);  // Cyan - very distinct from yellow
+        cairo_arc(cr, b->x, b->y, 2.5, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+        
+        // Draw trail
+        double trail_length = 4.0;
+        double norm_len = sqrt(b->vx*b->vx + b->vy*b->vy);
+        if (norm_len > 0.1) {
+            double trail_x = b->x - (b->vx / norm_len) * trail_length;
+            double trail_y = b->y - (b->vy / norm_len) * trail_length;
+            cairo_move_to(cr, trail_x, trail_y);
+            cairo_line_to(cr, b->x, b->y);
+            cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, 0.3);  // Cyan trail
             cairo_set_line_width(cr, 0.5);
             cairo_stroke(cr);
         }
