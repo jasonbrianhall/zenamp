@@ -177,16 +177,17 @@ void visualizer_free(Visualizer *vis) {
 static gboolean is_interactive_game(VisualizationType type) {
     switch (type) {
         // Interactive games that should never stop and maintain 30 FPS
-        case VIS_BUBBLES:
-        case VIS_MATRIX:
         case VIS_BEAT_CHESS:
         case VIS_BEAT_CHECKERS:
-        case VIS_PONG:
-        case VIS_RIPPLES:
-        case VIS_RABBITHARE:
-        case VIS_FIREWORKS:
         case VIS_BOUNCY_BALLS:
+        case VIS_BUBBLES:
+        case VIS_COMET_BUSTER:
+        case VIS_FIREWORKS:
+        case VIS_MATRIX:
         case VIS_MINESWEEPER:
+        case VIS_PONG:
+        case VIS_RABBITHARE:
+        case VIS_RIPPLES:
             return TRUE;
         default:
             return FALSE;

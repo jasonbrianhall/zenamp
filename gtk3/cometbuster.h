@@ -9,6 +9,7 @@
 #define MAX_COMETS 32
 #define MAX_BULLETS 128
 #define MAX_PARTICLES 512
+#define MAX_FLOATING_TEXT 32
 #define MAX_HIGH_SCORES 10
 
 typedef enum {
@@ -52,6 +53,15 @@ typedef struct {
 } Particle;
 
 typedef struct {
+    double x, y;                // Position
+    double lifetime;            // Seconds remaining
+    double max_lifetime;
+    char text[64];              // Text to display
+    double color[3];            // RGB
+    bool active;
+} FloatingText;
+
+typedef struct {
     int score;
     int wave;
     char player_name[32];       // Static string buffer
@@ -75,6 +85,7 @@ typedef struct {
     int consecutive_hits;       // Hits without being damage for multiplier
     int current_wave;
     int wave_comets;            // Comets destroyed this wave
+    int last_life_milestone;    // Last score milestone where extra life was granted (5000, 10000, etc.)
     bool game_over;
     bool game_won;              // Optional: wave complete
     
@@ -85,6 +96,8 @@ typedef struct {
     int bullet_count;
     Particle particles[MAX_PARTICLES];
     int particle_count;
+    FloatingText floating_texts[MAX_FLOATING_TEXT];
+    int floating_text_count;
     
     // Timing & difficulty
     double spawn_timer;         // Seconds until next spawn
@@ -110,6 +123,18 @@ typedef struct {
     bool mouse_left_pressed;       // Left mouse button state
     double mouse_fire_cooldown;    // Cooldown between shots
     
+    // Advanced thrusters (right-click)
+    bool mouse_right_pressed;      // Right mouse button state
+    bool mouse_middle_pressed;     // Middle mouse button state (omnidirectional fire)
+    double omni_fire_cooldown;     // Cooldown for omnidirectional fire
+    double fuel_amount;            // Current fuel [0.0 - 100.0]
+    double max_fuel;               // Maximum fuel capacity
+    double fuel_burn_rate;         // Fuel burned per second at max thrust
+    double fuel_recharge_rate;     // Fuel recharged per second when not boosting
+    double boost_multiplier;       // Speed multiplier when boosting (e.g., 2.0x)
+    bool is_boosting;              // Currently using advanced thrusters
+    double boost_thrust_timer;     // Visual effect timer for boosting
+    
     // High scores (static array)
     HighScore high_scores[MAX_HIGH_SCORES];
     int high_score_count;
@@ -125,22 +150,31 @@ void comet_buster_reset_game(CometBusterGame *game);
 void update_comet_buster(void *vis, double dt);
 
 // Update sub-systems
-void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y);
-void comet_buster_update_comets(CometBusterGame *game, double dt);
+void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height);
+void comet_buster_update_comets(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_update_shooting(CometBusterGame *game, double dt);  // New: click-to-shoot
-void comet_buster_update_bullets(CometBusterGame *game, double dt);
+void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_update_particles(CometBusterGame *game, double dt);
+void comet_buster_update_floating_text(CometBusterGame *game, double dt);
+void comet_buster_update_fuel(CometBusterGame *game, double dt);  // Advanced thrusters fuel system
 
 // Spawning
-void comet_buster_spawn_comet(CometBusterGame *game, int frequency_band);
-void comet_buster_spawn_random_comets(CometBusterGame *game, int count);
+void comet_buster_spawn_comet(CometBusterGame *game, int frequency_band, int screen_width, int screen_height);
+void comet_buster_spawn_random_comets(CometBusterGame *game, int count, int screen_width, int screen_height);
+void comet_buster_spawn_wave(CometBusterGame *game, int screen_width, int screen_height);
+int comet_buster_get_wave_comet_count(int wave);
+double comet_buster_get_wave_speed_multiplier(int wave);
 void comet_buster_spawn_bullet(CometBusterGame *game);
+void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game);
 void comet_buster_spawn_explosion(CometBusterGame *game, double x, double y, int frequency_band, int particle_count);
+void comet_buster_spawn_floating_text(CometBusterGame *game, double x, double y, const char *text, double r, double g, double b);
 
 // Collision & physics
 bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
 bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
-void comet_buster_destroy_comet(CometBusterGame *game, int comet_index);
+void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double dy, 
+                                         double dist, double min_dist);
+void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height);
 
 // Audio integration
 void comet_buster_fire_on_beat(CometBusterGame *game);
