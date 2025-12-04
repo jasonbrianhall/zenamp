@@ -16,7 +16,8 @@ typedef enum {
     COMET_SMALL = 0,
     COMET_MEDIUM = 1,
     COMET_LARGE = 2,
-    COMET_SPECIAL = 3
+    COMET_SPECIAL = 3,
+    COMET_MEGA = 4
 } CometSize;
 
 typedef struct {
@@ -76,7 +77,7 @@ typedef struct {
     double shoot_cooldown;      // Time until next shot
     double path_time;           // Time along sine wave path (for wave motion)
     double base_vx, base_vy;    // Original velocity direction (for sine calculation)
-    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red)
+    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green)
     bool active;
 } EnemyShip;
 
