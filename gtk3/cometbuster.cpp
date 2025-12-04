@@ -18,20 +18,13 @@
 void init_comet_buster_system(void *vis) {
     Visualizer *visualizer = (Visualizer *)vis;
     
-    comet_buster_reset_game(&visualizer->comet_buster);
-    
-    printf("Comet Buster system initialized (STATIC MEMORY)\n");
-    printf("Memory usage: %zu bytes per game\n", sizeof(CometBusterGame));
-    printf("Max objects: %d comets, %d bullets, %d particles\n",
-           MAX_COMETS, MAX_BULLETS, MAX_PARTICLES);
+    comet_buster_reset_game(&visualizer->comet_buster);    
 }
 
 void comet_buster_cleanup(CometBusterGame *game) {
     if (!game) return;
     
     memset(game, 0, sizeof(CometBusterGame));
-    
-    printf("Comet Buster cleaned up (all static memory zeroed)\n");
 }
 
 void comet_buster_reset_game(CometBusterGame *game) {
@@ -369,8 +362,6 @@ void comet_buster_update_wave_progression(CometBusterGame *game) {
     // Only trigger if we're not already in countdown (wave_complete_timer == 0)
     if (game->comet_count == 0 && game->wave_complete_timer == 0) {
         // All comets destroyed - start countdown to next wave
-        printf("WAVE %d COMPLETE! Spawning Wave %d in 2.0 seconds...\n", 
-               game->current_wave, game->current_wave + 1);
         game->wave_complete_timer = 2.0;  // 2 second delay before next wave
     }
 }
@@ -916,28 +907,15 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
     if (game->omni_fire_cooldown > 0) {
         game->omni_fire_cooldown -= dt;
     }
-    
-    // DEBUG: Print state
-    static int debug_frame = 0;
-    if (debug_frame++ % 60 == 0) {  // Print every 60 frames (~1 sec at 60 FPS)
-        printf("Comet Buster: mouse_left_pressed=%d, fire_cooldown=%.3f, bullets=%d, fuel=%.0f\n",
-               game->mouse_left_pressed, game->mouse_fire_cooldown, game->bullet_count, game->fuel_amount);
-    }
-    
+        
     // If left mouse button is held down, fire continuously (costs fuel)
     if (game->mouse_left_pressed) {
         if (game->mouse_fire_cooldown <= 0) {
             // Normal fire costs 0.25 fuel per bullet
             if (game->fuel_amount >= 0.25) {
-                printf("  >> FIRING BULLET (cooldown: %.3f, fuel: %.1f)\n", game->mouse_fire_cooldown, game->fuel_amount);
                 comet_buster_spawn_bullet(game);
                 game->fuel_amount -= 0.25;  // Consume 0.25 fuel
                 game->mouse_fire_cooldown = 0.05;  // ~20 bullets per second
-            } else {
-                // Can't fire without fuel
-                if (debug_frame % 60 == 0) {  // Only print occasionally to avoid spam
-                    printf("  >> NOT ENOUGH FUEL FOR NORMAL FIRE (need 0.25, have %.1f)\n", game->fuel_amount);
-                }
             }
         }
     }
@@ -946,11 +924,8 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
     if (game->mouse_middle_pressed) {
         if (game->omni_fire_cooldown <= 0) {
             if (game->fuel_amount >= 30) {
-                printf("  >> OMNIDIRECTIONAL FIRE! (fuel: %.0f)\n", game->fuel_amount);
                 comet_buster_spawn_omnidirectional_fire(game);
                 game->omni_fire_cooldown = 0.3;  // Slower than normal fire
-            } else {
-                printf("  >> NOT ENOUGH FUEL FOR OMNIDIRECTIONAL FIRE (need 30, have %.0f)\n", game->fuel_amount);
             }
         }
     }
@@ -1034,7 +1009,6 @@ void update_comet_buster(void *vis, double dt) {
             if (game->comet_count == 0) {
                 game->current_wave++;  // Increment AFTER timer expires
                 comet_buster_spawn_wave(game, width, height);
-                printf("Spawning Wave %d\n", game->current_wave);
             }
             game->wave_complete_timer = 0;
         }
@@ -1073,7 +1047,6 @@ void update_comet_buster(void *vis, double dt) {
         
         // Handle right-click restart
         if (game->mouse_right_pressed) {
-            printf("Restarting game...\n");
             comet_buster_reset_game(game);
         }
     }
@@ -1208,7 +1181,6 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     if (current_milestone > game->last_life_milestone) {
         game->ship_lives++;
         game->last_life_milestone = current_milestone;
-        printf("* EXTRA LIFE! Lives now: %d (Score: %d)\n", game->ship_lives, game->score);
         
         // Spawn floating text popup
         char text[32];
