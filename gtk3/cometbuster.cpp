@@ -37,7 +37,12 @@ void comet_buster_cleanup(CometBusterGame *game) {
 void comet_buster_reset_game(CometBusterGame *game) {
     if (!game) return;
     
-    memset(game, 0, sizeof(CometBusterGame));
+    // Clear arrays explicitly instead of memset to avoid compiler warnings
+    game->comet_count = 0;
+    game->bullet_count = 0;
+    game->particle_count = 0;
+    game->floating_text_count = 0;
+    game->high_score_count = 0;
     
     // Initialize non-zero values - use defaults, will be set by visualizer if needed
     game->ship_x = 400.0;
@@ -438,36 +443,40 @@ void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int
         game->ship_angle = target_angle;
     }
     
-    // Movement based on mouse distance
-    double mouse_dist = sqrt(dx*dx + dy*dy);
-    double max_dist = 400.0;
-    
-    double acceleration = 1.0;
-    if (mouse_dist < 50.0) {
-        acceleration = 0.1;
-    } else if (mouse_dist > max_dist) {
-        acceleration = 2.0;
-    } else {
-        acceleration = 1.0 + (mouse_dist / max_dist) * 1.5;
-    }
-    
-    double accel_magnitude = acceleration * 200.0;
-    
-    // Apply boost multiplier if right-click is held and fuel available
-    double speed_multiplier = 1.0;
+    // Right-click boost: accelerate forward in ship's facing direction
     if (game->mouse_right_pressed && game->fuel_amount > 0) {
         game->is_boosting = true;
-        speed_multiplier = game->boost_multiplier;
-        game->boost_thrust_timer = 0.1;  // Visual effect duration
+        
+        // Use ship's facing angle - completely ignore mouse
+        double boost_vx = cos(game->ship_angle) * 500.0 * game->boost_multiplier;
+        double boost_vy = sin(game->ship_angle) * 500.0 * game->boost_multiplier;
+        
+        game->ship_vx += boost_vx * dt;
+        game->ship_vy += boost_vy * dt;
     } else {
         game->is_boosting = false;
-    }
-    
-    accel_magnitude *= speed_multiplier;
-    
-    if (mouse_dist > 0.1) {
-        game->ship_vx += (dx / mouse_dist) * accel_magnitude * dt;
-        game->ship_vy += (dy / mouse_dist) * accel_magnitude * dt;
+        
+        // Normal movement: based on mouse distance
+        double dx = mouse_x - game->ship_x;
+        double dy = mouse_y - game->ship_y;
+        double mouse_dist = sqrt(dx*dx + dy*dy);
+        double max_dist = 400.0;
+        
+        double acceleration = 1.0;
+        if (mouse_dist < 50.0) {
+            acceleration = 0.1;
+        } else if (mouse_dist > max_dist) {
+            acceleration = 2.0;
+        } else {
+            acceleration = 1.0 + (mouse_dist / max_dist) * 1.5;
+        }
+        
+        double accel_magnitude = acceleration * 200.0;
+        
+        if (mouse_dist > 0.1) {
+            game->ship_vx += (dx / mouse_dist) * accel_magnitude * dt;
+            game->ship_vy += (dy / mouse_dist) * accel_magnitude * dt;
+        }
     }
     
     // Friction (slightly more with boost for balance)
@@ -761,6 +770,12 @@ void update_comet_buster(void *vis, double dt) {
     game->difficulty_timer -= dt;
     if (game->game_over) {
         game->game_over_timer -= dt;
+        
+        // Handle right-click restart
+        if (game->mouse_right_pressed) {
+            printf("Restarting game...\n");
+            comet_buster_reset_game(game);
+        }
     }
 }
 
@@ -868,16 +883,16 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     game->comets_destroyed++;
     game->consecutive_hits++;
     
-    // Check for extra life bonus every 5000 points
-    int current_milestone = game->score / 5000;
+    // Check for extra life bonus - every 10000 points
+    int current_milestone = game->score / 10000;
     if (current_milestone > game->last_life_milestone) {
         game->ship_lives++;
         game->last_life_milestone = current_milestone;
-        printf("★ EXTRA LIFE! Lives now: %d (Score: %d)\n", game->ship_lives, game->score);
+        printf("* EXTRA LIFE! Lives now: %d (Score: %d)\n", game->ship_lives, game->score);
         
         // Spawn floating text popup
         char text[32];
-        snprintf(text, sizeof(text), "★ +1 LIFE ★");
+        snprintf(text, sizeof(text), "* +1 LIFE *");
         comet_buster_spawn_floating_text(game, game->ship_x, game->ship_y - 30, text, 1.0, 1.0, 0.0);  // Yellow
     }
     
@@ -1010,7 +1025,13 @@ void comet_buster_load_high_scores(CometBusterGame *game) {
     if (!game) return;
     
     game->high_score_count = 0;
-    memset(game->high_scores, 0, sizeof(game->high_scores));
+    // Initialize high scores array
+    for (int i = 0; i < MAX_HIGH_SCORES; i++) {
+        game->high_scores[i].score = 0;
+        game->high_scores[i].wave = 0;
+        game->high_scores[i].timestamp = 0;
+        game->high_scores[i].player_name[0] = '\0';
+    }
 }
 
 void comet_buster_save_high_scores(CometBusterGame *game) {
@@ -1357,8 +1378,8 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
     
     char text[256];
     
-    // Score
-    sprintf(text, "SCORE: %d", game->score);
+    // Score (with multiplier indicator)
+    sprintf(text, "SCORE: %d (x%.1f)", game->score, game->score_multiplier);
     cairo_move_to(cr, 20, 30);
     cairo_show_text(cr, text);
     
@@ -1399,6 +1420,24 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
         cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
         cairo_set_font_size(cr, 18);
     }
+    
+    // Render floating text popups
+    cairo_set_font_size(cr, 24);
+    for (int i = 0; i < game->floating_text_count; i++) {
+        FloatingText *ft = &game->floating_texts[i];
+        if (ft->active) {
+            // Calculate fade (alpha) based on remaining lifetime
+            double alpha = ft->lifetime / ft->max_lifetime;
+            
+            // Set color with fade
+            cairo_set_source_rgba(cr, ft->color[0], ft->color[1], ft->color[2], alpha);
+            
+            // Draw text centered at position
+            cairo_move_to(cr, ft->x - 30, ft->y);
+            cairo_show_text(cr, ft->text);
+        }
+    }
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);  // Reset to white
     
     // Fuel bar (bottom left)
     cairo_set_font_size(cr, 14);
