@@ -229,9 +229,10 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     
     memset(ship, 0, sizeof(EnemyShip));
     
-    // Random edge to spawn from
-    int edge = rand() % 4;
+    // Random edge to spawn from (now includes diagonals)
+    int edge = rand() % 8;
     double speed = 80.0 + (rand() % 40);  // 80-120 pixels per second
+    double diagonal_speed = speed / sqrt(2);  // Normalize diagonal speed
     
     // Randomly decide ship type:
     // 25% chance of aggressive red ship (attacks player)
@@ -282,6 +283,42 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
             ship->angle = 3 * M_PI / 2;  // Facing up
             ship->base_vx = 0;
             ship->base_vy = -speed;
+            break;
+        case 4:  // From top-left to bottom-right (diagonal)
+            ship->x = -20;
+            ship->y = -20;
+            ship->vx = diagonal_speed;
+            ship->vy = diagonal_speed;
+            ship->angle = atan2(diagonal_speed, diagonal_speed);  // 45 degrees
+            ship->base_vx = diagonal_speed;
+            ship->base_vy = diagonal_speed;
+            break;
+        case 5:  // From top-right to bottom-left (diagonal)
+            ship->x = screen_width + 20;
+            ship->y = -20;
+            ship->vx = -diagonal_speed;
+            ship->vy = diagonal_speed;
+            ship->angle = atan2(diagonal_speed, -diagonal_speed);  // 135 degrees
+            ship->base_vx = -diagonal_speed;
+            ship->base_vy = diagonal_speed;
+            break;
+        case 6:  // From bottom-left to top-right (diagonal)
+            ship->x = -20;
+            ship->y = screen_height + 20;
+            ship->vx = diagonal_speed;
+            ship->vy = -diagonal_speed;
+            ship->angle = atan2(-diagonal_speed, diagonal_speed);  // 315 degrees
+            ship->base_vx = diagonal_speed;
+            ship->base_vy = -diagonal_speed;
+            break;
+        case 7:  // From bottom-right to top-left (diagonal)
+            ship->x = screen_width + 20;
+            ship->y = screen_height + 20;
+            ship->vx = -diagonal_speed;
+            ship->vy = -diagonal_speed;
+            ship->angle = atan2(-diagonal_speed, -diagonal_speed);  // 225 degrees
+            ship->base_vx = -diagonal_speed;
+            ship->base_vy = -diagonal_speed;
             break;
     }
     
@@ -922,8 +959,30 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 }
             }
         } else if (ship->ship_type == 2) {
-            // GREEN SHIPS: Shoot at nearest comet VERY fast
-            if (game->comet_count > 0) {
+            // GREEN SHIPS: Shoot at nearest comet VERY fast, OR at player if close
+            double chase_range = 300.0;  // Range to start shooting at player
+            double dx_player = game->ship_x - ship->x;
+            double dy_player = game->ship_y - ship->y;
+            double dist_to_player = sqrt(dx_player*dx_player + dy_player*dy_player);
+            
+            // Check if player is within range
+            if (dist_to_player < chase_range) {
+                // Shoot at player
+                ship->shoot_cooldown -= dt;
+                if (ship->shoot_cooldown <= 0) {
+                    if (dist_to_player > 0.01) {
+                        double bullet_speed = 150.0;
+                        double vx = (dx_player / dist_to_player) * bullet_speed;
+                        double vy = (dy_player / dist_to_player) * bullet_speed;
+                        
+                        comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                        
+                        // Green ships shoot VERY fast at player too
+                        ship->shoot_cooldown = 0.15 + (rand() % 25) / 100.0;  // 0.15-0.4 sec (very fast!)
+                    }
+                }
+            } else if (game->comet_count > 0) {
+                // Player not in range, shoot at nearest comet instead
                 ship->shoot_cooldown -= dt;
                 if (ship->shoot_cooldown <= 0) {
                     // Find nearest comet
@@ -1247,17 +1306,24 @@ void update_comet_buster(void *vis, double dt) {
             if (comet_buster_check_bullet_enemy_ship(&game->bullets[j], &game->enemy_ships[i])) {
                 EnemyShip *enemy = &game->enemy_ships[i];
                 
-                // Check if enemy has shield
-                if (enemy->shield_health > 0) {
-                    // Shield absorbs the bullet
-                    enemy->shield_health--;
-                    enemy->shield_impact_angle = atan2(enemy->y - game->bullets[j].y, 
-                                                        enemy->x - game->bullets[j].x);
-                    enemy->shield_impact_timer = 0.2;
-                } else {
-                    // No shield, destroy the ship
-                    comet_buster_destroy_enemy_ship(game, i, width, height);
+                // Check if this is a blue (patrol) ship that hasn't been provoked yet
+                bool was_provoked = comet_buster_hit_enemy_ship_provoke(game, i);
+                
+                if (!was_provoked) {
+                    // Not a blue ship, or already provoked - normal damage system
+                    // Check if enemy has shield
+                    if (enemy->shield_health > 0) {
+                        // Shield absorbs the bullet
+                        enemy->shield_health--;
+                        enemy->shield_impact_angle = atan2(enemy->y - game->bullets[j].y, 
+                                                            enemy->x - game->bullets[j].x);
+                        enemy->shield_impact_timer = 0.2;
+                    } else {
+                        // No shield, destroy the ship
+                        comet_buster_destroy_enemy_ship(game, i, width, height);
+                    }
                 }
+                // If it was provoked, the bullet just triggers the provocation but doesn't destroy it
                 
                 game->bullets[j].active = false;  // Bullet is consumed either way
                 break;
@@ -1462,8 +1528,8 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     game->comets_destroyed++;
     game->consecutive_hits++;
     
-    // Check for extra life bonus - every 10000 points
-    int current_milestone = game->score / 10000;
+    // Check for extra life bonus - every 100000 points
+    int current_milestone = game->score / 100000;
     if (current_milestone > game->last_life_milestone) {
         game->ship_lives++;
         game->last_life_milestone = current_milestone;
@@ -2478,6 +2544,37 @@ void draw_comet_buster_game_over(CometBusterGame *game, cairo_t *cr, int width, 
     cairo_set_font_size(cr, 18);
     cairo_move_to(cr, width / 2 - 100, height / 2 + 100);
     cairo_show_text(cr, "RIGHT CLICK to restart");
+}
+
+// ============================================================================
+// PROVOKE BLUE SHIPS - Convert patrol to aggressive when hit
+// ============================================================================
+
+bool comet_buster_hit_enemy_ship_provoke(CometBusterGame *game, int ship_index) {
+    if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) {
+        return false;
+    }
+    
+    EnemyShip *ship = &game->enemy_ships[ship_index];
+    
+    // If this is a patrol (blue) ship, convert it to aggressive
+    if (ship->ship_type == 0) {
+        ship->ship_type = 1;  // Change to aggressive ship (red)
+        ship->max_shield_health = 3;  // Boost its shield
+        if (ship->shield_health < 3) {
+            ship->shield_health = 3;  // Restore full shield
+        }
+        ship->shoot_cooldown = 0.0;  // Immediately start shooting
+        
+        // Spawn visual indicator that ship became angry
+        char anger_text[64];
+        sprintf(anger_text, "PROVOKED!");
+        comet_buster_spawn_floating_text(game, ship->x, ship->y, anger_text, 1.0, 0.2, 0.2);
+        
+        return true;  // Successfully provoked
+    }
+    
+    return false;  // Already aggressive or different type
 }
 
 // ============================================================================

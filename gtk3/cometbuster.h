@@ -220,6 +220,7 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
 bool comet_buster_check_bullet_enemy_ship(Bullet *b, EnemyShip *e);
 bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b);
 void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height);
+bool comet_buster_hit_enemy_ship_provoke(CometBusterGame *game, int ship_index);  // New: provoke blue ships
 
 // Audio integration
 void comet_buster_fire_on_beat(CometBusterGame *game);
