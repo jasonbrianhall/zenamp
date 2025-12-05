@@ -290,6 +290,24 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     ship->path_time = 0.0;  // Start at beginning of sine wave
     ship->active = true;
     
+    // Shield system for enemy ships (varies by type)
+    if (ship->ship_type == 1) {
+        // Red ships (aggressive): 2 shield points
+        ship->max_shield_health = 2;
+        ship->shield_health = 2;
+    } else if (ship->ship_type == 2) {
+        // Green ships (hunter): 3 shield points
+        ship->max_shield_health = 3;
+        ship->shield_health = 3;
+    } else {
+        // Blue ships (patrol): 3 shield points
+        ship->max_shield_health = 3;
+        ship->shield_health = 3;
+    }
+    
+    ship->shield_impact_timer = 0;
+    ship->shield_impact_angle = 0;
+    
     game->enemy_ship_count++;
 }
 
@@ -734,6 +752,11 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
         EnemyShip *ship = &game->enemy_ships[i];
         
         if (!ship->active) continue;
+        
+        // Update shield impact timer
+        if (ship->shield_impact_timer > 0) {
+            ship->shield_impact_timer -= dt;
+        }
         
         if (ship->ship_type == 1) {
             // AGGRESSIVE RED SHIP: Chase player
@@ -1222,8 +1245,21 @@ void update_comet_buster(void *vis, double dt) {
     for (int i = 0; i < game->enemy_ship_count; i++) {
         for (int j = 0; j < game->bullet_count; j++) {
             if (comet_buster_check_bullet_enemy_ship(&game->bullets[j], &game->enemy_ships[i])) {
-                comet_buster_destroy_enemy_ship(game, i, width, height);
-                game->bullets[j].active = false;  // Bullet is consumed
+                EnemyShip *enemy = &game->enemy_ships[i];
+                
+                // Check if enemy has shield
+                if (enemy->shield_health > 0) {
+                    // Shield absorbs the bullet
+                    enemy->shield_health--;
+                    enemy->shield_impact_angle = atan2(enemy->y - game->bullets[j].y, 
+                                                        enemy->x - game->bullets[j].x);
+                    enemy->shield_impact_timer = 0.2;
+                } else {
+                    // No shield, destroy the ship
+                    comet_buster_destroy_enemy_ship(game, i, width, height);
+                }
+                
+                game->bullets[j].active = false;  // Bullet is consumed either way
                 break;
             }
         }
@@ -1268,9 +1304,19 @@ void update_comet_buster(void *vis, double dt) {
             double collision_dist = 30.0 + comet->radius;  // Ship radius ~ 30px
             
             if (dist < collision_dist) {
-                // Ship dies on comet collision
-                comet_buster_destroy_enemy_ship(game, i, width, height);
-                // Comet takes damage as if hit by bullet
+                // Check if ship has shield
+                if (ship->shield_health > 0) {
+                    // Shield absorbs the comet impact
+                    ship->shield_health--;
+                    ship->shield_impact_angle = atan2(ship->y - comet->y, 
+                                                       ship->x - comet->x);
+                    ship->shield_impact_timer = 0.2;
+                } else {
+                    // No shield, ship is destroyed
+                    comet_buster_destroy_enemy_ship(game, i, width, height);
+                }
+                
+                // Comet is destroyed either way
                 comet_buster_destroy_comet(game, j, width, height);
                 break;
             }
@@ -2074,6 +2120,47 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
         cairo_stroke(cr);
         
         cairo_restore(cr);
+        
+        // Draw shield circle around enemy ship if it has shields
+        if (ship->shield_health > 0) {
+            cairo_save(cr);
+            cairo_translate(cr, ship->x, ship->y);
+            
+            // Shield color based on ship type
+            if (ship->ship_type == 1) {
+                // Red ship shield: orange/red
+                cairo_set_source_rgba(cr, 1.0, 0.5, 0.0, 0.5);
+            } else if (ship->ship_type == 2) {
+                // Green ship shield: bright green
+                cairo_set_source_rgba(cr, 0.5, 1.0, 0.5, 0.5);
+            } else {
+                // Blue ship: no shield (shouldn't reach here)
+                cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.5);
+            }
+            
+            cairo_set_line_width(cr, 2.0);
+            cairo_arc(cr, 0, 0, 22, 0, 2 * M_PI);
+            cairo_stroke(cr);
+            
+            // Draw shield impact flash
+            if (ship->shield_impact_timer > 0) {
+                double impact_x = 22 * cos(ship->shield_impact_angle);
+                double impact_y = 22 * sin(ship->shield_impact_angle);
+                double flash_alpha = ship->shield_impact_timer / 0.2;
+                
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, flash_alpha * 0.8);
+                cairo_arc(cr, impact_x, impact_y, 4, 0, 2 * M_PI);
+                cairo_fill(cr);
+                
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, flash_alpha * 0.4);
+                cairo_set_line_width(cr, 1.0);
+                double ring_radius = 6 + (1.0 - flash_alpha) * 10;
+                cairo_arc(cr, impact_x, impact_y, ring_radius, 0, 2 * M_PI);
+                cairo_stroke(cr);
+            }
+            
+            cairo_restore(cr);
+        }
     }
 }
 

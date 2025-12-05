@@ -80,6 +80,12 @@ typedef struct {
     double base_vx, base_vy;    // Original velocity direction (for sine calculation)
     int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green)
     bool active;
+    
+    // Shield system for enemy ships
+    int shield_health;          // Current shield points
+    int max_shield_health;      // Maximum shield points (varies by ship type)
+    double shield_impact_timer; // Visual impact effect timer
+    double shield_impact_angle; // Angle of shield impact
 } EnemyShip;
 
 #define MAX_ENEMY_SHIPS 4
