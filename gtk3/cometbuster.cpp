@@ -49,6 +49,15 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->ship_lives = 3;
     game->invulnerability_time = 0;
     
+    // Shield system
+    game->shield_health = 3;           // Start with 3 shield points
+    game->max_shield_health = 3;       // Maximum 3 shield points
+    game->shield_regen_timer = 0;      // No regeneration timer at start
+    game->shield_regen_delay = 3.0;    // 3 seconds before shield starts regenerating
+    game->shield_regen_rate = 0.5;     // 0.5 shield points per second
+    game->shield_impact_angle = 0;     // Impact angle (for visual)
+    game->shield_impact_timer = 0;     // Impact timer
+    
     // Game state
     game->score = 0;
     game->comets_destroyed = 0;
@@ -84,10 +93,10 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->omni_fire_cooldown = 0;
     
     // Advanced thrusters (fuel system)
-    game->fuel_amount = 100.0;
-    game->max_fuel = 100.0;
-    game->fuel_burn_rate = 60.0;        // Burn 60 fuel per second at full boost
-    game->fuel_recharge_rate = 25.0;    // Recharge 25 fuel per second when idle
+    game->energy_amount = 100.0;
+    game->max_energy = 100.0;
+    game->energy_burn_rate = 60.0;        // Burn 60 energy per second at full boost
+    game->energy_recharge_rate = 5.0;     // Recharge 5 energy per second when idle (much slower)
     game->boost_multiplier = 2.5;       // 2.5x speed boost
     game->is_boosting = false;
     game->boost_thrust_timer = 0.0;
@@ -411,7 +420,7 @@ void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game) {
     if (!game) return;
     
     // Check if we have enough fuel (costs 30 fuel per omnidirectional burst)
-    if (game->fuel_amount < 30) {
+    if (game->energy_amount < 30) {
         return;  // Not enough fuel
     }
     
@@ -444,8 +453,8 @@ void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game) {
     }
     
     // Consume fuel for omnidirectional fire
-    game->fuel_amount -= 30.0;
-    if (game->fuel_amount < 0) game->fuel_amount = 0;
+    game->energy_amount -= 30.0;
+    if (game->energy_amount < 0) game->energy_amount = 0;
     
     // Muzzle flash
     game->muzzle_flash_timer = 0.15;
@@ -538,7 +547,7 @@ void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int
     }
     
     // Right-click boost: accelerate forward in ship's facing direction
-    if (game->mouse_right_pressed && game->fuel_amount > 0) {
+    if (game->mouse_right_pressed && game->energy_amount > 0) {
         game->is_boosting = true;
         
         // Use ship's facing angle - completely ignore mouse
@@ -1076,9 +1085,9 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
     if (game->mouse_left_pressed) {
         if (game->mouse_fire_cooldown <= 0) {
             // Normal fire costs 0.25 fuel per bullet
-            if (game->fuel_amount >= 0.25) {
+            if (game->energy_amount >= 0.25) {
                 comet_buster_spawn_bullet(game);
-                game->fuel_amount -= 0.25;  // Consume 0.25 fuel
+                game->energy_amount -= 0.25;  // Consume 0.25 fuel
                 game->mouse_fire_cooldown = 0.05;  // ~20 bullets per second
             }
         }
@@ -1087,7 +1096,7 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
     // If middle mouse button is pressed, fire omnidirectionally (Last Starfighter style)
     if (game->mouse_middle_pressed) {
         if (game->omni_fire_cooldown <= 0) {
-            if (game->fuel_amount >= 30) {
+            if (game->energy_amount >= 30) {
                 comet_buster_spawn_omnidirectional_fire(game);
                 game->omni_fire_cooldown = 0.3;  // Slower than normal fire
             }
@@ -1104,19 +1113,19 @@ void comet_buster_update_fuel(CometBusterGame *game, double dt) {
     }
     
     // Handle fuel burn and recharge
-    if (game->is_boosting && game->fuel_amount > 0) {
+    if (game->is_boosting && game->energy_amount > 0) {
         // Burning fuel while boosting
-        game->fuel_amount -= game->fuel_burn_rate * dt;
-        if (game->fuel_amount < 0) {
-            game->fuel_amount = 0;
+        game->energy_amount -= game->energy_burn_rate * dt;
+        if (game->energy_amount < 0) {
+            game->energy_amount = 0;
             game->is_boosting = false;
         }
     } else if (!game->mouse_left_pressed) {
         // Recharging fuel when not boosting AND not firing
-        if (game->fuel_amount < game->max_fuel) {
-            game->fuel_amount += game->fuel_recharge_rate * dt;
-            if (game->fuel_amount > game->max_fuel) {
-                game->fuel_amount = game->max_fuel;
+        if (game->energy_amount < game->max_energy) {
+            game->energy_amount += game->energy_recharge_rate * dt;
+            if (game->energy_amount > game->max_energy) {
+                game->energy_amount = game->max_energy;
             }
         }
     }
@@ -1154,6 +1163,26 @@ void update_comet_buster(void *vis, double dt) {
     comet_buster_update_bullets(game, dt, width, height);
     comet_buster_update_particles(game, dt);
     comet_buster_update_floating_text(game, dt);  // Update floating text popups
+    comet_buster_update_fuel(game, dt);  // Update fuel system
+    
+    // Update shield regeneration
+    if (game->shield_health < game->max_shield_health) {
+        game->shield_regen_timer += dt;
+        if (game->shield_regen_timer >= game->shield_regen_delay) {
+            // Shield regeneration active
+            double regen_amount = game->shield_regen_rate * dt;
+            game->shield_health += regen_amount;
+            if (game->shield_health > game->max_shield_health) {
+                game->shield_health = game->max_shield_health;
+            }
+        }
+    }
+    
+    // Update shield impact timer
+    if (game->shield_impact_timer > 0) {
+        game->shield_impact_timer -= dt;
+    }
+    
     comet_buster_update_enemy_ships(game, dt, width, height);  // Update enemy ships
     comet_buster_update_enemy_bullets(game, dt, width, height);  // Update enemy bullets
     
@@ -1181,7 +1210,11 @@ void update_comet_buster(void *vis, double dt) {
     // Check ship-comet collisions
     for (int i = 0; i < game->comet_count; i++) {
         if (comet_buster_check_ship_comet(game, &game->comets[i])) {
+            // Destroy the comet when ship hits it
+            comet_buster_destroy_comet(game, i, width, height);
+            // Damage the ship
             comet_buster_on_ship_hit(game, visualizer);
+            break;  // Exit loop since we just modified comet_count
         }
     }
     
@@ -1200,6 +1233,25 @@ void update_comet_buster(void *vis, double dt) {
     for (int i = 0; i < game->enemy_bullet_count; i++) {
         if (comet_buster_check_enemy_bullet_ship(game, &game->enemy_bullets[i])) {
             comet_buster_on_ship_hit(game, visualizer);
+        }
+    }
+    
+    // Check enemy ship-player ship collisions (both take damage)
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *enemy_ship = &game->enemy_ships[i];
+        if (!enemy_ship->active) continue;
+        
+        double dx = game->ship_x - enemy_ship->x;
+        double dy = game->ship_y - enemy_ship->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        double collision_dist = 15.0 + 15.0;  // Both ships have ~15px radius
+        
+        if (dist < collision_dist) {
+            // Enemy ship is destroyed
+            comet_buster_destroy_enemy_ship(game, i, width, height);
+            // Player ship takes damage
+            comet_buster_on_ship_hit(game, visualizer);
+            break;  // Exit loop since we just modified enemy_ship_count
         }
     }
     
@@ -1538,9 +1590,58 @@ void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int 
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
     if (game->invulnerability_time > 0) return;
     
+    // Priority 1: Try to use 80% energy to absorb the hit
+    if (game->energy_amount >= 80.0) {
+        game->energy_amount -= 80.0;
+        
+        // Floating text for energy absorption
+        comet_buster_spawn_floating_text(game, game->ship_x, game->ship_y - 30, 
+                                         "ENERGY USED", 1.0, 1.0, 0.0);  // Yellow
+        
+        // Minor invulnerability for energy hit
+        game->invulnerability_time = 0.5;
+        return;
+    }
+    
+    // If energy is less than 80%, it drains to zero (but still allows shield check)
+    if (game->energy_amount > 0) {
+        game->energy_amount = 0;
+        
+        // Floating text for energy drain
+        comet_buster_spawn_floating_text(game, game->ship_x, game->ship_y - 30, 
+                                         "ENERGY DRAINED", 1.0, 0.5, 0.0);  // Orange
+        
+        // Don't return here - continue to shield check!
+    }
+    
+    // Priority 2: Use shield if available (either after energy drain or if energy was already 0)
+    if (game->shield_health > 0) {
+        game->shield_health--;
+        game->shield_regen_timer = 0;  // Reset regen timer
+        
+        // Track impact angle for visual effect (angle from ship to source of hit)
+        // We don't have exact hit source, so just use a random direction
+        game->shield_impact_angle = (rand() % 360) * (M_PI / 180.0);
+        game->shield_impact_timer = 0.2;  // Flash for 0.2 seconds
+        
+        // Floating text for shield hit
+        comet_buster_spawn_floating_text(game, game->ship_x, game->ship_y - 30, 
+                                         "SHIELD HIT", 0.0, 1.0, 1.0);  // Cyan
+        
+        // Minor invulnerability for shield hit
+        game->invulnerability_time = 0.5;
+        return;
+    }
+    
+    // Priority 3: If energy is zero and shield is down, take actual damage (lose life)
     game->ship_lives--;
     game->consecutive_hits = 0;
     game->score_multiplier = 1.0;
+    game->shield_regen_timer = 0;  // Reset shield regen after taking life damage
+    
+    // Reset shield to full when taking life damage
+    game->shield_health = game->max_shield_health;
+    game->shield_impact_timer = 0;
     
     if (game->ship_lives <= 0) {
         game->game_over = true;
@@ -2062,6 +2163,65 @@ void draw_comet_buster_ship(CometBusterGame *game, cairo_t *cr, int width, int h
     }
     
     cairo_restore(cr);
+    
+    // Draw shield circle around ship
+    if (game->shield_health > 0) {
+        cairo_save(cr);
+        cairo_translate(cr, game->ship_x, game->ship_y);
+        
+        // Shield circle - brighter when more healthy
+        double shield_alpha = (double)game->shield_health / game->max_shield_health;
+        
+        // Shield color: cyan when healthy, orange when low
+        if (game->shield_health >= 2) {
+            cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, shield_alpha * 0.6);  // Bright cyan
+        } else if (game->shield_health >= 1) {
+            cairo_set_source_rgba(cr, 1.0, 0.8, 0.0, shield_alpha * 0.6);  // Orange/yellow
+        } else {
+            cairo_set_source_rgba(cr, 1.0, 0.3, 0.3, shield_alpha * 0.6);  // Red warning
+        }
+        
+        cairo_set_line_width(cr, 2.5);
+        cairo_arc(cr, 0, 0, 28, 0, 2 * M_PI);
+        cairo_stroke(cr);
+        
+        // Draw shield segments/pips to show health
+        cairo_set_line_width(cr, 1.5);
+        double segment_angle = (2 * M_PI) / game->max_shield_health;
+        
+        for (int i = 0; i < game->shield_health; i++) {
+            double angle = (i * segment_angle) - (M_PI / 2);  // Start at top
+            double x1 = 24 * cos(angle);
+            double y1 = 24 * sin(angle);
+            double x2 = 32 * cos(angle);
+            double y2 = 32 * sin(angle);
+            
+            cairo_move_to(cr, x1, y1);
+            cairo_line_to(cr, x2, y2);
+            cairo_stroke(cr);
+        }
+        
+        // Draw impact flash at hit point
+        if (game->shield_impact_timer > 0) {
+            double impact_x = 28 * cos(game->shield_impact_angle);
+            double impact_y = 28 * sin(game->shield_impact_angle);
+            double flash_alpha = game->shield_impact_timer / 0.2;  // Fade out over time
+            
+            // Bright white flash at impact point
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, flash_alpha * 0.8);
+            cairo_arc(cr, impact_x, impact_y, 5, 0, 2 * M_PI);
+            cairo_fill(cr);
+            
+            // Expanding rings at impact
+            cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, flash_alpha * 0.4);
+            cairo_set_line_width(cr, 1.0);
+            double ring_radius = 8 + (1.0 - flash_alpha) * 12;
+            cairo_arc(cr, impact_x, impact_y, ring_radius, 0, 2 * M_PI);
+            cairo_stroke(cr);
+        }
+        
+        cairo_restore(cr);
+    }
 }
 
 void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int height) {
@@ -2084,10 +2244,18 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
     cairo_move_to(cr, 20, 55);
     cairo_show_text(cr, text);
     
-    // Multiplier
-    sprintf(text, "MULT: %.1fx", game->score_multiplier);
-    cairo_move_to(cr, 20, 80);
+    // Shield status
+    sprintf(text, "SHIELD: %d/%d", game->shield_health, game->max_shield_health);
+    if (game->shield_health <= 0) {
+        cairo_set_source_rgb(cr, 1.0, 0.3, 0.3);  // Red when no shield
+    } else if (game->shield_health == 1) {
+        cairo_set_source_rgb(cr, 1.0, 0.8, 0.0);  // Orange when low
+    } else {
+        cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);  // Cyan when healthy
+    }
+    cairo_move_to(cr, 20, 105);
     cairo_show_text(cr, text);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);  // Reset to white
     
     // Wave
     sprintf(text, "WAVE: %d", game->current_wave);
@@ -2137,12 +2305,12 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
     
     // Fuel bar (bottom left)
     cairo_set_font_size(cr, 14);
-    sprintf(text, "FUEL: %.0f%%", game->fuel_amount);
+    sprintf(text, "ENERGY: %.0f%%", game->energy_amount);
     
     // Color based on fuel level
-    if (game->fuel_amount < 20) {
+    if (game->energy_amount < 20) {
         cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);  // Red - critical
-    } else if (game->fuel_amount < 50) {
+    } else if (game->energy_amount < 50) {
         cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);  // Yellow - low
     } else {
         cairo_set_source_rgb(cr, 0.2, 1.0, 0.2);  // Green - good
@@ -2163,7 +2331,7 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
     cairo_fill(cr);
     
     // Fuel level (colored)
-    double fuel_percent = game->fuel_amount / game->max_fuel;
+    double fuel_percent = game->energy_amount / game->max_energy;
     if (fuel_percent > 0.5) {
         cairo_set_source_rgb(cr, 0.2, 1.0, 0.2);  // Green
     } else if (fuel_percent > 0.2) {

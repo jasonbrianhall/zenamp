@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <time.h>
+#include <cairo.h>
 
 // Static memory allocation constants
 #define MAX_COMETS 32
@@ -94,6 +95,15 @@ typedef struct {
     int ship_lives;
     double invulnerability_time; // Seconds of invincibility after being hit
     
+    // Shield system
+    int shield_health;          // Current shield points (0 means no shield)
+    int max_shield_health;      // Maximum shield capacity
+    double shield_regen_timer;  // Timer for shield regeneration
+    double shield_regen_delay;  // Delay before shield starts regenerating after hit
+    double shield_regen_rate;   // Health points per second when regenerating
+    double shield_impact_angle; // Angle where shield was hit (for visual effect)
+    double shield_impact_timer; // Timer for impact flash effect
+    
     // Game state
     int score;
     int comets_destroyed;
@@ -149,10 +159,10 @@ typedef struct {
     bool mouse_right_pressed;      // Right mouse button state
     bool mouse_middle_pressed;     // Middle mouse button state (omnidirectional fire)
     double omni_fire_cooldown;     // Cooldown for omnidirectional fire
-    double fuel_amount;            // Current fuel [0.0 - 100.0]
-    double max_fuel;               // Maximum fuel capacity
-    double fuel_burn_rate;         // Fuel burned per second at max thrust
-    double fuel_recharge_rate;     // Fuel recharged per second when not boosting
+    double energy_amount;          // Current energy [0.0 - 100.0]
+    double max_energy;             // Maximum energy capacity
+    double energy_burn_rate;        // Energy burned per second at max thrust
+    double energy_recharge_rate;    // Energy recharged per second when not boosting
     double boost_multiplier;       // Speed multiplier when boosting (e.g., 2.0x)
     bool is_boosting;              // Currently using advanced thrusters
     double boost_thrust_timer;     // Visual effect timer for boosting
