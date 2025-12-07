@@ -67,10 +67,10 @@ CXXFLAGS_WIN_DEBUG = $(CXXFLAGS_WIN) $(DEBUG_FLAGS)
 CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Source files - Game code
-SOURCES_CPP_COMMON = comet_main.cpp cometbuster.cpp
+SOURCES_CPP_COMMON = comet_main.cpp cometbuster.cpp wad.cpp audio_wad.cpp
 
 # Source files - Miniz WAD system (C files)
-SOURCES_C = miniz.c miniz_tdef.c miniz_tinfl.c miniz_zip.c wad.c audio_wad.c
+SOURCES_C = miniz.c miniz_tdef.c miniz_tinfl.c miniz_zip.c
 
 # Object files for different platforms
 OBJECTS_CPP_LINUX = $(SOURCES_CPP_COMMON:.cpp=.o)
@@ -131,7 +131,7 @@ cometbuster-linux: $(BUILD_DIR_LINUX)/$(EXECUTABLE_LINUX)
 
 $(BUILD_DIR_LINUX)/$(EXECUTABLE_LINUX): $(addprefix $(BUILD_DIR_LINUX)/,$(OBJECTS_LINUX)) $(EXTRA_OBJS)
 	@echo "Linking Linux executable: $@"
-	$(CXX_LINUX) $(addprefix $(BUILD_DIR_LINUX)/,$(OBJECTS_LINUX)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_LINUX)
+	$(CXX_LINUX) $(CXXFLAGS_LINUX) $(addprefix $(BUILD_DIR_LINUX)/,$(OBJECTS_LINUX)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_LINUX)
 	@echo "✓ Build complete: $@"
 
 # Linux compilation rules - C++ files
@@ -152,7 +152,7 @@ cometbuster-linux-debug: $(BUILD_DIR_LINUX_DEBUG)/$(EXECUTABLE_LINUX_DEBUG)
 
 $(BUILD_DIR_LINUX_DEBUG)/$(EXECUTABLE_LINUX_DEBUG): $(addprefix $(BUILD_DIR_LINUX_DEBUG)/,$(OBJECTS_LINUX_DEBUG)) $(EXTRA_OBJS)
 	@echo "Linking Linux debug executable: $@"
-	$(CXX_LINUX) $(addprefix $(BUILD_DIR_LINUX_DEBUG)/,$(OBJECTS_LINUX_DEBUG)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_LINUX)
+	$(CXX_LINUX) $(CXXFLAGS_LINUX_DEBUG) $(addprefix $(BUILD_DIR_LINUX_DEBUG)/,$(OBJECTS_LINUX_DEBUG)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_LINUX)
 	@echo "✓ Debug build complete: $@"
 
 # Linux debug compilation rules - C++ files
@@ -173,7 +173,7 @@ cometbuster-windows: $(BUILD_DIR_WIN)/$(EXECUTABLE_WIN)
 
 $(BUILD_DIR_WIN)/$(EXECUTABLE_WIN): $(addprefix $(BUILD_DIR_WIN)/,$(OBJECTS_WIN)) $(EXTRA_OBJS)
 	@echo "Linking Windows executable: $@"
-	$(CXX_WIN) $(addprefix $(BUILD_DIR_WIN)/,$(OBJECTS_WIN)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_WIN)
+	$(CXX_WIN) $(CXXFLAGS_WIN) $(addprefix $(BUILD_DIR_WIN)/,$(OBJECTS_WIN)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_WIN)
 	@echo "✓ Windows build complete: $@"
 
 # Windows compilation rules - C++ files
@@ -194,7 +194,7 @@ cometbuster-windows-debug: $(BUILD_DIR_WIN_DEBUG)/$(EXECUTABLE_WIN_DEBUG)
 
 $(BUILD_DIR_WIN_DEBUG)/$(EXECUTABLE_WIN_DEBUG): $(addprefix $(BUILD_DIR_WIN_DEBUG)/,$(OBJECTS_WIN_DEBUG)) $(EXTRA_OBJS)
 	@echo "Linking Windows debug executable: $@"
-	$(CXX_WIN) $(addprefix $(BUILD_DIR_WIN_DEBUG)/,$(OBJECTS_WIN_DEBUG)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_WIN)
+	$(CXX_WIN) $(CXXFLAGS_WIN_DEBUG) $(addprefix $(BUILD_DIR_WIN_DEBUG)/,$(OBJECTS_WIN_DEBUG)) $(EXTRA_OBJS) -o $@ $(LDFLAGS_WIN)
 	@echo "✓ Windows debug build complete: $@"
 
 # Windows debug compilation rules - C++ files

@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef ExternalSound
-
 #include <SDL2/SDL.h>
 
 // Helper function to load sound from WAD
@@ -242,5 +240,3 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
         // Silently ignore instead of spamming errors
     }
 }
-
-#endif  // ExternalSound
