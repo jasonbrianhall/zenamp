@@ -6,6 +6,7 @@
 #include <math.h>
 #include "cometbuster.h"
 #include "visualization.h"
+#include "audio_wad.h"
 
 typedef struct {
     GtkWidget *window;
@@ -14,6 +15,7 @@ typedef struct {
     GtkWidget *menu_bar;
     
     Visualizer visualizer;
+    AudioManager audio;          // Audio system
     
     int frame_count;
     double total_time;
@@ -322,6 +324,17 @@ int main(int argc, char *argv[]) {
     // Initialize the game
     init_comet_buster_system(&gui.visualizer);
     
+    // Initialize audio system
+    memset(&gui.audio, 0, sizeof(AudioManager));
+    if (!audio_init(&gui.audio)) {
+        fprintf(stderr, "Warning: Audio initialization failed, continuing without sound\n");
+    }
+    
+    // Try to load WAD file with sounds
+    if (!audio_load_wad(&gui.audio, "cometbuster.wad")) {
+        fprintf(stderr, "Warning: Could not load cometbuster.wad, sounds will be silent\n");
+    }
+    
     // Create window
     gui.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(gui.window), "CometBuster");
@@ -425,6 +438,7 @@ int main(int argc, char *argv[]) {
     // Cleanup
     g_source_remove(gui.update_timer_id);
     comet_buster_cleanup(&gui.visualizer.comet_buster);
+    audio_cleanup(&gui.audio);
     
     return 0;
 }

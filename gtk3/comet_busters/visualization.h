@@ -7,11 +7,13 @@
 #include <math.h>
 #include <string.h>
 #include "cometbuster.h"
+#include "audio_wad.h"
 
 typedef struct {
     int width, height;
     double volume_level;
     CometBusterGame comet_buster;
+    AudioManager audio;              // Audio system
     int mouse_x;
     int mouse_y;
     bool mouse_left_pressed;
