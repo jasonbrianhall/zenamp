@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef ExternalSound
+
 // Open WAD file (which is a ZIP archive)
 bool wad_open(WadArchive *wad, const char *filename) {
     if (!wad || !filename) {
@@ -138,3 +140,5 @@ bool wad_file_exists(WadArchive *wad, const char *internal_path) {
     int file_index = mz_zip_reader_locate_file(zip, internal_path, NULL, 0);
     return file_index >= 0;
 }
+
+#endif  // ExternalSound

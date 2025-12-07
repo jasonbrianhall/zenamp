@@ -22,6 +22,10 @@ CC_WIN = x86_64-w64-mingw32-gcc
 CXXFLAGS_COMMON = -Wall -Wextra -g -std=c++11 -fpermissive
 CFLAGS_COMMON = -Wall -Wextra -g
 
+# Optional features (default enabled, disable by setting to empty)
+# To compile WITHOUT sound: make SOUND_FEATURE=
+SOUND_FEATURE ?= -DExternalSound
+
 # Platform-specific package config commands
 PKG_CONFIG_LINUX = pkg-config
 PKG_CONFIG_WIN = mingw64-pkg-config
@@ -36,8 +40,8 @@ GTK_LIBS_LINUX := $(shell $(PKG_CONFIG_LINUX) --libs gtk+-3.0 2>/dev/null || ech
 SDL2_MIXER_CFLAGS_LINUX := $(shell $(PKG_CONFIG_LINUX) --cflags SDL2_mixer 2>/dev/null || echo "")
 SDL2_MIXER_LIBS_LINUX := $(shell $(PKG_CONFIG_LINUX) --libs SDL2_mixer 2>/dev/null || echo "-lSDL2_mixer")
 
-CXXFLAGS_LINUX = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(SDL2_MIXER_CFLAGS_LINUX) -DLINUX -DVERSION=\"$(VERSION)\"
-CFLAGS_LINUX = $(CFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(SDL2_MIXER_CFLAGS_LINUX) -DLINUX
+CXXFLAGS_LINUX = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(SDL2_MIXER_CFLAGS_LINUX) $(SOUND_FEATURE) -DLINUX -DVERSION=\"$(VERSION)\"
+CFLAGS_LINUX = $(CFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(SDL2_MIXER_CFLAGS_LINUX) $(SOUND_FEATURE) -DLINUX
 LDFLAGS_LINUX = $(SDL2_LIBS_LINUX) $(GTK_LIBS_LINUX) $(SDL2_MIXER_LIBS_LINUX) -lm -pthread -lstdc++
 
 # Optimization flags
@@ -52,8 +56,8 @@ GTK_LIBS_WIN := $(shell $(PKG_CONFIG_WIN) --libs gtk+-3.0 2>/dev/null || echo ""
 SDL2_MIXER_CFLAGS_WIN := $(shell $(PKG_CONFIG_WIN) --cflags SDL2_mixer 2>/dev/null || echo "")
 SDL2_MIXER_LIBS_WIN := $(shell $(PKG_CONFIG_WIN) --libs SDL2_mixer 2>/dev/null || echo "-lSDL2_mixer")
 
-CXXFLAGS_WIN = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(SDL2_MIXER_CFLAGS_WIN) -DWIN32 -D_WIN32 -DVERSION=\"$(VERSION)\"
-CFLAGS_WIN = $(CFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(SDL2_MIXER_CFLAGS_WIN) -DWIN32 -D_WIN32
+CXXFLAGS_WIN = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(SDL2_MIXER_CFLAGS_WIN) $(SOUND_FEATURE) -DWIN32 -D_WIN32 -DVERSION=\"$(VERSION)\"
+CFLAGS_WIN = $(CFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(SDL2_MIXER_CFLAGS_WIN) $(SOUND_FEATURE) -DWIN32 -D_WIN32
 LDFLAGS_WIN = $(SDL2_LIBS_WIN) $(GTK_LIBS_WIN) $(SDL2_MIXER_LIBS_WIN) -lm -lstdc++ -lwinmm
 
 CXXFLAGS_WIN += -O2 -ffunction-sections -fdata-sections
@@ -275,6 +279,11 @@ help:
 	@echo "  make cometbuster-linux-debug   - Build debug for Linux"
 	@echo "  make cometbuster-windows-debug - Build debug for Windows"
 	@echo ""
+	@echo "Build options:"
+	@echo "  make [target] SOUND_FEATURE=-DExternalSound    - Build WITH sound (default)"
+	@echo "  make [target] SOUND_FEATURE=                   - Build WITHOUT sound"
+	@echo "  Example: make linux SOUND_FEATURE=             # Linux build, no sound"
+	@echo ""
 	@echo "WAD audio targets:"
 	@echo "  make wad           - Create cometbuster.wad from sound files"
 	@echo ""
@@ -297,15 +306,19 @@ help:
 	@echo ""
 	@echo "WAD Audio System:"
 	@echo "  - Uses Miniz library for ZIP reading"
-	@echo "  - SDL2_mixer for audio playback"
+	@echo "  - SDL2_mixer for audio playback (optional, controlled by SOUND_FEATURE)"
 	@echo "  - Create sounds/ directory with MP3 files"
 	@echo "  - Run: python3 create_wad.py"
 	@echo "  - Distributes: binary + cometbuster.wad"
 	@echo ""
-	@echo "Example workflow:"
-	@echo "  1. make linux                 # Build for Linux"
+	@echo "Example workflow with sound:"
+	@echo "  1. make linux                 # Build for Linux with sound"
 	@echo "  2. make wad                   # Create WAD from sounds"
 	@echo "  3. ./build/linux/cometbuster  # Run the game"
+	@echo ""
+	@echo "Example workflow without sound (ZenAmp compatibility):"
+	@echo "  1. make linux SOUND_FEATURE=  # Build for Linux, no sound"
+	@echo "  2. ./build/linux/cometbuster  # Run the game (no audio)"
 	@echo ""
 
 .PHONY: all clean install uninstall help linux windows debug wad
