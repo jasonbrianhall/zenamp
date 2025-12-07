@@ -6,8 +6,10 @@
 #include <time.h>
 #include "cometbuster.h"
 #include "visualization.h"
-#include "audio_wad.h"
 
+#ifdef ExternalSound
+#include "audio_wad.h"
+#endif 
 // ============================================================================
 // STATIC MEMORY VERSION - NO MALLOC/FREE
 // ============================================================================
