@@ -3,12 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ExternalSound
+
 #include <SDL2/SDL.h>
 
 // Helper function to load sound from WAD
+// Supports WAV, MP3, OGG, FLAC, etc. (depending on SDL_mixer compilation)
 static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     if (!wad || !filename) return NULL;
     
+    // Extract file from WAD
     WadFile wad_file;
     if (!wad_extract_file(wad, filename, &wad_file)) {
         fprintf(stderr, "Failed to load sound from WAD: %s\n", filename);
@@ -16,6 +20,7 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     }
     
     // Create SDL_RWops from memory buffer
+    // SDL_RWFromMem creates a read-only stream from existing memory
     SDL_RWops *rw = SDL_RWFromMem(wad_file.data, wad_file.size);
     if (!rw) {
         fprintf(stderr, "Failed to create SDL_RWops for %s\n", filename);
@@ -23,16 +28,28 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
         return NULL;
     }
     
-    // Load WAV from memory
-    // Note: SDL_mixer can load MP3 if SDL_mixer was compiled with MP3 support
-    Mix_Chunk *chunk = Mix_LoadWAV_RW(rw, 1);  // 1 = free SDL_RWops
+    // Load audio from memory using SDL_mixer
+    // Mix_LoadWAV_RW can load:
+    //   - WAV (always supported)
+    //   - MP3 (if SDL_mixer compiled with smpeg2 or libmad)
+    //   - OGG (if SDL_mixer compiled with libogg/libvorbis)
+    //   - FLAC (if SDL_mixer compiled with libFLAC)
+    //   - MOD (if SDL_mixer compiled with libmikmod)
+    // The '0' means don't free the SDL_RWops - we'll handle it
+    Mix_Chunk *chunk = Mix_LoadWAV_RW(rw, 0);
     
-    // Note: wad_file.data is freed by SDL_RWFromMem, but we need to track it
     if (!chunk) {
         fprintf(stderr, "Failed to decode audio from WAD: %s - %s\n", filename, Mix_GetError());
-        // Free the data since Mix_LoadWAV_RW didn't take ownership
-        free(wad_file.data);
+        fprintf(stderr, "Note: Check if SDL_mixer supports this format. Install SDL2_mixer-devel.\n");
+        SDL_RWclose(rw);
+        wad_free_file(&wad_file);
+        return NULL;
     }
+    
+    // Clean up: free the RWops and the WAD file data
+    // Note: SDL_mixer copies the audio data internally, so the original can be freed
+    SDL_RWclose(rw);
+    wad_free_file(&wad_file);
     
     return chunk;
 }
@@ -240,3 +257,66 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
         // Silently ignore instead of spamming errors
     }
 }
+
+#else  // !ExternalSound
+
+// Stub implementations when sound is disabled
+bool audio_init(AudioManager *audio) {
+    if (!audio) return false;
+    audio->master_volume = 128;
+    audio->audio_enabled = false;
+    return true;
+}
+
+void audio_cleanup(AudioManager *audio) {
+    if (!audio) return;
+    // Nothing to clean up
+}
+
+bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
+    if (!audio || !wad_filename) return false;
+    // Stub - always succeeds silently
+    return true;
+}
+
+void audio_set_volume(AudioManager *audio, int volume) {
+    if (!audio) return;
+    if (volume < 0) volume = 0;
+    if (volume > 128) volume = 128;
+    audio->master_volume = volume;
+}
+
+int audio_get_volume(AudioManager *audio) {
+    if (!audio) return 0;
+    return audio->master_volume;
+}
+
+void audio_play_music(AudioManager *audio, const char *internal_path, bool loop) {
+    (void)audio;
+    (void)internal_path;
+    (void)loop;
+    // No-op stub
+}
+
+void audio_stop_music(AudioManager *audio) {
+    (void)audio;
+    // No-op stub
+}
+
+void audio_pause_music(AudioManager *audio) {
+    (void)audio;
+    // No-op stub
+}
+
+void audio_resume_music(AudioManager *audio) {
+    (void)audio;
+    // No-op stub
+}
+
+void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
+    (void)audio;
+    (void)sound;
+    // No-op stub
+}
+
+#endif  // ExternalSound
