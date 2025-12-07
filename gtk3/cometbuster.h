@@ -191,12 +191,12 @@ void update_comet_buster(void *vis, double dt);
 void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height);
 void comet_buster_update_comets(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_update_shooting(CometBusterGame *game, double dt);  // New: click-to-shoot
-void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height, void *vis);
 void comet_buster_update_particles(CometBusterGame *game, double dt);
 void comet_buster_update_floating_text(CometBusterGame *game, double dt);
 void comet_buster_update_fuel(CometBusterGame *game, double dt);  // Advanced thrusters fuel system
 void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height);
-void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height, void *vis);
 
 // Spawning
 void comet_buster_spawn_comet(CometBusterGame *game, int frequency_band, int screen_width, int screen_height);
@@ -216,10 +216,10 @@ bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
 bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
 void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double dy, 
                                          double dist, double min_dist);
-void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height);
+void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height, void *vis);
 bool comet_buster_check_bullet_enemy_ship(Bullet *b, EnemyShip *e);
 bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b);
-void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height);
+void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height, void *vis);
 bool comet_buster_hit_enemy_ship_provoke(CometBusterGame *game, int ship_index);  // New: provoke blue ships
 
 // Audio integration

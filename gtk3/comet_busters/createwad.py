@@ -92,7 +92,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Default paths
-    input_dir = sys.argv[1] if len(sys.argv) > 1 else "cometbuster_sounds"
+    input_dir = sys.argv[1] if len(sys.argv) > 1 else "sounds"
     output_file = sys.argv[2] if len(sys.argv) > 2 else "cometbuster.wad"
     
     create_wad(input_dir, output_file)

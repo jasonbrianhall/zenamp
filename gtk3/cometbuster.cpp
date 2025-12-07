@@ -6,6 +6,7 @@
 #include <time.h>
 #include "cometbuster.h"
 #include "visualization.h"
+#include "audio_wad.h"
 
 // ============================================================================
 // STATIC MEMORY VERSION - NO MALLOC/FREE
@@ -690,7 +691,7 @@ void comet_buster_update_comets(CometBusterGame *game, double dt, int width, int
     }
 }
 
-void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height) {
+void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height, void *vis) {
     if (!game) return;
     
     for (int i = 0; i < game->bullet_count; i++) {
@@ -723,7 +724,7 @@ void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, in
             
             if (comet_buster_check_bullet_comet(b, c)) {
                 b->active = false;
-                comet_buster_destroy_comet(game, j, width, height);
+                comet_buster_destroy_comet(game, j, width, height, vis);
                 break;
             }
         }
@@ -1087,7 +1088,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
     }
 }
 
-void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height) {
+void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height, void *vis) {
     if (!game) return;
     
     for (int i = 0; i < game->enemy_bullet_count; i++) {
@@ -1117,7 +1118,7 @@ void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int wid
             if (!c->active) continue;
             
             if (comet_buster_check_bullet_comet(b, c)) {
-                comet_buster_destroy_comet(game, j, width, height);
+                comet_buster_destroy_comet(game, j, width, height, vis);
                 b->active = false;
                 break;
             }
@@ -1150,7 +1151,7 @@ void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int wid
     }
 }
 
-void comet_buster_update_shooting(CometBusterGame *game, double dt) {
+void comet_buster_update_shooting(CometBusterGame *game, double dt, void *vis) {
     if (!game || game->game_over) return;
     
     // Update fire cooldown
@@ -1171,6 +1172,14 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
                 comet_buster_spawn_bullet(game);
                 game->energy_amount -= 0.25;  // Consume 0.25 fuel
                 game->mouse_fire_cooldown = 0.05;  // ~20 bullets per second
+                
+                // Play fire sound
+#ifdef ExternalSound
+                Visualizer *visualizer = (Visualizer *)vis;
+                if (visualizer && visualizer->audio.sfx_fire) {
+                    audio_play_sound(&visualizer->audio, visualizer->audio.sfx_fire);
+                }
+#endif
             }
         }
     }
@@ -1181,6 +1190,14 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt) {
             if (game->energy_amount >= 30) {
                 comet_buster_spawn_omnidirectional_fire(game);
                 game->omni_fire_cooldown = 0.3;  // Slower than normal fire
+                
+                // Play fire sound
+#ifdef ExternalSound
+                Visualizer *visualizer = (Visualizer *)vis;
+                if (visualizer && visualizer->audio.sfx_fire) {
+                    audio_play_sound(&visualizer->audio, visualizer->audio.sfx_fire);
+                }
+#endif
             }
         }
     }
@@ -1241,8 +1258,8 @@ void update_comet_buster(void *vis, double dt) {
     // Update game state
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height);
     comet_buster_update_comets(game, dt, width, height);
-    comet_buster_update_shooting(game, dt);  // Uses mouse_left_pressed state
-    comet_buster_update_bullets(game, dt, width, height);
+    comet_buster_update_shooting(game, dt, visualizer);  // Uses mouse_left_pressed state
+    comet_buster_update_bullets(game, dt, width, height, visualizer);
     comet_buster_update_particles(game, dt);
     comet_buster_update_floating_text(game, dt);  // Update floating text popups
     comet_buster_update_fuel(game, dt);  // Update fuel system
@@ -1266,7 +1283,7 @@ void update_comet_buster(void *vis, double dt) {
     }
     
     comet_buster_update_enemy_ships(game, dt, width, height);  // Update enemy ships
-    comet_buster_update_enemy_bullets(game, dt, width, height);  // Update enemy bullets
+    comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);  // Update enemy bullets
     
     // Update fuel system
     comet_buster_update_fuel(game, dt);
@@ -1293,7 +1310,7 @@ void update_comet_buster(void *vis, double dt) {
     for (int i = 0; i < game->comet_count; i++) {
         if (comet_buster_check_ship_comet(game, &game->comets[i])) {
             // Destroy the comet when ship hits it
-            comet_buster_destroy_comet(game, i, width, height);
+            comet_buster_destroy_comet(game, i, width, height, visualizer);
             // Damage the ship
             comet_buster_on_ship_hit(game, visualizer);
             break;  // Exit loop since we just modified comet_count
@@ -1320,7 +1337,7 @@ void update_comet_buster(void *vis, double dt) {
                         enemy->shield_impact_timer = 0.2;
                     } else {
                         // No shield, destroy the ship
-                        comet_buster_destroy_enemy_ship(game, i, width, height);
+                        comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
                     }
                 }
                 // If it was provoked, the bullet just triggers the provocation but doesn't destroy it
@@ -1350,7 +1367,7 @@ void update_comet_buster(void *vis, double dt) {
         
         if (dist < collision_dist) {
             // Enemy ship is destroyed
-            comet_buster_destroy_enemy_ship(game, i, width, height);
+            comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
             // Player ship takes damage
             comet_buster_on_ship_hit(game, visualizer);
             break;  // Exit loop since we just modified enemy_ship_count
@@ -1379,11 +1396,11 @@ void update_comet_buster(void *vis, double dt) {
                     ship->shield_impact_timer = 0.2;
                 } else {
                     // No shield, ship is destroyed
-                    comet_buster_destroy_enemy_ship(game, i, width, height);
+                    comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
                 }
                 
                 // Comet is destroyed either way
-                comet_buster_destroy_comet(game, j, width, height);
+                comet_buster_destroy_comet(game, j, width, height, visualizer);
                 break;
             }
         }
@@ -1497,7 +1514,7 @@ bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b) {
     return dist < 15.0;  // Player ship collision radius
 }
 
-void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height) {
+void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height, void *vis) {
     (void)width;
     (void)height;
     if (comet_index < 0 || comet_index >= game->comet_count) return;
@@ -1512,6 +1529,14 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     else if (c->size == COMET_SMALL) particle_count = 8;
     
     comet_buster_spawn_explosion(game, c->x, c->y, c->frequency_band, particle_count);
+    
+    // Play explosion sound
+    if (vis) {
+        Visualizer *visualizer = (Visualizer *)vis;
+#ifdef ExternalSound
+        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_explosion);
+#endif
+    }
     
     // Award points
     int points = 0;
@@ -1664,7 +1689,7 @@ void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int widt
     game->comet_count--;
 }
 
-void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height) {
+void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height, void *vis) {
     (void)width;
     (void)height;
     if (ship_index < 0 || ship_index >= game->enemy_ship_count) return;
@@ -1674,6 +1699,14 @@ void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int 
     
     // Create explosion
     comet_buster_spawn_explosion(game, ship->x, ship->y, 1, 12);  // Mid-frequency explosion
+    
+    // Play explosion sound
+    if (vis) {
+        Visualizer *visualizer = (Visualizer *)vis;
+#ifdef ExternalSound
+        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_explosion);
+#endif
+    }
     
     // Award points
     int points = 300;  // Enemy ships worth 300 points
@@ -1701,6 +1734,13 @@ void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int 
 
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
     if (game->invulnerability_time > 0) return;
+    
+    // Play hit sound
+#ifdef ExternalSound
+    if (visualizer) {
+        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+    }
+#endif
     
     // Priority 1: Try to use 80% energy to absorb the hit
     if (game->energy_amount >= 80.0) {
