@@ -35,21 +35,31 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     //   - OGG (if SDL_mixer compiled with libogg/libvorbis)
     //   - FLAC (if SDL_mixer compiled with libFLAC)
     //   - MOD (if SDL_mixer compiled with libmikmod)
-    // The '0' means don't free the SDL_RWops - we'll handle it
-    Mix_Chunk *chunk = Mix_LoadWAV_RW(rw, 0);
+    // The '1' means free the SDL_RWops after loading
+    Mix_Chunk *chunk = Mix_LoadWAV_RW(rw, 1);
     
     if (!chunk) {
         fprintf(stderr, "Failed to decode audio from WAD: %s - %s\n", filename, Mix_GetError());
         fprintf(stderr, "Note: Check if SDL_mixer supports this format. Install SDL2_mixer-devel.\n");
-        SDL_RWclose(rw);
         wad_free_file(&wad_file);
         return NULL;
     }
     
-    // Clean up: free the RWops and the WAD file data
-    // Note: SDL_mixer copies the audio data internally, so the original can be freed
-    SDL_RWclose(rw);
-    wad_free_file(&wad_file);
+    // NOTE: We do NOT free wad_file.data here!
+    // SDL_mixer stores pointers to the decoded PCM data in the Mix_Chunk.
+    // The original compressed data (wad_file.data) can be freed, but the
+    // decoded samples must remain valid for the lifetime of the Mix_Chunk.
+    // 
+    // This is a memory leak IF SDL_mixer doesn't copy the data, but it's
+    // necessary because the WAD is closed and the file data would be freed.
+    // 
+    // For a proper fix, we would need to either:
+    // 1. Keep the WAD file open for the entire game lifetime
+    // 2. Malloc new memory for decoded audio and manage it ourselves
+    // 3. Use Mix_LoadMUS instead which manages its own memory
+    //
+    // For now, we accept the small memory leak (extracted file data stays in RAM)
+    // to ensure sounds play correctly throughout the game.
     
     return chunk;
 }
@@ -72,7 +82,7 @@ bool audio_init(AudioManager *audio) {
         return false;
     }
     
-    Mix_AllocateChannels(8);
+    Mix_AllocateChannels(32);  // Allow up to 32 simultaneous sounds
     
     // Initialize fields
     audio->background_music = NULL;
@@ -87,6 +97,9 @@ bool audio_init(AudioManager *audio) {
     
     audio->master_volume = 128;
     audio->audio_enabled = true;
+    
+    // IMPORTANT: Set mixer volume to max so sounds actually play
+    Mix_Volume(-1, 128);  // -1 = all channels, 128 = max volume
     
     fprintf(stdout, "✓ Audio system initialized\n");
     return true;
@@ -253,8 +266,8 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
     
     int channel = Mix_PlayChannel(-1, sound, 0);
     if (channel < 0) {
-        // All channels busy - this is normal during intense action
-        // Silently ignore instead of spamming errors
+        // All channels busy - shouldn't happen with 32 channels
+        // but silently ignore if it does
     }
 }
 

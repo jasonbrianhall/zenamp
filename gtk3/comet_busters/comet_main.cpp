@@ -335,6 +335,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Warning: Could not load cometbuster.wad, sounds will be silent\n");
     }
     
+    // Copy audio system to visualizer so game code can access it
+    gui.visualizer.audio = gui.audio;
+    
     // Create window
     gui.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(gui.window), "CometBuster");
