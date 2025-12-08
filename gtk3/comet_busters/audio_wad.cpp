@@ -348,3 +348,14 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
         // All channels busy - shouldn't happen with 32 channels
     }
 }
+
+bool audio_is_music_playing(AudioManager *audio) {
+    if (!audio) {
+        return false;
+    }
+    
+    // SDL_mixer provides Mix_PlayingMusic() which returns:
+    // 0 if music is not playing
+    // 1 if music is playing
+    return (Mix_PlayingMusic() != 0);
+}

@@ -65,4 +65,7 @@ void audio_resume_music(AudioManager *audio);
 // Sound effects
 void audio_play_sound(AudioManager *audio, Mix_Chunk *sound);
 
+// Music status check (NEW - for continuous playback)
+bool audio_is_music_playing(AudioManager *audio);
+
 #endif  // AUDIO_WAD_H

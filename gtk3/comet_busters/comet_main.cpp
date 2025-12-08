@@ -1058,6 +1058,14 @@ gboolean game_update_timer(gpointer data) {
             }
         }
         
+        // Check if current music track has finished and queue the next one
+#ifdef ExternalSound
+        if (!audio_is_music_playing(&gui->audio)) {
+            fprintf(stdout, "[AUDIO] Current track finished, queuing next track...\n");
+            audio_play_random_music(&gui->audio);
+        }
+#endif
+        
         // Update frame counter for FPS
         gui->frame_count++;
         gui->total_time += 16.67;  // Approximately 60 FPS
