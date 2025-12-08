@@ -22,6 +22,17 @@ typedef struct {
     guint update_timer_id;
     
     bool is_fullscreen;
+    bool game_paused;            // Track if game is paused
+    
+    // Volume control dialog
+    GtkWidget *volume_dialog;
+    GtkWidget *music_volume_scale;
+    GtkWidget *sfx_volume_scale;
+    GtkWidget *music_volume_label;
+    GtkWidget *sfx_volume_label;
+    
+    int music_volume;
+    int sfx_volume;
     
 } CometGUI;
 
@@ -37,6 +48,154 @@ gboolean game_update_timer(gpointer data);
 void on_about(GtkWidget *widget, gpointer data);
 void on_game_controls(GtkWidget *widget, gpointer data);
 void on_toggle_fullscreen(GtkWidget *widget, gpointer data);
+void on_volume_dialog_open(GtkWidget *widget, gpointer data);
+void on_music_volume_changed(GtkRange *range, gpointer data);
+void on_sfx_volume_changed(GtkRange *range, gpointer data);
+gboolean on_volume_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data);
+void update_volume_labels(CometGUI *gui);
+
+// Volume control dialog functions
+void update_volume_labels(CometGUI *gui) {
+    if (!gui) return;
+    
+    char music_label[64];
+    char sfx_label[64];
+    
+    // Display as percentage (0-100)
+    int music_percent = (gui->music_volume * 100) / 128;
+    int sfx_percent = (gui->sfx_volume * 100) / 128;
+    
+    snprintf(music_label, sizeof(music_label), "Music Volume: %d%%", music_percent);
+    snprintf(sfx_label, sizeof(sfx_label), "Sound Effects Volume: %d%%", sfx_percent);
+    
+    gtk_label_set_text(GTK_LABEL(gui->music_volume_label), music_label);
+    gtk_label_set_text(GTK_LABEL(gui->sfx_volume_label), sfx_label);
+}
+
+void on_music_volume_changed(GtkRange *range, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    gui->music_volume = (int)gtk_range_get_value(range);
+    
+    // Update music volume using the new audio_wad function
+    audio_set_music_volume(&gui->audio, gui->music_volume);
+    
+    update_volume_labels(gui);
+}
+
+void on_sfx_volume_changed(GtkRange *range, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    gui->sfx_volume = (int)gtk_range_get_value(range);
+    
+    // Update SFX volume using the new audio_wad function
+    audio_set_sfx_volume(&gui->audio, gui->sfx_volume);
+    
+    update_volume_labels(gui);
+}
+
+gboolean on_volume_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (gui) {
+        gui->volume_dialog = NULL;
+        // Resume the game
+        gui->game_paused = false;
+        fprintf(stdout, "▶ Game Resumed\n");
+    }
+    return FALSE;  // Allow window to close
+}
+
+void on_volume_dialog_open(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // If dialog already exists, bring it to front
+    if (gui->volume_dialog) {
+        gtk_window_present(GTK_WINDOW(gui->volume_dialog));
+        return;
+    }
+    
+    // Pause the game
+    gui->game_paused = true;
+    fprintf(stdout, "⏸ Game Paused (Volume Dialog Open)\n");
+    
+    // Create volume control dialog window
+    gui->volume_dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(gui->volume_dialog), "Volume Control");
+    gtk_window_set_type_hint(GTK_WINDOW(gui->volume_dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
+    gtk_window_set_default_size(GTK_WINDOW(gui->volume_dialog), 400, 250);
+    gtk_window_set_modal(GTK_WINDOW(gui->volume_dialog), FALSE);
+    
+    g_signal_connect(gui->volume_dialog, "delete-event", 
+                    G_CALLBACK(on_volume_dialog_delete), gui);
+    
+    // Create main vbox
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 15);
+    gtk_container_add(GTK_CONTAINER(gui->volume_dialog), vbox);
+    
+    // Title label
+    GtkWidget *title_label = gtk_label_new("Audio Settings");
+    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttribute *weight = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+    weight->start_index = 0;
+    weight->end_index = -1;
+    pango_attr_list_insert(attrs, weight);
+    gtk_label_set_attributes(GTK_LABEL(title_label), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(vbox), title_label, FALSE, FALSE, 0);
+    
+    // Separator
+    GtkWidget *separator1 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(vbox), separator1, FALSE, FALSE, 0);
+    
+    // Music volume section
+    GtkWidget *music_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_box_pack_start(GTK_BOX(vbox), music_vbox, FALSE, FALSE, 0);
+    
+    gui->music_volume_label = gtk_label_new("Music Volume: 100%");
+    gtk_label_set_xalign(GTK_LABEL(gui->music_volume_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(music_vbox), gui->music_volume_label, FALSE, FALSE, 0);
+    
+    gui->music_volume_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 128, 1);
+    gtk_scale_set_draw_value(GTK_SCALE(gui->music_volume_scale), FALSE);
+    gtk_range_set_value(GTK_RANGE(gui->music_volume_scale), gui->music_volume);
+    g_signal_connect(gui->music_volume_scale, "value-changed",
+                    G_CALLBACK(on_music_volume_changed), gui);
+    gtk_box_pack_start(GTK_BOX(music_vbox), gui->music_volume_scale, FALSE, FALSE, 0);
+    
+    // SFX volume section
+    GtkWidget *sfx_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_box_pack_start(GTK_BOX(vbox), sfx_vbox, FALSE, FALSE, 0);
+    
+    gui->sfx_volume_label = gtk_label_new("Sound Effects Volume: 100%");
+    gtk_label_set_xalign(GTK_LABEL(gui->sfx_volume_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(sfx_vbox), gui->sfx_volume_label, FALSE, FALSE, 0);
+    
+    gui->sfx_volume_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 128, 1);
+    gtk_scale_set_draw_value(GTK_SCALE(gui->sfx_volume_scale), FALSE);
+    gtk_range_set_value(GTK_RANGE(gui->sfx_volume_scale), gui->sfx_volume);
+    g_signal_connect(gui->sfx_volume_scale, "value-changed",
+                    G_CALLBACK(on_sfx_volume_changed), gui);
+    gtk_box_pack_start(GTK_BOX(sfx_vbox), gui->sfx_volume_scale, FALSE, FALSE, 0);
+    
+    // Separator
+    GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(vbox), separator2, FALSE, FALSE, 0);
+    
+    // Info label
+    GtkWidget *info_label = gtk_label_new("Move sliders to adjust volume\nChanges apply immediately");
+    gtk_label_set_xalign(GTK_LABEL(info_label), 0.5);
+    gtk_box_pack_start(GTK_BOX(vbox), info_label, FALSE, FALSE, 0);
+    
+    // Add stretch to push everything to top
+    gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), TRUE, TRUE, 0);
+    
+    gtk_widget_show_all(gui->volume_dialog);
+    gtk_window_present(GTK_WINDOW(gui->volume_dialog));
+}
 
 gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
@@ -128,24 +287,24 @@ gboolean game_update_timer(gpointer data) {
     // Update at approximately 60 FPS (16.67 ms per frame)
     double dt = 0.01667;  // 16.67 ms
     
-    // Update mouse movement timer
-    gui->visualizer.mouse_movement_timer += dt;
-    if (gui->visualizer.mouse_movement_timer > 0.5) {
-        // Mouse hasn't moved in 0.5 seconds, switch back to keyboard if keyboard was last used
-        gui->visualizer.mouse_just_moved = false;
+    // Skip game update if paused (dialog open)
+    if (!gui->game_paused) {
+        // Update mouse movement timer
+        gui->visualizer.mouse_movement_timer += dt;
+        if (gui->visualizer.mouse_movement_timer > 0.5) {
+            gui->visualizer.mouse_just_moved = false;
+        }
+        
+        // Update the game
+        update_comet_buster(&gui->visualizer, dt);
+        
+        gui->total_time += dt;
+        gui->frame_count++;
     }
     
-    // Update the game
-    update_comet_buster(&gui->visualizer, dt);
-    
-    // Update status text
+    // Always update status text and redraw (so we see "PAUSED" message)
     update_status_text(gui);
-    
-    // Trigger redraw
     gtk_widget_queue_draw(gui->drawing_area);
-    
-    gui->total_time += dt;
-    gui->frame_count++;
     
     return G_SOURCE_CONTINUE;
 }
@@ -202,6 +361,10 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
         return TRUE;
     } else if (event->keyval == GDK_KEY_Escape) {
         gtk_main_quit();
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_v || event->keyval == GDK_KEY_V) {
+        // V key for volume dialog
+        on_volume_dialog_open(widget, data);
         return TRUE;
     }
     
@@ -399,6 +562,16 @@ int main(int argc, char *argv[]) {
     gui.frame_count = 0;
     gui.total_time = 0.0;
     gui.is_fullscreen = false;
+    gui.game_paused = false;  // Game not paused initially
+    
+    // Initialize volume dialog fields
+    gui.volume_dialog = NULL;
+    gui.music_volume_scale = NULL;
+    gui.sfx_volume_scale = NULL;
+    gui.music_volume_label = NULL;
+    gui.sfx_volume_label = NULL;
+    gui.music_volume = 100;  // Will be updated from audio system
+    gui.sfx_volume = 100;
     
     // Initialize visualizer - will be set dynamically by on_draw
     gui.visualizer.width = 640;  // Default, will be updated in on_draw
@@ -440,6 +613,10 @@ int main(int argc, char *argv[]) {
     
     // Copy audio system to visualizer so game code can access it
     gui.visualizer.audio = gui.audio;
+    
+    // Sync volume dialog with audio system values
+    gui.music_volume = audio_get_music_volume(&gui.audio);
+    gui.sfx_volume = audio_get_sfx_volume(&gui.audio);
     
     // Load background music tracks
 #ifdef ExternalSound
@@ -500,6 +677,17 @@ int main(int argc, char *argv[]) {
     
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_item), file_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), file_item);
+    
+    // Audio menu
+    GtkWidget *audio_menu = gtk_menu_new();
+    GtkWidget *audio_item = gtk_menu_item_new_with_label("Audio");
+    
+    GtkWidget *volume_settings_item = gtk_menu_item_new_with_label("Volume Settings (V)");
+    g_signal_connect(volume_settings_item, "activate", G_CALLBACK(on_volume_dialog_open), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(audio_menu), volume_settings_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(audio_item), audio_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), audio_item);
     
     // Help menu
     GtkWidget *help_menu = gtk_menu_new();

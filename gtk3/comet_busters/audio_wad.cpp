@@ -18,7 +18,6 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     }
     
     // Create SDL_RWops from memory buffer
-    // SDL_RWFromMem creates a read-only stream from existing memory
     SDL_RWops *rw = SDL_RWFromMem(wad_file.data, wad_file.size);
     if (!rw) {
         fprintf(stderr, "Failed to create SDL_RWops for %s\n", filename);
@@ -27,13 +26,6 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     }
     
     // Load audio from memory using SDL_mixer
-    // Mix_LoadWAV_RW can load:
-    //   - WAV (always supported)
-    //   - MP3 (if SDL_mixer compiled with smpeg2 or libmad)
-    //   - OGG (if SDL_mixer compiled with libogg/libvorbis)
-    //   - FLAC (if SDL_mixer compiled with libFLAC)
-    //   - MOD (if SDL_mixer compiled with libmikmod)
-    // The '1' means free the SDL_RWops after loading
     Mix_Chunk *chunk = Mix_LoadWAV_RW(rw, 1);
     
     if (!chunk) {
@@ -42,22 +34,6 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
         wad_free_file(&wad_file);
         return NULL;
     }
-    
-    // NOTE: We do NOT free wad_file.data here!
-    // SDL_mixer stores pointers to the decoded PCM data in the Mix_Chunk.
-    // The original compressed data (wad_file.data) can be freed, but the
-    // decoded samples must remain valid for the lifetime of the Mix_Chunk.
-    // 
-    // This is a memory leak IF SDL_mixer doesn't copy the data, but it's
-    // necessary because the WAD is closed and the file data would be freed.
-    // 
-    // For a proper fix, we would need to either:
-    // 1. Keep the WAD file open for the entire game lifetime
-    // 2. Malloc new memory for decoded audio and manage it ourselves
-    // 3. Use Mix_LoadMUS instead which manages its own memory
-    //
-    // For now, we accept the small memory leak (extracted file data stays in RAM)
-    // to ensure sounds play correctly throughout the game.
     
     return chunk;
 }
@@ -99,10 +75,13 @@ bool audio_init(AudioManager *audio) {
     memset(&audio->wad, 0, sizeof(WadArchive));
     
     audio->master_volume = 128;
+    audio->music_volume = 100;   // Start at reasonable level (0-128)
+    audio->sfx_volume = 100;     // Start at reasonable level (0-128)
     audio->audio_enabled = true;
     
-    // IMPORTANT: Set mixer volume to max so sounds actually play
-    Mix_Volume(-1, 128);  // -1 = all channels, 128 = max volume
+    // Set initial volumes
+    Mix_VolumeMusic(100);        // Music volume
+    Mix_Volume(-1, 100);         // SFX volume (all channels)
     
     fprintf(stdout, "✓ Audio system initialized\n");
     return true;
@@ -124,7 +103,6 @@ bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
     fprintf(stdout, "Loading sounds from WAD: %s\n", wad_filename);
     
     // Load individual sounds
-    // Note: Adjust paths to match how you organized files in the WAD
     audio->sfx_fire = load_sound_from_wad(&audio->wad, "sounds/fire.mp3");
     audio->sfx_explosion = load_sound_from_wad(&audio->wad, "sounds/explosion.mp3");
     audio->sfx_hit = load_sound_from_wad(&audio->wad, "sounds/hit.mp3");
@@ -142,7 +120,7 @@ bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
     
     fprintf(stdout, "✓ Loaded %d/%d sounds from WAD\n", loaded, 6);
     
-    return loaded > 0;  // Return true if at least one sound loaded
+    return loaded > 0;
 }
 
 // Clean up
@@ -176,11 +154,9 @@ void audio_cleanup(AudioManager *audio) {
     // Close mixer
     Mix_CloseAudio();
     SDL_Quit();
-    
-    fprintf(stdout, "✓ Audio system cleaned up\n");
 }
 
-// Set volume
+// Set master volume (legacy - for backward compatibility)
 void audio_set_volume(AudioManager *audio, int volume) {
     if (!audio) return;
     
@@ -188,15 +164,53 @@ void audio_set_volume(AudioManager *audio, int volume) {
     if (volume > 128) volume = 128;
     
     audio->master_volume = volume;
-    Mix_Volume(-1, volume);
-    
-    fprintf(stdout, "Volume: %d/128\n", volume);
+    // Update both music and SFX proportionally
+    audio_set_music_volume(audio, volume);
+    audio_set_sfx_volume(audio, volume);
 }
 
-// Get volume
+// Get master volume (legacy - for backward compatibility)
 int audio_get_volume(AudioManager *audio) {
     if (!audio) return 0;
     return audio->master_volume;
+}
+
+// Set music volume (NEW)
+void audio_set_music_volume(AudioManager *audio, int volume) {
+    if (!audio) return;
+    
+    if (volume < 0) volume = 0;
+    if (volume > 128) volume = 128;
+    
+    audio->music_volume = volume;
+    Mix_VolumeMusic(volume);
+    
+    int percent = (volume * 100) / 128;
+}
+
+// Get music volume (NEW)
+int audio_get_music_volume(AudioManager *audio) {
+    if (!audio) return 0;
+    return audio->music_volume;
+}
+
+// Set SFX volume (NEW)
+void audio_set_sfx_volume(AudioManager *audio, int volume) {
+    if (!audio) return;
+    
+    if (volume < 0) volume = 0;
+    if (volume > 128) volume = 128;
+    
+    audio->sfx_volume = volume;
+    Mix_Volume(-1, volume);  // Apply to all channels
+    
+    int percent = (volume * 100) / 128;
+}
+
+// Get SFX volume (NEW)
+int audio_get_sfx_volume(AudioManager *audio) {
+    if (!audio) return 0;
+    return audio->sfx_volume;
 }
 
 // Play music from WAD
@@ -218,7 +232,7 @@ void audio_play_music(AudioManager *audio, const char *internal_path, bool loop)
     }
     
     // Load music
-    Mix_Music *music = Mix_LoadMUS_RW(rw, 1);  // 1 = free SDL_RWops
+    Mix_Music *music = Mix_LoadMUS_RW(rw, 1);
     if (!music) {
         fprintf(stderr, "Failed to load music: %s\n", Mix_GetError());
         free(music_file.data);
@@ -249,7 +263,7 @@ void audio_play_random_music(AudioManager *audio) {
     
     if (!music) return;
     
-    if (Mix_PlayMusic(music, -1) < 0) {  // -1 = loop
+    if (Mix_PlayMusic(music, -1) < 0) {
         fprintf(stderr, "Failed to play music: %s\n", Mix_GetError());
     } else {
         fprintf(stdout, "♪ Playing random track %d/%d\n", track_index + 1, audio->music_track_count);
@@ -293,6 +307,5 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
     int channel = Mix_PlayChannel(-1, sound, 0);
     if (channel < 0) {
         // All channels busy - shouldn't happen with 32 channels
-        // but silently ignore if it does
     }
 }
