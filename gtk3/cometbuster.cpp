@@ -1618,12 +1618,20 @@ void update_comet_buster(void *vis, double dt) {
             if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
                 game->bullets[j].active = false;  // Consume bullet
                 
-                // Check if boss has shield
-                if (game->boss.shield_active && game->boss.shield_health > 0) {
+                // Shield reduces damage but doesn't block it
+                bool shield_active = (game->boss.shield_active && game->boss.shield_health > 0);
+                
+                if (shield_active) {
+                    // Shield takes damage and reduces boss damage
                     game->boss.shield_health--;
                     game->boss.shield_impact_timer = 0.2;
                     game->boss.shield_impact_angle = atan2(game->boss.y - game->bullets[j].y,
                                                            game->boss.x - game->bullets[j].x);
+                    
+                    // Boss still takes reduced damage (50% damage gets through shield)
+                    game->boss.health--;  // Still damage the boss
+                    game->boss.damage_flash_timer = 0.1;
+                    game->consecutive_hits++;
                     
 #ifdef ExternalSound
                     if (visualizer && visualizer->audio.sfx_hit) {
@@ -1631,14 +1639,20 @@ void update_comet_buster(void *vis, double dt) {
                     }
 #endif
                 } else {
-                    // Damage boss
-                    game->boss.health--;
+                    // No shield - full damage
+                    game->boss.health -= 2;  // Double damage when no shield
                     game->boss.damage_flash_timer = 0.1;
                     game->consecutive_hits++;
                     
-                    if (game->boss.health <= 0) {
-                        comet_buster_destroy_boss(game, width, height, visualizer);
+#ifdef ExternalSound
+                    if (visualizer && visualizer->audio.sfx_hit) {
+                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
                     }
+#endif
+                }
+                
+                if (game->boss.health <= 0) {
+                    comet_buster_destroy_boss(game, width, height, visualizer);
                 }
                 break;
             }
@@ -2001,13 +2015,13 @@ void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen
     boss->vy = 0;
     boss->angle = 0;
     
-    // Boss health
-    boss->health = 100;
-    boss->max_health = 100;
+    // Boss health - reduced from 100 to 60
+    boss->health = 60;
+    boss->max_health = 60;
     
-    // Shield system
-    boss->shield_health = 20;
-    boss->max_shield_health = 20;
+    // Shield system - reduced from 20 to 10, shield reduces damage but doesn't block it
+    boss->shield_health = 10;
+    boss->max_shield_health = 10;
     boss->shield_active = true;
     
     // Shooting
@@ -2025,6 +2039,9 @@ void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen
     
     boss->active = true;
     game->boss_active = true;
+    
+    // Spawn some normal comets alongside the boss
+    comet_buster_spawn_random_comets(game, 3, screen_width, screen_height);
     
     fprintf(stdout, "[SPAWN BOSS] Boss spawned! Position: (%.1f, %.1f), Active: %d, Health: %d\n", 
             boss->x, boss->y, boss->active, boss->health);
@@ -2047,11 +2064,11 @@ void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int h
         
         // Change shield state based on phase
         if (boss->phase == 1) {
-            // Shield up phase
+            // Shield phase - shield reduces damage but doesn't block it
             boss->shield_active = true;
             boss->shield_health = boss->max_shield_health;
         } else {
-            // Normal and enraged phases have weaker/no shield
+            // Normal and enraged phases still have active shield, but it doesn't block
             boss->shield_active = false;
         }
     }
@@ -2079,17 +2096,17 @@ void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int h
         boss->damage_flash_timer -= dt;
     }
     
-    // Firing pattern based on phase
+    // Firing pattern based on phase - all rates reduced
     boss->shoot_cooldown -= dt;
     
     if (boss->phase == 0) {
-        // Normal phase - steady fire
+        // Normal phase - reduced from 0.5 to 0.8 seconds
         if (boss->shoot_cooldown <= 0) {
             comet_buster_boss_fire(game);
-            boss->shoot_cooldown = 0.5;  // Fire every 0.5 seconds
+            boss->shoot_cooldown = 0.8;
         }
     } else if (boss->phase == 1) {
-        // Shield phase - less firing, recharging shield
+        // Shield phase - less firing, reduced from 0.7 to 1.0 seconds
         if (boss->shield_health < boss->max_shield_health) {
             boss->shield_health++;  // Regen 1 HP per frame
             if (boss->shield_health > boss->max_shield_health) {
@@ -2098,15 +2115,15 @@ void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int h
         }
         if (boss->shoot_cooldown <= 0) {
             comet_buster_boss_fire(game);
-            boss->shoot_cooldown = 0.7;  // Fire less frequently
+            boss->shoot_cooldown = 1.0;
         }
     } else if (boss->phase == 2) {
-        // Enraged phase - rapid fire, wider spread
+        // Enraged phase - still faster but reduced from 0.3 to 0.5 seconds
         if (boss->shoot_cooldown <= 0) {
             comet_buster_boss_fire(game);
             // Fire extra bullets in spread pattern
             comet_buster_boss_fire(game);
-            boss->shoot_cooldown = 0.3;  // Fire every 0.3 seconds
+            boss->shoot_cooldown = 0.5;
         }
     }
 }
@@ -2122,9 +2139,20 @@ void comet_buster_boss_fire(CometBusterGame *game) {
     double dy = game->ship_y - boss->y;
     double angle_to_ship = atan2(dy, dx);
     
-    // Fire in multiple directions, centered on the ship
-    int num_bullets = (boss->phase == 2) ? 5 : 3;  // 5 in enraged, 3 normally
-    double angle_spread = 60.0 * M_PI / 180.0;  // 60 degree spread
+    // Fire fewer bullets in different patterns
+    int num_bullets;
+    double angle_spread;
+    
+    if (boss->phase == 2) {
+        // Enraged phase - 3 bullets (reduced from 5)
+        num_bullets = 3;
+        angle_spread = 45.0 * M_PI / 180.0;  // Reduced spread from 60 to 45 degrees
+    } else {
+        // Normal and shield phases - 2 bullets (reduced from 3)
+        num_bullets = 2;
+        angle_spread = 30.0 * M_PI / 180.0;  // 30 degree spread
+    }
+    
     double start_angle = angle_to_ship - angle_spread / 2.0;
     
     for (int i = 0; i < num_bullets; i++) {
