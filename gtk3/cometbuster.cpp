@@ -2302,10 +2302,8 @@ void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
         }
         #endif
         
-        if (comet_buster_is_high_score(game, game->score)) {
-            comet_buster_add_high_score(game, game->score, game->current_wave, "Player");
-            comet_buster_save_high_scores(game);
-        }
+        // Don't add high score here - let the GUI dialog handle player name entry
+        // The high score will be added when player submits their name in the dialog
     } else {
         // Move ship to center (like classic Asteroids) - resolution aware
         if (visualizer && visualizer->width > 0 && visualizer->height > 0) {
@@ -2350,8 +2348,8 @@ void comet_buster_save_high_scores(CometBusterGame *game) {
 }
 
 void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name) {
+    return;
     if (!game || !name) return;
-    
     // Find insertion position to maintain sorted order (highest score first)
     int insert_pos = game->high_score_count;
     for (int i = 0; i < game->high_score_count; i++) {
