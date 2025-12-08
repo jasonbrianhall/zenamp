@@ -301,3 +301,475 @@ bool comet_buster_check_bullet_boss(Bullet *b, BossShip *boss) {
     
     return (dist < collision_dist);
 }
+
+void comet_buster_spawn_spawn_queen(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game) return;
+    
+    fprintf(stdout, "[SPAWN QUEEN] Spawning Spawn Queen at Wave %d\n", game->current_wave);
+    
+    SpawnQueenBoss *queen = &game->spawn_queen;
+    memset(queen, 0, sizeof(SpawnQueenBoss));
+    
+    // Initial position - top center
+    queen->x = screen_width / 2.0;
+    queen->y = 100.0;
+    queen->vx = 0;
+    queen->vy = 0;
+    
+    // Health scales with wave
+    int health_base = 80 + (game->current_wave - 10) * 5;
+    queen->health = health_base;
+    queen->max_health = health_base;
+    
+    // Shield
+    queen->shield_health = 15;
+    queen->max_shield_health = 15;
+    
+    // Spawning mechanics
+    queen->spawn_timer = 2.0;  // Start spawning after 2 seconds
+    queen->spawn_cooldown = 3.0;
+    
+    // Attack patterns
+    queen->phase = 0;
+    queen->phase_timer = 0;
+    queen->attack_timer = 0;
+    queen->attack_cooldown = 2.0;
+    
+    // Movement
+    queen->movement_timer = 0;
+    queen->base_movement_speed = 40.0;
+    
+    // Visual
+    queen->rotation = 0;
+    queen->rotation_speed = 30.0;
+    queen->damage_flash_timer = 0;
+    queen->spawn_particle_timer = 0;
+    
+    // Flags
+    queen->active = true;
+    queen->is_spawn_queen = true;
+    game->boss_active = true;
+    
+    fprintf(stdout, "[SPAWN QUEEN] Queen spawned! Health: %d\n", queen->health);
+}
+
+void comet_buster_spawn_queen_spawn_ships(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game || game->enemy_ship_count >= MAX_ENEMY_SHIPS) return;
+    
+    SpawnQueenBoss *queen = &game->spawn_queen;
+    
+    // ONLY SPAWN TYPE 1 (RED) OR TYPE 3 (SENTINEL/MAGENTA)
+    // NEVER SPAWN TYPE 0 (BLUE) OR TYPE 2 (GREEN) - they don't attack
+    
+    int ship_type = 0;
+    int num_ships_to_spawn = 1;
+    
+    if (queen->phase == 0) {
+        // ===== PHASE 0: RECRUITMENT (75-100%) =====
+        // Red ships only - aggressive solo hunters
+        ship_type = 1;  // Red
+        num_ships_to_spawn = (rand() % 2) + 1;  // 1-2 ships
+        fprintf(stdout, "[SPAWN QUEEN] Phase 0: Spawning %d Red ships\n", num_ships_to_spawn);
+        
+    } else if (queen->phase == 1) {
+        // ===== PHASE 1: AGGRESSION (40-75%) =====
+        // Mix: 60% Red ships, 40% Sentinel formations
+        int spawn_roll = rand() % 100;
+        
+        if (spawn_roll < 60) {
+            // Spawn Red ships
+            ship_type = 1;
+            num_ships_to_spawn = (rand() % 2) + 1;  // 1-2 red ships
+            fprintf(stdout, "[SPAWN QUEEN] Phase 1: Spawning %d Red ships\n", num_ships_to_spawn);
+        } else {
+            // Spawn Sentinel formation (pair or trio)
+            ship_type = 3;
+            num_ships_to_spawn = 2 + (rand() % 2);  // 2-3 ships
+            fprintf(stdout, "[SPAWN QUEEN] Phase 1: Spawning Sentinel formation of %d\n", num_ships_to_spawn);
+        }
+        
+    } else {
+        // ===== PHASE 2: DESPERATION (0-40%) =====
+        // Mostly Sentinel formations (70%), occasional Red (30%)
+        int spawn_roll = rand() % 100;
+        
+        if (spawn_roll < 30) {
+            // Occasional solo Red ship
+            ship_type = 1;
+            num_ships_to_spawn = 1;
+            fprintf(stdout, "[SPAWN QUEEN] Phase 2: Spawning 1 Red ship\n");
+        } else {
+            // Dominant Sentinel formations
+            ship_type = 3;
+            num_ships_to_spawn = 2 + (rand() % 2);  // 2-3 ships
+            fprintf(stdout, "[SPAWN QUEEN] Phase 2: Spawning Sentinel formation of %d\n", num_ships_to_spawn);
+        }
+    }
+    
+    // Choose a random spawn edge
+    int edge = rand() % 8;
+    double speed = 80.0 + (rand() % 40);
+    
+    // For Sentinel ships, create a formation with coordinated ID
+    int formation_id = -1;
+    int formation_size = 1;
+    
+    if (ship_type == 3 && num_ships_to_spawn > 1) {
+        // Sentinel formation - track so they stay together
+        formation_id = game->current_wave * 100 + (int)(game->spawn_queen.spawn_timer * 10);
+        formation_size = num_ships_to_spawn;
+    }
+    
+    // Spawn all the ships
+    for (int i = 0; i < num_ships_to_spawn; i++) {
+        if (game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
+            fprintf(stdout, "[SPAWN QUEEN] Hit MAX_ENEMY_SHIPS limit (%d), stopping spawn\n", MAX_ENEMY_SHIPS);
+            break;
+        }
+        
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height,
+                                               ship_type, edge, speed,
+                                               formation_id, formation_size);
+    }
+    
+    // Visual particle effect from queen's ports
+    for (int p = 0; p < 5; p++) {
+        double angle = 2.0 * M_PI * (rand() % 100) / 100.0;
+        double particle_speed = 50.0 + (rand() % 50);
+        double vx = cos(angle) * particle_speed;
+        double vy = sin(angle) * particle_speed;
+    }
+}
+
+// ============================================================================
+// UPDATING
+// ============================================================================
+
+void comet_buster_update_spawn_queen(CometBusterGame *game, double dt, int width, int height) {
+    if (!game || !game->spawn_queen.active) return;
+    
+    SpawnQueenBoss *queen = &game->spawn_queen;
+    
+    // Update phase based on health percentage
+    int old_phase = queen->phase;
+    if (queen->health > queen->max_health * 0.75) {
+        queen->phase = 0;  // Recruitment
+    } else if (queen->health > queen->max_health * 0.4) {
+        queen->phase = 1;  // Aggression
+    } else {
+        queen->phase = 2;  // Desperation
+    }
+    
+    // Log phase changes
+    if (queen->phase != old_phase) {
+        fprintf(stdout, "[SPAWN QUEEN] Phase changed to %d (health: %.1f%%)\n", 
+                queen->phase, 100.0 * queen->health / queen->max_health);
+    }
+    
+    queen->phase_timer += dt;
+    
+    // --- MOVEMENT ---
+    // Slow horizontal sine wave
+    queen->movement_timer += dt;
+    double sine_offset = sin(queen->movement_timer * queen->base_movement_speed / 100.0) * 150.0;
+    queen->x = width / 2.0 + sine_offset;
+    
+    // Keep in bounds
+    if (queen->x < 60) queen->x = 60;
+    if (queen->x > width - 60) queen->x = width - 60;
+    
+    // --- ROTATION ---
+    queen->rotation += queen->rotation_speed * dt;
+    
+    // --- DAMAGE EFFECTS ---
+    if (queen->damage_flash_timer > 0) {
+        queen->damage_flash_timer -= dt;
+    }
+    
+    queen->spawn_particle_timer -= dt;
+    
+    // --- SHIP SPAWNING ---
+    queen->spawn_timer -= dt;
+    if (queen->spawn_timer <= 0) {
+        comet_buster_spawn_queen_spawn_ships(game, width, height);
+        
+        // Spawn cooldown varies by phase
+        if (queen->phase == 0) {
+            queen->spawn_cooldown = 3.0;
+        } else if (queen->phase == 1) {
+            queen->spawn_cooldown = 2.5;
+        } else {
+            queen->spawn_cooldown = 2.0;
+        }
+        
+        queen->spawn_timer = queen->spawn_cooldown;
+    }
+    
+    // --- BULLET ATTACKS ---
+    queen->attack_timer -= dt;
+    if (queen->attack_timer <= 0) {
+        comet_buster_spawn_queen_fire(game);
+        
+        // Attack cooldown varies by phase
+        if (queen->phase == 0) {
+            queen->attack_cooldown = 2.0;
+        } else if (queen->phase == 1) {
+            queen->attack_cooldown = 1.2;
+        } else {
+            queen->attack_cooldown = 0.8;
+        }
+        
+        queen->attack_timer = queen->attack_cooldown;
+    }
+}
+
+// ============================================================================
+// FIRING
+// ============================================================================
+
+void comet_buster_spawn_queen_fire(CometBusterGame *game) {
+    if (!game || !game->spawn_queen.active) return;
+    
+    SpawnQueenBoss *queen = &game->spawn_queen;
+    double bullet_speed = 200.0;
+    
+    double dx = game->ship_x - queen->x;
+    double dy = game->ship_y - queen->y;
+    double angle_to_ship = atan2(dy, dx);
+    
+    if (queen->phase == 0) {
+        // Phase 0: Minimal fire - 1 bullet toward player
+        int num_bullets = 1;
+        double spread = 15.0 * M_PI / 180.0;
+        
+        for (int i = 0; i < num_bullets; i++) {
+            double fire_angle = angle_to_ship + (spread * (i - num_bullets/2.0));
+            double vx = cos(fire_angle) * bullet_speed;
+            double vy = sin(fire_angle) * bullet_speed;
+            comet_buster_spawn_enemy_bullet(game, queen->x, queen->y, vx, vy);
+        }
+        
+    } else if (queen->phase == 1) {
+        // Phase 1: Burst fire - 3-bullet spread
+        int num_bullets = 3;
+        double spread = 45.0 * M_PI / 180.0;
+        double start_angle = angle_to_ship - spread / 2.0;
+        
+        for (int i = 0; i < num_bullets; i++) {
+            double fire_angle = start_angle + (spread / (num_bullets - 1)) * i;
+            double vx = cos(fire_angle) * bullet_speed;
+            double vy = sin(fire_angle) * bullet_speed;
+            comet_buster_spawn_enemy_bullet(game, queen->x, queen->y, vx, vy);
+        }
+        
+    } else {
+        // Phase 2: Ring fire - 16 bullets in all directions
+        int num_bullets = 16;
+        for (int i = 0; i < num_bullets; i++) {
+            double fire_angle = 2.0 * M_PI * i / num_bullets;
+            double vx = cos(fire_angle) * (bullet_speed + 50.0);
+            double vy = sin(fire_angle) * (bullet_speed + 50.0);
+            comet_buster_spawn_enemy_bullet(game, queen->x, queen->y, vx, vy);
+        }
+    }
+}
+
+// ============================================================================
+// COLLISION & DAMAGE
+// ============================================================================
+
+bool comet_buster_check_bullet_spawn_queen(Bullet *b, SpawnQueenBoss *queen) {
+    if (!b || !b->active || !queen || !queen->active) return false;
+    
+    double dx = queen->x - b->x;
+    double dy = queen->y - b->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    double collision_radius = 50.0;
+    
+    return (dist < collision_radius);
+}
+
+void comet_buster_destroy_spawn_queen(CometBusterGame *game, int width, int height, void *vis) {
+    if (!game || !game->spawn_queen.active) return;
+    
+    SpawnQueenBoss *queen = &game->spawn_queen;
+    
+    fprintf(stdout, "[SPAWN QUEEN] Destroyed at wave %d!\n", game->current_wave);
+    
+    // Large explosion (80 particles)
+    comet_buster_spawn_explosion(game, queen->x, queen->y, 0, 80);
+    
+    // Victory text
+    comet_buster_spawn_floating_text(game, queen->x, queen->y - 50,
+                                     "MOTHERSHIP DOWN", 1.0, 0.2, 1.0);
+    
+    // Scoring
+    int base_score = 1000;
+    int wave_bonus = game->current_wave * 100;
+    int total_score = base_score + wave_bonus;
+    
+    // Bonus if multiplier was high
+    if (game->score_multiplier >= 4.0) {
+        total_score += 500;
+        comet_buster_spawn_floating_text(game, queen->x, queen->y,
+                                         "MULTIPLIER BONUS!", 0.0, 1.0, 1.0);
+    }
+    
+    game->score += total_score;
+    
+    // Mark inactive
+    queen->active = false;
+    game->boss_active = false;
+    
+    fprintf(stdout, "[SPAWN QUEEN] Score awarded: %d\n", total_score);
+}
+
+// ============================================================================
+// RENDERING
+// ============================================================================
+
+void draw_spawn_queen_boss(SpawnQueenBoss *queen, cairo_t *cr, int width, int height) {
+    (void)width;
+    (void)height;
+    
+    if (!queen || !queen->active) return;
+    
+    cairo_save(cr);
+    cairo_translate(cr, queen->x, queen->y);
+    cairo_rotate(cr, queen->rotation * M_PI / 180.0);
+    
+    // Main elliptical body - iridescent magenta
+    double major_axis = 70.0;
+    double minor_axis = 45.0;
+    
+    // Body fill
+    cairo_set_source_rgb(cr, 0.7, 0.3, 0.8);  // Magenta
+    cairo_scale(cr, major_axis, minor_axis);
+    cairo_arc(cr, 0, 0, 1.0, 0, 2.0 * M_PI);
+    cairo_restore(cr);
+    cairo_fill(cr);
+    cairo_save(cr);
+    
+    // Outer metallic ring
+    cairo_translate(cr, queen->x, queen->y);
+    cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, 0.7);
+    cairo_set_line_width(cr, 2.5);
+    cairo_scale(cr, major_axis, minor_axis);
+    cairo_arc(cr, 0, 0, 1.0, 0, 2.0 * M_PI);
+    cairo_restore(cr);
+    cairo_stroke(cr);
+    
+    cairo_save(cr);
+    cairo_translate(cr, queen->x, queen->y);
+    
+    // Spawn ports - 6 around equator
+    double port_radius = 6.0;
+    double port_orbit = 50.0;
+    
+    // Determine port colors based on phase
+    double port_r, port_g, port_b;
+    if (queen->phase == 0) {
+        // Phase 0: Red ships - ports glow red
+        port_r = 1.0; port_g = 0.2; port_b = 0.2;
+    } else if (queen->phase == 1) {
+        // Phase 1: Mix - ports glow yellow
+        port_r = 1.0; port_g = 0.5; port_b = 0.8;
+    } else {
+        // Phase 2: Sentinel ships - ports glow magenta
+        port_r = 0.8; port_g = 0.3; port_b = 1.0;
+    }
+    
+    // Pulsing glow intensity
+    double glow_intensity = 0.5 + 0.5 * sin(queen->spawn_particle_timer * 5.0);
+    
+    for (int i = 0; i < 6; i++) {
+        double angle = 2.0 * M_PI * i / 6.0;
+        double px = cos(angle) * port_orbit;
+        double py = sin(angle) * port_orbit * 0.6;
+        
+        // Outer glow
+        cairo_set_source_rgba(cr, port_r, port_g, port_b, glow_intensity * 0.5);
+        cairo_arc(cr, px, py, port_radius + 4.0, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+        
+        // Port center
+        cairo_set_source_rgb(cr, port_r, port_g, port_b);
+        cairo_arc(cr, px, py, port_radius, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+    }
+    
+    cairo_restore(cr);
+    
+    // Damage flash overlay
+    if (queen->damage_flash_timer > 0) {
+        cairo_set_source_rgba(cr, 1.0, 0.5, 0.5, 0.4);
+        cairo_arc(cr, queen->x, queen->y, major_axis, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+    }
+    
+    // Red core (pulsing)
+    double core_size = 12.0 + 3.0 * sin(queen->phase_timer * 3.0);
+    cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);
+    cairo_arc(cr, queen->x, queen->y, core_size, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    
+    // --- HEALTH BAR ---
+    double bar_width = 100.0;
+    double bar_height = 8.0;
+    double bar_x = queen->x - bar_width / 2.0;
+    double bar_y = queen->y - 70.0;
+    
+    // Background
+    cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_fill(cr);
+    
+    // Health fill
+    double health_ratio = (double)queen->health / queen->max_health;
+    cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);  // Red
+    cairo_rectangle(cr, bar_x, bar_y, bar_width * health_ratio, bar_height);
+    cairo_fill(cr);
+    
+    // Border
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_set_line_width(cr, 1.0);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_stroke(cr);
+    
+    // --- SHIELD BAR ---
+    double shield_y = bar_y + bar_height + 2.0;
+    
+    cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
+    cairo_rectangle(cr, bar_x, shield_y, bar_width, bar_height);
+    cairo_fill(cr);
+    
+    double shield_ratio = (double)queen->shield_health / queen->max_shield_health;
+    cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);  // Cyan
+    cairo_rectangle(cr, bar_x, shield_y, bar_width * shield_ratio, bar_height);
+    cairo_fill(cr);
+    
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_rectangle(cr, bar_x, shield_y, bar_width, bar_height);
+    cairo_stroke(cr);
+    
+    // --- PHASE INDICATOR ---
+    const char *phase_text;
+    double text_r, text_g, text_b;
+    
+    if (queen->phase == 0) {
+        phase_text = "RECRUITING";
+        text_r = 1.0; text_g = 0.5; text_b = 0.0;
+    } else if (queen->phase == 1) {
+        phase_text = "AGGRESSIVE";
+        text_r = 1.0; text_g = 1.0; text_b = 0.0;
+    } else {
+        phase_text = "DESPERATE!";
+        text_r = 1.0; text_g = 0.0; text_b = 0.0;
+    }
+    
+    cairo_set_source_rgb(cr, text_r, text_g, text_b);
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 11);
+    cairo_move_to(cr, queen->x - 35, queen->y + 75);
+    cairo_show_text(cr, phase_text);
+}

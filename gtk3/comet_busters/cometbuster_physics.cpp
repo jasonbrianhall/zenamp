@@ -934,13 +934,15 @@ void update_comet_buster(void *vis, double dt) {
     comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);  // Update enemy bullets
     
     // Update boss if active
-    if (game->boss_active) {
+    if (game->boss_active && game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
+        comet_buster_update_spawn_queen(game, dt, width, height);
+    } else if (game->boss_active && game->boss.active) {
         comet_buster_update_boss(game, dt, width, height);
-    }
+    }    
     
     // Spawn boss on waves 5, 10, 15, 20, etc. (every 5 waves starting at wave 5)
     // But only if the boss hasn't already been defeated this wave (game->wave_complete_timer == 0)
-    if ((game->current_wave % 5 == 0) && !game->boss_active && game->comet_count == 0 && !game->boss.active && game->wave_complete_timer == 0) {
+    if ((game->current_wave % 10 == 5) && !game->boss_active && game->comet_count == 0 && !game->boss.active && game->wave_complete_timer == 0) {
         fprintf(stdout, "[UPDATE] Conditions met to spawn boss: Wave=%d, BossActive=%d, CometCount=%d\n",
                 game->current_wave, game->boss_active, game->comet_count);
         comet_buster_spawn_boss(game, width, height);
@@ -1074,60 +1076,99 @@ void update_comet_buster(void *vis, double dt) {
         }
     }
     
-    // Check player bullets hitting boss
+    // Check player bullets hitting boss (either Spawn Queen or regular boss)
     if (game->boss_active) {
-        for (int j = 0; j < game->bullet_count; j++) {
-            if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
-                game->bullets[j].active = false;  // Consume bullet
-                
-                // Shield reduces damage but doesn't block it
-                bool shield_active = (game->boss.shield_active && game->boss.shield_health > 0);
-                
-                if (shield_active) {
-                    // Shield takes damage and reduces boss damage
-                    game->boss.shield_health--;
-                    game->boss.shield_impact_timer = 0.2;
-                    game->boss.shield_impact_angle = atan2(game->boss.y - game->bullets[j].y,
-                                                           game->boss.x - game->bullets[j].x);
-                    
-                    // Boss still takes reduced damage (50% damage gets through shield)
-                    game->boss.health--;  // Still damage the boss
-                    game->boss.damage_flash_timer = 0.1;
+        // Check Spawn Queen collision first
+        if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
+            for (int j = 0; j < game->bullet_count; j++) {
+                if (comet_buster_check_bullet_spawn_queen(&game->bullets[j], &game->spawn_queen)) {
+                    game->bullets[j].active = false;  // Consume bullet
+                    game->spawn_queen.damage_flash_timer = 0.1;
                     game->consecutive_hits++;
                     
-#ifdef ExternalSound
-                    if (visualizer && visualizer->audio.sfx_hit) {
-                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                    // Shield reduces damage
+                    if (game->spawn_queen.shield_health > 0) {
+                        game->spawn_queen.shield_health--;
+                    } else {
+                        // No shield - direct damage
+                        game->spawn_queen.health--;
                     }
-#endif
-                } else {
-                    // No shield - full damage
-                    game->boss.health -= 2;  // Double damage when no shield
-                    game->boss.damage_flash_timer = 0.1;
-                    game->consecutive_hits++;
                     
-#ifdef ExternalSound
-                    if (visualizer && visualizer->audio.sfx_hit) {
-                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                    fprintf(stdout, "[COLLISION] Spawn Queen hit! Health: %d, Shield: %d\n", 
+                            game->spawn_queen.health, game->spawn_queen.shield_health);
+                    
+                    if (game->spawn_queen.health <= 0) {
+                        comet_buster_destroy_spawn_queen(game, width, height, visualizer);
                     }
-#endif
+                    break;
                 }
-                
-                if (game->boss.health <= 0) {
-                    comet_buster_destroy_boss(game, width, height, visualizer);
-                }
-                break;
+            }
+            
+            // Check Spawn Queen-player ship collision
+            double dx = game->ship_x - game->spawn_queen.x;
+            double dy = game->ship_y - game->spawn_queen.y;
+            double dist = sqrt(dx*dx + dy*dy);
+            double collision_dist = 20.0 + 50.0;  // Player ~20px, Queen ~50px
+            
+            if (dist < collision_dist) {
+                comet_buster_on_ship_hit(game, visualizer);
             }
         }
-        
-        // Check boss-player ship collisions
-        double dx = game->ship_x - game->boss.x;
-        double dy = game->ship_y - game->boss.y;
-        double dist = sqrt(dx*dx + dy*dy);
-        double collision_dist = 20.0 + 35.0;  // Player ~20px, Boss ~35px
-        
-        if (dist < collision_dist) {
-            comet_buster_on_ship_hit(game, visualizer);
+        // Regular Death Star boss collision
+        else if (game->boss.active) {
+            for (int j = 0; j < game->bullet_count; j++) {
+                if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
+                    game->bullets[j].active = false;  // Consume bullet
+                    
+                    // Shield reduces damage but doesn't block it
+                    bool shield_active = (game->boss.shield_active && game->boss.shield_health > 0);
+                    
+                    if (shield_active) {
+                        // Shield takes damage and reduces boss damage
+                        game->boss.shield_health--;
+                        game->boss.shield_impact_timer = 0.2;
+                        game->boss.shield_impact_angle = atan2(game->boss.y - game->bullets[j].y,
+                                                               game->boss.x - game->bullets[j].x);
+                        
+                        // Boss still takes reduced damage (50% damage gets through shield)
+                        game->boss.health--;  // Still damage the boss
+                        game->boss.damage_flash_timer = 0.1;
+                        game->consecutive_hits++;
+                        
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_hit) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                        }
+#endif
+                    } else {
+                        // No shield - full damage
+                        game->boss.health -= 2;  // Double damage when no shield
+                        game->boss.damage_flash_timer = 0.1;
+                        game->consecutive_hits++;
+                        
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_hit) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                        }
+#endif
+                    }
+                    
+                    if (game->boss.health <= 0) {
+                        comet_buster_destroy_boss(game, width, height, visualizer);
+                    }
+                    break;
+                }
+            }
+            
+            // Check boss-player ship collisions
+            double dx = game->ship_x - game->boss.x;
+            double dy = game->ship_y - game->boss.y;
+            double dist = sqrt(dx*dx + dy*dy);
+            double collision_dist = 20.0 + 35.0;  // Player ~20px, Boss ~35px
+            
+            if (dist < collision_dist) {
+                comet_buster_on_ship_hit(game, visualizer);
+            }
         }
     }
     

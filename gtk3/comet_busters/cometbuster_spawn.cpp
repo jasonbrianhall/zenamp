@@ -111,27 +111,39 @@ void comet_buster_spawn_random_comets(CometBusterGame *game, int count, int scre
 void comet_buster_spawn_wave(CometBusterGame *game, int screen_width, int screen_height) {
     if (!game) return;
     
-    // Reset boss.active flag so the boss can be spawned again in a future boss wave
+    // Reset boss flags
     game->boss.active = false;
+    game->spawn_queen.active = false;
     
-    // Get number of comets for this wave
-    int wave_count = comet_buster_get_wave_comet_count(game->current_wave);
-    
-    // Spawn comets for the wave
-    for (int i = 0; i < wave_count; i++) {
-        int band = rand() % 3;
-        comet_buster_spawn_comet(game, band, screen_width, screen_height);
+    // Check if this is a boss wave
+    if (game->current_wave > 0 && game->current_wave % 10 == 0) {
+        // Spawn Queen appears on waves 10, 20, 30, etc.
+        comet_buster_spawn_spawn_queen(game, screen_width, screen_height);
+        // Don't spawn normal comets - spawn queen controls the difficulty
+    } else if (game->current_wave % 10 == 5) {
+        // Regular boss on waves 5, 15, 25, etc.
+        comet_buster_spawn_boss(game, screen_width, screen_height);
+        // Spawn some normal comets alongside the boss
+        comet_buster_spawn_random_comets(game, 3, screen_width, screen_height);
+    } else {
+        // Normal waves - just comets
+        int wave_count = comet_buster_get_wave_comet_count(game->current_wave);
         
-        // Apply speed multiplier based on wave
-        if (game->comet_count > 0) {
-            Comet *last_comet = &game->comets[game->comet_count - 1];
-            double speed_mult = comet_buster_get_wave_speed_multiplier(game->current_wave);
-            last_comet->vx *= speed_mult;
-            last_comet->vy *= speed_mult;
+        for (int i = 0; i < wave_count; i++) {
+            int band = rand() % 3;
+            comet_buster_spawn_comet(game, band, screen_width, screen_height);
+            
+            // Apply speed multiplier based on wave
+            if (game->comet_count > 0) {
+                Comet *last_comet = &game->comets[game->comet_count - 1];
+                double speed_mult = comet_buster_get_wave_speed_multiplier(game->current_wave);
+                last_comet->vx *= speed_mult;
+                last_comet->vy *= speed_mult;
+            }
         }
+        
+        game->wave_comets = 0;  // Reset wave comet counter
     }
-    
-    game->wave_comets = 0;  // Reset wave comet counter
 }
 
 void comet_buster_update_wave_progression(CometBusterGame *game) {

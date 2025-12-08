@@ -140,6 +140,40 @@ typedef struct {
     bool active;                // Is the boss alive?
 } BossShip;
 
+// Spawn Queen (Mothership) structure - spawns Red and Sentinel ships on waves 10, 20, 30, etc.
+typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    int health;                 // Queen health (scales with wave)
+    int max_health;
+    int shield_health;          // Shield (15 points, regenerates in phase 1)
+    int max_shield_health;
+    
+    // Spawn mechanics
+    double spawn_timer;         // Timer until next ship spawn
+    double spawn_cooldown;      // Seconds between ship spawns
+    
+    // Attack patterns
+    int phase;                  // 0 = recruitment, 1 = aggression, 2 = desperation
+    double phase_timer;         // Time in current phase
+    double attack_timer;        // Timer until next attack
+    double attack_cooldown;     // Seconds between attacks
+    
+    // Movement
+    double movement_timer;      // For sine wave motion
+    double base_movement_speed; // How fast to move horizontally
+    
+    // Visual
+    double rotation;            // Spinning animation
+    double rotation_speed;      // Degrees per second
+    double damage_flash_timer;  // Flash when taking damage
+    double spawn_particle_timer;// For port glow effects
+    
+    // Status
+    bool active;                // Is queen alive?
+    bool is_spawn_queen;        // Flag: true for queen, false for regular boss
+} SpawnQueenBoss;
+
 typedef struct {
     // Ship state
     double ship_x, ship_y;
@@ -186,6 +220,7 @@ typedef struct {
     
     // Boss (Death Star) - appears in wave 5+
     BossShip boss;
+    SpawnQueenBoss spawn_queen;  // Mothership boss - appears on waves 10, 20, 30, etc.
     bool boss_active;
     double boss_spawn_timer;
     int last_boss_wave;             // Track which wave had the boss (only spawn every 5 waves)
@@ -277,6 +312,15 @@ bool comet_buster_check_bullet_boss(Bullet *b, BossShip *boss);
 void comet_buster_destroy_boss(CometBusterGame *game, int width, int height, void *vis);
 void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height);
 
+// Spawn Queen boss functions
+void comet_buster_spawn_spawn_queen(CometBusterGame *game, int screen_width, int screen_height);
+void comet_buster_update_spawn_queen(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_spawn_queen_fire(CometBusterGame *game);
+void comet_buster_spawn_queen_spawn_ships(CometBusterGame *game, int screen_width, int screen_height);
+bool comet_buster_check_bullet_spawn_queen(Bullet *b, SpawnQueenBoss *queen);
+void comet_buster_destroy_spawn_queen(CometBusterGame *game, int width, int height, void *vis);
+void draw_spawn_queen_boss(SpawnQueenBoss *queen, cairo_t *cr, int width, int height);
+
 bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
 bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
 void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double dy, 
@@ -316,5 +360,7 @@ void comet_buster_load_high_scores(CometBusterGame *game);
 void comet_buster_save_high_scores(CometBusterGame *game);
 void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name);
 bool comet_buster_is_high_score(CometBusterGame *game, int score);
+void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_width, int screen_height, 
+                                            int ship_type, int edge, double speed, int formation_id, int formation_size);
 
 #endif // COMETBUSTER_H

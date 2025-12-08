@@ -868,7 +868,7 @@ void on_debug_jump_to_wave_5(GtkWidget *widget, gpointer data) {
     
     // Jump to Wave 5
     CometBusterGame *game = &gui->visualizer.comet_buster;
-    game->current_wave = 5;
+    game->current_wave = 10;
     game->score = 10000;  // Give some starting points
     game->score_multiplier = 1.5;  // Decent multiplier
     

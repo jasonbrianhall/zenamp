@@ -38,6 +38,8 @@ void comet_buster_reset_game(CometBusterGame *game) {
     // Initialize boss as inactive
     game->boss_active = false;
     game->boss.active = false;
+    game->spawn_queen.active = false;
+    game->spawn_queen.is_spawn_queen = false;
     game->boss_spawn_timer = 0;
     game->last_boss_wave = 0;  // Track which wave had the boss
     
