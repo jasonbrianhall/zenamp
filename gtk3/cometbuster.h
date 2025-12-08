@@ -182,6 +182,7 @@ typedef struct {
     BossShip boss;
     bool boss_active;
     double boss_spawn_timer;
+    int last_boss_wave;             // Track which wave had the boss (only spawn every 5 waves)
     
     // Timing & difficulty
     double spawn_timer;         // Seconds until next spawn

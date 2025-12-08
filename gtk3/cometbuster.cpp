@@ -46,6 +46,7 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->boss_active = false;
     game->boss.active = false;
     game->boss_spawn_timer = 0;
+    game->last_boss_wave = 0;  // Track which wave had the boss
     
     // Initialize non-zero values - use defaults, will be set by visualizer if needed
     game->ship_x = 400.0;
@@ -426,6 +427,9 @@ double comet_buster_get_wave_speed_multiplier(int wave) {
 
 void comet_buster_spawn_wave(CometBusterGame *game, int screen_width, int screen_height) {
     if (!game) return;
+    
+    // Reset boss.active flag so the boss can be spawned again in a future boss wave
+    game->boss.active = false;
     
     // Get number of comets for this wave
     int wave_count = comet_buster_get_wave_comet_count(game->current_wave);
@@ -1473,10 +1477,9 @@ void update_comet_buster(void *vis, double dt) {
         comet_buster_update_boss(game, dt, width, height);
     }
     
-    // Spawn boss on wave 5 (only if boss isn't already dead from this wave)
-    // We check: boss should be requested (wave >= 5), boss shouldn't be active, and all comets should be gone
-    // AND the boss.active flag should still be false (meaning it hasn't been initialized yet)
-    if (game->current_wave >= 5 && !game->boss_active && game->comet_count == 0 && !game->boss.active) {
+    // Spawn boss on waves 5, 10, 15, 20, etc. (every 5 waves starting at wave 5)
+    // But only if the boss hasn't already been defeated this wave (game->wave_complete_timer == 0)
+    if ((game->current_wave % 5 == 0) && !game->boss_active && game->comet_count == 0 && !game->boss.active && game->wave_complete_timer == 0) {
         fprintf(stdout, "[UPDATE] Conditions met to spawn boss: Wave=%d, BossActive=%d, CometCount=%d\n",
                 game->current_wave, game->boss_active, game->comet_count);
         comet_buster_spawn_boss(game, width, height);
@@ -1492,15 +1495,13 @@ void update_comet_buster(void *vis, double dt) {
     }
     
     // Handle wave complete timer (delay before next wave spawns)
-    // BUT: Don't spawn next wave if boss is still alive
+    // If boss was just killed, spawn next wave after timer regardless of remaining comets
     if (game->wave_complete_timer > 0 && !game->boss_active) {
         game->wave_complete_timer -= dt;
         if (game->wave_complete_timer <= 0) {
-            // Timer expired - spawn the next wave (but only if boss is dead)
-            if (game->comet_count == 0 && !game->boss_active) {
-                game->current_wave++;  // Increment AFTER timer expires
-                comet_buster_spawn_wave(game, width, height);
-            }
+            // Timer expired - spawn the next wave
+            game->current_wave++;  // Increment wave
+            comet_buster_spawn_wave(game, width, height);
             game->wave_complete_timer = 0;
         }
     }
@@ -2000,7 +2001,6 @@ void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int 
 // ============================================================================
 
 void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen_height) {
-    (void)screen_height;  // Suppress unused parameter warning
     if (!game) return;
     
     fprintf(stdout, "[SPAWN BOSS] Attempting to spawn boss at Wave %d\n", game->current_wave);
@@ -2008,11 +2008,11 @@ void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen
     BossShip *boss = &game->boss;
     memset(boss, 0, sizeof(BossShip));
     
-    // Spawn at top center of screen
+    // Spawn boss off-screen at the top so it scrolls in
     boss->x = screen_width / 2.0;
-    boss->y = 80.0;
+    boss->y = -80.0;  // Start above the screen
     boss->vx = 40.0 + (rand() % 40);  // Slow horizontal movement
-    boss->vy = 0;
+    boss->vy = 100.0;  // Scroll down at 100 pixels per second
     boss->angle = 0;
     
     // Boss health - reduced from 100 to 60
@@ -2073,9 +2073,16 @@ void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int h
         }
     }
     
-    // Movement - bounces off sides
+    // Movement - bounces off sides, stops scrolling down after entering screen
     boss->x += boss->vx * dt;
-    boss->y += boss->vy * dt;
+    
+    // Only move down if boss is above the visible area
+    if (boss->y < 100.0) {
+        boss->y += boss->vy * dt;
+    } else {
+        // Once boss is in play area, stop vertical movement
+        boss->vy = 0;
+    }
     
     if (boss->x < 60 || boss->x > width - 60) {
         boss->vx = -boss->vx;  // Bounce
@@ -2211,6 +2218,13 @@ void comet_buster_destroy_boss(CometBusterGame *game, int width, int height, voi
     
     boss->active = false;
     game->boss_active = false;
+    
+    // Reset boss.active flag for future boss waves
+    game->boss.active = false;
+    
+    // Set wave complete timer for 2 second countdown before next wave
+    // Boss is dead, so wave will progress after countdown regardless of remaining comets
+    game->wave_complete_timer = 2.0;
 }
 
 
@@ -3143,20 +3157,20 @@ void draw_comet_buster_hud(CometBusterGame *game, cairo_t *cr, int width, int he
     cairo_show_text(cr, text);
     
     // Wave progress info (only show if wave is incomplete)
-    if (game->comet_count > 0) {
+    if (game->wave_complete_timer > 0) {
+        sprintf(text, "NEXT WAVE in %.1fs", game->wave_complete_timer);
+        cairo_set_font_size(cr, 18);
+        cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);
+        cairo_move_to(cr, width / 2 - 160, height / 2 - 50);
+        cairo_show_text(cr, text);
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_set_font_size(cr, 18);
+    } else if (game->comet_count > 0) {
         int expected_count = comet_buster_get_wave_comet_count(game->current_wave);
         sprintf(text, "DESTROYED: %d/%d", expected_count - game->comet_count, expected_count);
         cairo_set_font_size(cr, 12);
         cairo_move_to(cr, width - 280, 75);
         cairo_show_text(cr, text);
-        cairo_set_font_size(cr, 18);
-    } else if (game->wave_complete_timer > 0) {
-        sprintf(text, "WAVE COMPLETE! NEXT IN %.1fs", game->wave_complete_timer);
-        cairo_set_font_size(cr, 16);
-        cairo_set_source_rgb(cr, 0.0, 1.0, 0.5);
-        cairo_move_to(cr, width / 2 - 120, height / 2 - 50);
-        cairo_show_text(cr, text);
-        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
         cairo_set_font_size(cr, 18);
     }
     
