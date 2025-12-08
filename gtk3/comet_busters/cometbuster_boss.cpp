@@ -291,3 +291,13 @@ void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height) 
     cairo_show_text(cr, phase_text);
 }
 
+bool comet_buster_check_bullet_boss(Bullet *b, BossShip *boss) {
+    if (!b || !b->active || !boss || !boss->active) return false;
+    
+    double dx = boss->x - b->x;
+    double dy = boss->y - b->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    double collision_dist = 35.0;  // Boss collision radius
+    
+    return (dist < collision_dist);
+}
