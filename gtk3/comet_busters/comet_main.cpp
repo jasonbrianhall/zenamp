@@ -675,6 +675,8 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data);
 gboolean on_key_release(GtkWidget *widget, GdkEventKey *event, gpointer data);
 void update_status_text(CometGUI *gui);
 gboolean game_update_timer(gpointer data);
+void on_new_game(GtkWidget *widget, gpointer data);
+void on_toggle_pause(GtkWidget *widget, gpointer data);
 void on_about(GtkWidget *widget, gpointer data);
 void on_game_controls(GtkWidget *widget, gpointer data);
 void on_toggle_fullscreen(GtkWidget *widget, gpointer data);
@@ -844,9 +846,41 @@ void on_new_game(GtkWidget *widget, gpointer data) {
     gui->high_score_dialog_shown = false;
     gui->game_paused = false;
     
+    // Reset mouse state to prevent wild mouse behavior on restart
+    gui->visualizer.mouse_x = gui->visualizer.width / 2;
+    gui->visualizer.mouse_y = gui->visualizer.height / 2;
+    gui->visualizer.last_mouse_x = gui->visualizer.width / 2;
+    gui->visualizer.last_mouse_y = gui->visualizer.height / 2;
+    gui->visualizer.mouse_just_moved = false;
+    gui->visualizer.mouse_movement_timer = 0;
+    gui->visualizer.mouse_left_pressed = false;
+    gui->visualizer.mouse_right_pressed = false;
+    gui->visualizer.mouse_middle_pressed = false;
+    
+    // Reset keyboard state to prevent stuck keys on restart
+    gui->visualizer.key_a_pressed = false;
+    gui->visualizer.key_d_pressed = false;
+    gui->visualizer.key_w_pressed = false;
+    gui->visualizer.key_s_pressed = false;
+    gui->visualizer.key_z_pressed = false;
+    gui->visualizer.key_x_pressed = false;
+    gui->visualizer.key_space_pressed = false;
+    gui->visualizer.key_ctrl_pressed = false;
+    
     // Reset game state
     init_comet_buster_system(&gui->visualizer);
     fprintf(stdout, "[GAME] New Game Started\n");
+}
+
+void on_toggle_pause(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // Only allow pause if game is not over
+    if (!gui->visualizer.comet_buster.game_over) {
+        gui->game_paused = !gui->game_paused;
+        fprintf(stdout, "%s\n", gui->game_paused ? "[*] Game Paused" : "[*] Game Resumed");
+    }
 }
 
 // ============================================================================
@@ -1216,9 +1250,12 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
             on_toggle_fullscreen(NULL, gui);
             return TRUE;
             break;
+        case GDK_KEY_p:
+        case GDK_KEY_P:
         case GDK_KEY_Escape:
             gui->game_paused = !gui->game_paused;
             fprintf(stdout, "%s\n", gui->game_paused ? "[*] Game Paused" : "[*] Game Resumed");
+            return TRUE;
             break;
     }
     
@@ -1394,6 +1431,10 @@ int main(int argc, char *argv[]) {
     GtkWidget *view_scores_item = gtk_menu_item_new_with_label("View High Scores");
     g_signal_connect(view_scores_item, "activate", G_CALLBACK(on_view_high_scores), &gui);
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), view_scores_item);
+    
+    GtkWidget *pause_item = gtk_menu_item_new_with_label("Pause/Resume (P)");
+    g_signal_connect(pause_item, "activate", G_CALLBACK(on_toggle_pause), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), pause_item);
     
     GtkWidget *separator = gtk_separator_menu_item_new();
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);

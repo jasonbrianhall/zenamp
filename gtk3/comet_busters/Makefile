@@ -67,7 +67,7 @@ CXXFLAGS_WIN_DEBUG = $(CXXFLAGS_WIN) $(DEBUG_FLAGS)
 CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Source files - Game code
-SOURCES_CPP_COMMON = comet_main.cpp cometbuster.cpp wad.cpp audio_wad.cpp cometbuster_spawn.cpp cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp cometbuster_boss.cpp
+SOURCES_CPP_COMMON = comet_main.cpp wad.cpp audio_wad.cpp cometbuster_spawn.cpp cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp cometbuster_boss.cpp cometbuster_score.cpp cometbuster_render.cpp cometbuster_util.cpp
 
 # Source files - Miniz WAD system (C files)
 SOURCES_C = miniz.c miniz_tdef.c miniz_tinfl.c miniz_zip.c
@@ -102,6 +102,9 @@ BUILD_DIR_WIN = $(BUILD_DIR)/windows
 BUILD_DIR_LINUX_DEBUG = $(BUILD_DIR)/linux_debug
 BUILD_DIR_WIN_DEBUG = $(BUILD_DIR)/windows_debug
 
+# Windows DLL settings
+DLL_SOURCE_DIR = /usr/x86_64-w64-mingw32/sys-root/mingw/bin
+
 # Extra objects for linking
 EXTRA_OBJS ?=
 
@@ -114,14 +117,14 @@ all: linux
 
 # OS-specific builds
 .PHONY: windows
-windows: cometbuster-windows
+windows: cometbuster-windows cometbuster-collect-dlls
 
 .PHONY: linux
 linux: cometbuster-linux
 
 # Debug targets
 .PHONY: debug
-debug: cometbuster-linux-debug cometbuster-windows-debug
+debug: cometbuster-linux-debug cometbuster-windows-debug cometbuster-collect-debug-dlls
 
 #
 # Linux build targets
@@ -206,6 +209,28 @@ $(BUILD_DIR_WIN_DEBUG)/%.win.debug.o: %.cpp
 $(BUILD_DIR_WIN_DEBUG)/%.win.debug.o: %.c
 	@echo "Compiling (Windows Debug): $<"
 	$(CC_WIN) $(CFLAGS_WIN_DEBUG) -c $< -o $@
+
+#
+# DLL collection for Windows builds
+#
+.PHONY: cometbuster-collect-dlls
+cometbuster-collect-dlls: $(BUILD_DIR_WIN)/$(EXECUTABLE_WIN)
+	@echo "Collecting DLLs for cometbuster..."
+	@if [ -f $(BUILD_DIR_WIN)/collect_dlls.sh ]; then \
+		$(BUILD_DIR_WIN)/collect_dlls.sh $(BUILD_DIR_WIN)/$(EXECUTABLE_WIN) $(DLL_SOURCE_DIR) $(BUILD_DIR_WIN); \
+	else \
+		echo "Warning: collect_dlls.sh not found. You may need to manually copy required DLLs."; \
+		echo "Required DLLs typically include: SDL2.dll, libgtk-3-0.dll, libglib-2.0-0.dll, etc."; \
+	fi
+
+.PHONY: cometbuster-collect-debug-dlls
+cometbuster-collect-debug-dlls: $(BUILD_DIR_WIN_DEBUG)/$(EXECUTABLE_WIN_DEBUG)
+	@echo "Collecting Debug DLLs for cometbuster..."
+	@if [ -f $(BUILD_DIR_WIN)/collect_dlls.sh ]; then \
+		$(BUILD_DIR_WIN)/collect_dlls.sh $(BUILD_DIR_WIN_DEBUG)/$(EXECUTABLE_WIN_DEBUG) $(DLL_SOURCE_DIR) $(BUILD_DIR_WIN_DEBUG); \
+	else \
+		echo "Warning: collect_dlls.sh not found. You may need to manually copy required DLLs."; \
+	fi
 
 # Install target (Linux only)
 .PHONY: install
@@ -308,4 +333,4 @@ help:
 	@echo "  3. ./build/linux/cometbuster  # Run the game"
 	@echo ""
 
-.PHONY: all clean install uninstall help linux windows debug wad
+.PHONY: all clean install uninstall help linux windows debug wad cometbuster-collect-dlls cometbuster-collect-debug-dlls
