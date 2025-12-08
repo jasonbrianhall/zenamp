@@ -30,6 +30,8 @@ gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
 gboolean on_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data);
 gboolean on_button_release(GtkWidget *widget, GdkEventButton *event, gpointer data);
 gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpointer data);
+gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data);
+gboolean on_key_release(GtkWidget *widget, GdkEventKey *event, gpointer data);
 void update_status_text(CometGUI *gui);
 gboolean game_update_timer(gpointer data);
 void on_about(GtkWidget *widget, gpointer data);
@@ -106,8 +108,17 @@ gboolean on_button_release(GtkWidget *widget, GdkEventButton *event, gpointer da
 
 gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
-    gui->visualizer.mouse_x = (int)event->x;
-    gui->visualizer.mouse_y = (int)event->y;
+    int new_x = (int)event->x;
+    int new_y = (int)event->y;
+    
+    // Check if mouse actually moved (not just within same pixel)
+    if (new_x != gui->visualizer.mouse_x || new_y != gui->visualizer.mouse_y) {
+        gui->visualizer.mouse_just_moved = true;
+        gui->visualizer.mouse_movement_timer = 0.0;  // Reset timer on movement
+    }
+    
+    gui->visualizer.mouse_x = new_x;
+    gui->visualizer.mouse_y = new_y;
     return TRUE;
 }
 
@@ -116,6 +127,13 @@ gboolean game_update_timer(gpointer data) {
     
     // Update at approximately 60 FPS (16.67 ms per frame)
     double dt = 0.01667;  // 16.67 ms
+    
+    // Update mouse movement timer
+    gui->visualizer.mouse_movement_timer += dt;
+    if (gui->visualizer.mouse_movement_timer > 0.5) {
+        // Mouse hasn't moved in 0.5 seconds, switch back to keyboard if keyboard was last used
+        gui->visualizer.mouse_just_moved = false;
+    }
     
     // Update the game
     update_comet_buster(&gui->visualizer, dt);
@@ -136,14 +154,42 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     CometBusterGame *game = &gui->visualizer.comet_buster;
     
-    if (event->keyval == GDK_KEY_r || event->keyval == GDK_KEY_R) {
+    // Handle arcade-style controls
+    // Rotation: A=left, D=right
+    if (event->keyval == GDK_KEY_a || event->keyval == GDK_KEY_A) {
+        gui->visualizer.key_a_pressed = true;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_d || event->keyval == GDK_KEY_D) {
+        gui->visualizer.key_d_pressed = true;
+        return TRUE;
+    }
+    // Thrust: W=forward, S=backward
+    else if (event->keyval == GDK_KEY_w || event->keyval == GDK_KEY_W) {
+        gui->visualizer.key_w_pressed = true;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_s || event->keyval == GDK_KEY_S) {
+        gui->visualizer.key_s_pressed = true;
+        return TRUE;
+    }
+    // Boost: X or SPACE
+    else if (event->keyval == GDK_KEY_x || event->keyval == GDK_KEY_X) {
+        gui->visualizer.key_x_pressed = true;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_space || event->keyval == GDK_KEY_KP_Space) {
+        gui->visualizer.key_space_pressed = true;
+        return TRUE;
+    }
+    // Fire: CTRL (left or right)
+    else if (event->keyval == GDK_KEY_Control_L || event->keyval == GDK_KEY_Control_R) {
+        gui->visualizer.key_ctrl_pressed = true;
+        return TRUE;
+    }
+    // Other game controls
+    else if (event->keyval == GDK_KEY_r || event->keyval == GDK_KEY_R) {
         // Restart game
         comet_buster_reset_game(game);
         update_status_text(gui);
         gtk_widget_queue_draw(gui->drawing_area);
-        return TRUE;
-    } else if (event->keyval == GDK_KEY_p || event->keyval == GDK_KEY_P) {
-        // Toggle pause (optional)
         return TRUE;
     } else if (event->keyval == GDK_KEY_F11) {
         // Toggle fullscreen
@@ -250,8 +296,13 @@ void on_game_controls(GtkWidget *widget, gpointer data) {
         "  Mouse Position     - Aim ship (move mouse to rotate)\n"
         "  Left Click         - Fire bullets at aimed direction\n"
         "  Middle Click       - Omnidirectional fire (all 8 directions)\n\n"
-        "MOVEMENT & POWER:\n"
-        "  Right Click        - Boost thrusters (uses energy)\n"
+        "MOVEMENT & CONTROLS:\n"
+        "  A                  - Turn ship left\n"
+        "  D                  - Turn ship right\n"
+        "  W                  - Forward thrust\n"
+        "  S                  - Backward thrust\n"
+        "  CTRL               - Fire weapon\n"
+        "  X or SPACE         - Boost thrusters (uses energy)\n"
         "  Energy Bar         - Shows current/max energy (regenerates)\n\n"
         "GAME CONTROLS:\n"
         "  R                  - Restart game\n"
@@ -299,6 +350,36 @@ void on_toggle_fullscreen(GtkWidget *widget, gpointer data) {
     }
 }
 
+gboolean on_key_release(GtkWidget *widget, GdkEventKey *event, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    
+    // Handle arcade-style control key releases
+    if (event->keyval == GDK_KEY_a || event->keyval == GDK_KEY_A) {
+        gui->visualizer.key_a_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_d || event->keyval == GDK_KEY_D) {
+        gui->visualizer.key_d_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_w || event->keyval == GDK_KEY_W) {
+        gui->visualizer.key_w_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_s || event->keyval == GDK_KEY_S) {
+        gui->visualizer.key_s_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_x || event->keyval == GDK_KEY_X) {
+        gui->visualizer.key_x_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_space || event->keyval == GDK_KEY_KP_Space) {
+        gui->visualizer.key_space_pressed = false;
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_Control_L || event->keyval == GDK_KEY_Control_R) {
+        gui->visualizer.key_ctrl_pressed = false;
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
 int main(int argc, char *argv[]) {
     srand(time(NULL));
     
@@ -317,9 +398,22 @@ int main(int argc, char *argv[]) {
     gui.visualizer.volume_level = 0.5;
     gui.visualizer.mouse_x = 400;
     gui.visualizer.mouse_y = 300;
+    gui.visualizer.last_mouse_x = 400;
+    gui.visualizer.last_mouse_y = 300;
+    gui.visualizer.mouse_movement_timer = 0.0;
+    gui.visualizer.mouse_just_moved = false;
     gui.visualizer.mouse_left_pressed = false;
     gui.visualizer.mouse_right_pressed = false;
     gui.visualizer.mouse_middle_pressed = false;
+    
+    // Initialize arcade-style keyboard input
+    gui.visualizer.key_a_pressed = false;
+    gui.visualizer.key_d_pressed = false;
+    gui.visualizer.key_w_pressed = false;
+    gui.visualizer.key_s_pressed = false;
+    gui.visualizer.key_x_pressed = false;
+    gui.visualizer.key_space_pressed = false;
+    gui.visualizer.key_ctrl_pressed = false;
     
     // Initialize the game
     init_comet_buster_system(&gui.visualizer);
@@ -370,6 +464,7 @@ int main(int argc, char *argv[]) {
     gtk_window_maximize(GTK_WINDOW(gui.window));
     g_signal_connect(gui.window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
     g_signal_connect(gui.window, "key-press-event", G_CALLBACK(on_key_press), &gui);
+    g_signal_connect(gui.window, "key-release-event", G_CALLBACK(on_key_release), &gui);
     
     // Create main vbox
     GtkWidget *main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -433,18 +528,25 @@ int main(int argc, char *argv[]) {
     // Drawing area - scales with window
     gui.drawing_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(gui.drawing_area, -1, -1);  // Dynamic sizing
+    gtk_widget_set_can_focus(gui.drawing_area, TRUE);  // Allow focus
     gtk_widget_add_events(gui.drawing_area, 
                          GDK_BUTTON_PRESS_MASK | 
                          GDK_BUTTON_RELEASE_MASK | 
-                         GDK_POINTER_MOTION_MASK);
+                         GDK_POINTER_MOTION_MASK |
+                         GDK_KEY_PRESS_MASK |
+                         GDK_KEY_RELEASE_MASK);
     g_signal_connect(gui.drawing_area, "draw", G_CALLBACK(on_draw), &gui);
     g_signal_connect(gui.drawing_area, "button-press-event", G_CALLBACK(on_button_press), &gui);
     g_signal_connect(gui.drawing_area, "button-release-event", G_CALLBACK(on_button_release), &gui);
     g_signal_connect(gui.drawing_area, "motion-notify-event", G_CALLBACK(on_motion_notify), &gui);
+    g_signal_connect(gui.drawing_area, "key-press-event", G_CALLBACK(on_key_press), &gui);
+    g_signal_connect(gui.drawing_area, "key-release-event", G_CALLBACK(on_key_release), &gui);
     gtk_box_pack_start(GTK_BOX(vbox), gui.drawing_area, TRUE, TRUE, 0);
     
     gtk_widget_show_all(gui.window);
     
+    // Grab keyboard focus on drawing area so key events go there
+    gtk_widget_grab_focus(gui.drawing_area);
     // Start game update timer (approximately 60 FPS)
     gui.update_timer_id = g_timeout_add(17, game_update_timer, &gui);  // ~60 FPS
     
