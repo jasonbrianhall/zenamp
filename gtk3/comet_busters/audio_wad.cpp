@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef ExternalSound
-
 #include <SDL2/SDL.h>
 
 // Helper function to load sound from WAD
@@ -85,7 +83,12 @@ bool audio_init(AudioManager *audio) {
     Mix_AllocateChannels(32);  // Allow up to 32 simultaneous sounds
     
     // Initialize fields
-    audio->background_music = NULL;
+    for (int i = 0; i < 10; i++) {
+        audio->music_tracks[i] = NULL;
+    }
+    audio->music_track_count = 0;
+    audio->current_music_track = 0;
+    
     audio->sfx_fire = NULL;
     audio->sfx_explosion = NULL;
     audio->sfx_hit = NULL;
@@ -151,10 +154,12 @@ void audio_cleanup(AudioManager *audio) {
         Mix_HaltMusic();
     }
     
-    // Free music
-    if (audio->background_music) {
-        Mix_FreeMusic(audio->background_music);
-        audio->background_music = NULL;
+    // Free all music tracks
+    for (int i = 0; i < 10; i++) {
+        if (audio->music_tracks[i]) {
+            Mix_FreeMusic(audio->music_tracks[i]);
+            audio->music_tracks[i] = NULL;
+        }
     }
     
     // Free sounds
@@ -220,13 +225,34 @@ void audio_play_music(AudioManager *audio, const char *internal_path, bool loop)
         return;
     }
     
-    audio->background_music = music;
+    // Store in music tracks array for random playback
+    if (audio->music_track_count < 10) {
+        audio->music_tracks[audio->music_track_count] = music;
+        audio->music_track_count++;
+    }
     
     int loops = loop ? -1 : 0;
     if (Mix_PlayMusic(music, loops) < 0) {
         fprintf(stderr, "Failed to play music: %s\n", Mix_GetError());
     } else {
         fprintf(stdout, "♪ Playing: %s\n", internal_path);
+    }
+}
+
+// Play random music from loaded tracks
+void audio_play_random_music(AudioManager *audio) {
+    if (!audio || audio->music_track_count == 0) return;
+    
+    // Pick a random track
+    int track_index = rand() % audio->music_track_count;
+    Mix_Music *music = audio->music_tracks[track_index];
+    
+    if (!music) return;
+    
+    if (Mix_PlayMusic(music, -1) < 0) {  // -1 = loop
+        fprintf(stderr, "Failed to play music: %s\n", Mix_GetError());
+    } else {
+        fprintf(stdout, "♪ Playing random track %d/%d\n", track_index + 1, audio->music_track_count);
     }
 }
 
@@ -270,66 +296,3 @@ void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
         // but silently ignore if it does
     }
 }
-
-#else  // !ExternalSound
-
-// Stub implementations when sound is disabled
-bool audio_init(AudioManager *audio) {
-    if (!audio) return false;
-    audio->master_volume = 128;
-    audio->audio_enabled = false;
-    return true;
-}
-
-void audio_cleanup(AudioManager *audio) {
-    if (!audio) return;
-    // Nothing to clean up
-}
-
-bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
-    if (!audio || !wad_filename) return false;
-    // Stub - always succeeds silently
-    return true;
-}
-
-void audio_set_volume(AudioManager *audio, int volume) {
-    if (!audio) return;
-    if (volume < 0) volume = 0;
-    if (volume > 128) volume = 128;
-    audio->master_volume = volume;
-}
-
-int audio_get_volume(AudioManager *audio) {
-    if (!audio) return 0;
-    return audio->master_volume;
-}
-
-void audio_play_music(AudioManager *audio, const char *internal_path, bool loop) {
-    (void)audio;
-    (void)internal_path;
-    (void)loop;
-    // No-op stub
-}
-
-void audio_stop_music(AudioManager *audio) {
-    (void)audio;
-    // No-op stub
-}
-
-void audio_pause_music(AudioManager *audio) {
-    (void)audio;
-    // No-op stub
-}
-
-void audio_resume_music(AudioManager *audio) {
-    (void)audio;
-    // No-op stub
-}
-
-void audio_play_sound(AudioManager *audio, Mix_Chunk *sound) {
-    (void)audio;
-    (void)sound;
-    // No-op stub
-}
-
-#endif  // ExternalSound

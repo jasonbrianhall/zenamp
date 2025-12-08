@@ -338,6 +338,18 @@ int main(int argc, char *argv[]) {
     // Copy audio system to visualizer so game code can access it
     gui.visualizer.audio = gui.audio;
     
+    // Load background music tracks
+#ifdef ExternalSound
+    audio_play_music(&gui.audio, "music/track1.mp3", false);   // Load track 1
+    audio_play_music(&gui.audio, "music/track2.mp3", false);   // Load track 2
+    audio_play_music(&gui.audio, "music/track3.mp3", false);   // Load track 3
+    audio_play_music(&gui.audio, "music/track4.mp3", false);   // Load track 4
+    audio_play_music(&gui.audio, "music/track5.mp3", false);   // Load track 5
+    
+    // Play a random track
+    audio_play_random_music(&gui.audio);
+#endif
+    
     // Create window
     gui.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(gui.window), "CometBuster");

@@ -6,7 +6,10 @@
 #include "wad.h"
 
 typedef struct {
-    Mix_Music *background_music;
+    // Music tracks (up to 10 background music files)
+    Mix_Music *music_tracks[10];
+    int music_track_count;
+    int current_music_track;
     
     // Sound effects
     Mix_Chunk *sfx_fire;
@@ -35,6 +38,7 @@ int audio_get_volume(AudioManager *audio);
 
 // Music playback
 void audio_play_music(AudioManager *audio, const char *internal_path, bool loop);
+void audio_play_random_music(AudioManager *audio);  // Play random track from loaded list
 void audio_stop_music(AudioManager *audio);
 void audio_pause_music(AudioManager *audio);
 void audio_resume_music(AudioManager *audio);
@@ -42,4 +46,4 @@ void audio_resume_music(AudioManager *audio);
 // Sound effects
 void audio_play_sound(AudioManager *audio, Mix_Chunk *sound);
 
-#endif
+#endif  // AUDIO_WAD_H
