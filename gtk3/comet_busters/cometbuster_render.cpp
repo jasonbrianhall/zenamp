@@ -48,7 +48,6 @@ void draw_comet_buster(void *vis, cairo_t *cr) {
     // Draw boss (either Spawn Queen or regular Death Star)
     if (game->boss_active) {
         if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
-            fprintf(stdout, "[RENDER] Drawing Spawn Queen\n");
             draw_spawn_queen_boss(&game->spawn_queen, cr, width, height);
         } else if (game->boss.active) {
             draw_comet_buster_boss(&game->boss, cr, width, height);
