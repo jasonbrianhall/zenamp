@@ -583,44 +583,73 @@ void on_view_high_scores(GtkWidget *widget, gpointer data) {
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_box_pack_start(GTK_BOX(vbox), scrolled_window, TRUE, TRUE, 0);
     
-    // Create text view for high scores
-    GtkWidget *text_view = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
-    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text_view), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_NONE);
-    gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
-    
-    // Get text buffer and add high scores
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
-    GtkTextIter iter;
-    gtk_text_buffer_get_start_iter(buffer, &iter);
-    
     // Always reload high scores from disk
     high_scores_load(&gui->visualizer.comet_buster);
     
-    // Format and add high scores to text buffer
-    char header[100];
-    snprintf(header, sizeof(header), "%-6s %-20s %-8s %-6s\n", 
-             "Rank", "Player Name", "Score", "Wave");
-    gtk_text_buffer_insert(buffer, &iter, header, -1);
+    // Create TreeView for high scores table
+    GtkListStore *store = gtk_list_store_new(4,
+                                            G_TYPE_STRING,  // Rank
+                                            G_TYPE_STRING,  // Player Name
+                                            G_TYPE_STRING,  // Score
+                                            G_TYPE_STRING); // Wave
     
-    // Add separator line
-    gtk_text_buffer_insert(buffer, &iter, 
-                          "─────────────────────────────────────────\n", -1);
+    GtkWidget *tree_view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree_view), TRUE);
+    gtk_container_add(GTK_CONTAINER(scrolled_window), tree_view);
     
-    // Add high scores
+    // Create columns
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    
+    GtkTreeViewColumn *col_rank = gtk_tree_view_column_new_with_attributes(
+        "Rank", renderer, "text", 0, NULL);
+    gtk_tree_view_column_set_min_width(col_rank, 50);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_rank);
+    
+    GtkTreeViewColumn *col_name = gtk_tree_view_column_new_with_attributes(
+        "Player Name", renderer, "text", 1, NULL);
+    gtk_tree_view_column_set_min_width(col_name, 150);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_name);
+    
+    GtkTreeViewColumn *col_score = gtk_tree_view_column_new_with_attributes(
+        "Score", renderer, "text", 2, NULL);
+    gtk_tree_view_column_set_min_width(col_score, 80);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_score);
+    
+    GtkTreeViewColumn *col_wave = gtk_tree_view_column_new_with_attributes(
+        "Wave", renderer, "text", 3, NULL);
+    gtk_tree_view_column_set_min_width(col_wave, 50);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(tree_view), col_wave);
+    
+    // Add high scores to tree store
     if (gui->visualizer.comet_buster.high_score_count == 0) {
-        gtk_text_buffer_insert(buffer, &iter, 
-                              "No high scores yet. Get playing!\n", -1);
+        GtkTreeIter iter;
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter,
+                          0, "-",
+                          1, "No high scores yet. Get playing!",
+                          2, "-",
+                          3, "-",
+                          -1);
     } else {
         for (int i = 0; i < gui->visualizer.comet_buster.high_score_count; i++) {
             HighScore *score = &gui->visualizer.comet_buster.high_scores[i];
-            char score_line[100];
-            snprintf(score_line, sizeof(score_line), "#%-5d %-20s %-8d %-6d\n",
-                     i + 1, score->player_name, score->score, score->wave);
-            gtk_text_buffer_insert(buffer, &iter, score_line, -1);
+            GtkTreeIter iter;
+            char rank_str[10], score_str[20], wave_str[10];
+            snprintf(rank_str, sizeof(rank_str), "#%d", i + 1);
+            snprintf(score_str, sizeof(score_str), "%d", score->score);
+            snprintf(wave_str, sizeof(wave_str), "%d", score->wave);
+            
+            gtk_list_store_append(store, &iter);
+            gtk_list_store_set(store, &iter,
+                              0, rank_str,
+                              1, score->player_name,
+                              2, score_str,
+                              3, wave_str,
+                              -1);
         }
     }
+    
+    g_object_unref(store);
     
     // Close button
     GtkWidget *close_button = gtk_button_new_with_label("Close");

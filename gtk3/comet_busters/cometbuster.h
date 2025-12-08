@@ -90,7 +90,7 @@ typedef struct {
     double shoot_cooldown;      // Time until next shot
     double path_time;           // Time along sine wave path (for wave motion)
     double base_vx, base_vy;    // Original velocity direction (for sine calculation)
-    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green)
+    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green), 3 = sentinel (purple)
     bool active;
     
     // Shield system for enemy ships
@@ -98,6 +98,12 @@ typedef struct {
     int max_shield_health;      // Maximum shield points (varies by ship type)
     double shield_impact_timer; // Visual impact effect timer
     double shield_impact_angle; // Angle of shield impact
+    
+    // Sentinel formation system
+    int formation_id;           // Groups sentinels that spawned together (-1 if not sentinel)
+    int formation_size;         // How many sentinels in this formation (1, 2, or 3)
+    bool has_partner;           // Is the paired sentinel still alive?
+    double formation_cohesion;  // How tightly they stay together (0.0-1.0)
 } EnemyShip;
 
 #define MAX_ENEMY_SHIPS 4

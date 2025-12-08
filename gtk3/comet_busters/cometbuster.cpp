@@ -238,7 +238,9 @@ void comet_buster_spawn_random_comets(CometBusterGame *game, int count, int scre
 // ENEMY SHIP SPAWNING
 // ============================================================================
 
-void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height) {
+// Helper function to spawn a single enemy ship with given parameters
+void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_width, int screen_height, 
+                                            int ship_type, int edge, double speed, int formation_id, int formation_size) {
     if (!game || game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
         return;
     }
@@ -248,24 +250,24 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     
     memset(ship, 0, sizeof(EnemyShip));
     
-    // Random edge to spawn from (now includes diagonals)
-    int edge = rand() % 8;
-    double speed = 80.0 + (rand() % 40);  // 80-120 pixels per second
     double diagonal_speed = speed / sqrt(2);  // Normalize diagonal speed
     
-    // Randomly decide ship type:
-    // 10% chance of aggressive red ship (attacks player)
-    // 80% chance of patrol blue ship (shoots comets)
-    // 15% chance of hunter green ship (shoots comets fast, chases if close)
-    int type_roll = rand() % 100;
-    if (type_roll < 10) {
-        ship->ship_type = 1;  // Red (aggressive)
-    } else if (type_roll < 90) {
-        ship->ship_type = 0;  // Blue (patrol)
+    ship->ship_type = ship_type;
+    
+    // Formation fields for sentinels
+    if (ship_type == 3) {
+        ship->formation_id = formation_id;
+        ship->formation_size = formation_size;
+        ship->has_partner = (formation_size > 1);
+        ship->formation_cohesion = 0.7;
     } else {
-        ship->ship_type = 2;  // Green (hunter)
+        ship->formation_id = -1;
+        ship->formation_size = 1;
+        ship->has_partner = false;
+        ship->formation_cohesion = 0.0;
     }
     
+    // Set position based on edge
     switch (edge) {
         case 0:  // From left to right
             ship->x = -20;
@@ -341,6 +343,14 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
             break;
     }
     
+    // Add slight offset for sentinel formation ships (so they don't spawn on top of each other)
+    if (ship_type == 3) {
+        double offset_angle = (formation_size > 1) ? (2.0 * M_PI * formation_id / formation_size) : 0;
+        double offset_dist = 30.0;  // Pixels apart
+        ship->x += cos(offset_angle) * offset_dist;
+        ship->y += sin(offset_angle) * offset_dist;
+    }
+    
     ship->health = 1;
     ship->shoot_cooldown = 1.0 + (rand() % 20) / 10.0;  // Shoot after 1-3 seconds
     ship->path_time = 0.0;  // Start at beginning of sine wave
@@ -355,6 +365,10 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
         // Green ships (hunter): 3 shield points
         ship->max_shield_health = 3;
         ship->shield_health = 3;
+    } else if (ship->ship_type == 3) {
+        // Purple ships (sentinel): 4 shield points (more durable)
+        ship->max_shield_health = 4;
+        ship->shield_health = 4;
     } else {
         // Blue ships (patrol): 3 shield points
         ship->max_shield_health = 3;
@@ -365,6 +379,57 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     ship->shield_impact_angle = 0;
     
     game->enemy_ship_count++;
+}
+
+void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game) {
+        return;
+    }
+    
+    // Random edge to spawn from (now includes diagonals)
+    int edge = rand() % 8;
+    double speed = 80.0 + (rand() % 40);  // 80-120 pixels per second
+    
+    // Randomly decide ship type:
+    // 10% chance of aggressive red ship (attacks player)
+    // 75% chance of patrol blue ship (shoots comets)
+    // 10% chance of hunter green ship (shoots comets fast, chases if close)
+    // 5% chance of sentinel purple ship (defensive formation) - reduced to 0% if red ship active
+    
+    // Check if any red ships are currently active
+    bool red_ship_active = false;
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        if (game->enemy_ships[i].active && game->enemy_ships[i].ship_type == 1) {
+            red_ship_active = true;
+            break;
+        }
+    }
+    
+    int type_roll = rand() % 100;
+    if (type_roll < 10) {
+        // Red (aggressive) - single ship
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 1, edge, speed, -1, 1);
+    } else if (type_roll < 85) {
+        // Blue (patrol) - single ship
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 0, edge, speed, -1, 1);
+
+    } else if (type_roll < 95) {
+        // Green (hunter) - single ship
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 2, edge, speed, -1, 1);
+    } else if (!red_ship_active && game->enemy_ship_count + 2 < MAX_ENEMY_SHIPS) {
+        // Purple (sentinel) - spawn as PAIR (2-3 ships) - only if no red ships active
+        // and if there's room for at least 2 more ships
+        int formation_id = game->current_wave * 100 + (int)(game->enemy_ship_spawn_timer * 10);
+        int formation_size = (rand() % 2) + 2;  // 2 or 3 sentinels
+        
+        // Spawn all sentinels in the formation at the same edge
+        for (int i = 0; i < formation_size; i++) {
+            comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 3, edge, speed, formation_id, formation_size);
+        }
+    } else {
+        // Fallback to blue ship if conditions not met for sentinel
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 0, edge, speed, -1, 1);
+    }
 }
 
 void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy) {
@@ -954,6 +1019,53 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     ship->angle = atan2(ship->vy, ship->vx);
                 }
             }
+        } else if (ship->ship_type == 3) {
+            // SENTINEL PURPLE SHIP: Defensive formation behavior
+            // Moves slowly in original direction while maintaining formation spacing
+            
+            // First, find any other sentinels in the same formation
+            double formation_center_x = ship->x;
+            double formation_center_y = ship->y;
+            int formation_count = 0;
+            
+            for (int j = 0; j < game->enemy_ship_count; j++) {
+                EnemyShip *other = &game->enemy_ships[j];
+                if (other->active && other->ship_type == 3 && other->formation_id == ship->formation_id) {
+                    formation_center_x += other->x;
+                    formation_center_y += other->y;
+                    formation_count++;
+                }
+            }
+            
+            if (formation_count > 0) {
+                formation_center_x /= formation_count;
+                formation_center_y /= formation_count;
+            }
+            
+            // Maintain formation spacing - gently move toward formation center
+            double dx_formation = formation_center_x - ship->x;
+            double dy_formation = formation_center_y - ship->y;
+            double dist_to_center = sqrt(dx_formation*dx_formation + dy_formation*dy_formation);
+            
+            double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+            if (base_speed < 1.0) base_speed = 60.0;  // Sentinels move slower
+            
+            // Small correction toward formation center
+            double correction_factor = 0.1 * ship->formation_cohesion;
+            if (dist_to_center > 100.0 && dist_to_center > 0.1) {
+                ship->vx += (dx_formation / dist_to_center) * base_speed * correction_factor;
+                ship->vy += (dy_formation / dist_to_center) * base_speed * correction_factor;
+            }
+            
+            // Maintain base velocity direction but slightly slower
+            ship->vx = ship->base_vx * 0.7;
+            ship->vy = ship->base_vy * 0.7;
+            
+            // Add formation correction
+            ship->vx += (dx_formation / (dist_to_center + 1.0)) * base_speed * correction_factor;
+            ship->vy += (dy_formation / (dist_to_center + 1.0)) * base_speed * correction_factor;
+            
+            ship->angle = atan2(ship->vy, ship->vx);
         } else {
             // PATROL BLUE SHIP: Follow sine wave pattern, avoid comets
             ship->path_time += dt;
@@ -2738,6 +2850,9 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
         } else if (ship->ship_type == 2) {
             // Hunter green ship
             cairo_set_source_rgb(cr, 0.2, 1.0, 0.2);  // Bright green
+        } else if (ship->ship_type == 3) {
+            // Sentinel purple ship
+            cairo_set_source_rgb(cr, 0.8, 0.2, 1.0);  // Bright purple
         } else {
             // Patrol blue ship
             cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);  // Blue
@@ -2775,6 +2890,9 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
             } else if (ship->ship_type == 2) {
                 // Green ship shield: bright green
                 cairo_set_source_rgba(cr, 0.5, 1.0, 0.5, 0.5);
+            } else if (ship->ship_type == 3) {
+                // Sentinel purple shield: bright purple
+                cairo_set_source_rgba(cr, 0.8, 0.4, 1.0, 0.5);
             } else {
                 // Blue ship: no shield (shouldn't reach here)
                 cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.5);
@@ -2799,6 +2917,25 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
                 double ring_radius = 6 + (1.0 - flash_alpha) * 10;
                 cairo_arc(cr, impact_x, impact_y, ring_radius, 0, 2 * M_PI);
                 cairo_stroke(cr);
+            }
+            
+            cairo_restore(cr);
+        }
+        
+        // Draw formation connection lines between Sentinel ships
+        if (ship->ship_type == 3) {
+            cairo_save(cr);
+            
+            // Find and draw lines to other sentinels in formation
+            for (int j = i + 1; j < game->enemy_ship_count; j++) {
+                EnemyShip *other = &game->enemy_ships[j];
+                if (other->active && other->ship_type == 3 && other->formation_id == ship->formation_id) {
+                    cairo_set_source_rgba(cr, 0.8, 0.4, 1.0, 0.3);  // Purple line
+                    cairo_set_line_width(cr, 1.0);
+                    cairo_move_to(cr, ship->x, ship->y);
+                    cairo_line_to(cr, other->x, other->y);
+                    cairo_stroke(cr);
+                }
             }
             
             cairo_restore(cr);
