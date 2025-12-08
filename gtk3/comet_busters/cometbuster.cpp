@@ -2847,10 +2847,7 @@ void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height) 
         // Boss not active - this is normal when no boss spawned
         return;
     }
-    
-    fprintf(stdout, "[DRAW BOSS] Drawing boss at (%.1f, %.1f) - Health: %d, Active: %d\n", 
-            boss->x, boss->y, boss->health, boss->active);
-    
+        
     // Draw the boss (death star) as a large circle with rotating patterns
     cairo_save(cr);
     cairo_translate(cr, boss->x, boss->y);
