@@ -65,27 +65,31 @@ static const char* settings_get_dir(void) {
     if (initialized) return settings_dir;
     
 #ifdef _WIN32
-    // Windows: %APPDATA%\CometBuster\
-    char appdata_path[MAX_PATH];
-    
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata_path))) {
-        snprintf(settings_dir, sizeof(settings_dir), "%s\\CometBuster", appdata_path);
-    } else {
-        // Fallback to user home directory
-        const char *home = getenv("USERPROFILE");
-        if (home) {
-            snprintf(settings_dir, sizeof(settings_dir), "%s\\CometBuster", home);
+    // Windows: %APPDATA%/CometBuster/
+    {
+        char appdata_path[MAX_PATH];
+        
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata_path))) {
+            snprintf(settings_dir, sizeof(settings_dir), "%s\\CometBuster", appdata_path);
         } else {
-            strcpy(settings_dir, ".\\CometBuster");
+            // Fallback to user home directory
+            const char *home = getenv("USERPROFILE");
+            if (home) {
+                snprintf(settings_dir, sizeof(settings_dir), "%s\\CometBuster", home);
+            } else {
+                strcpy(settings_dir, ".\\CometBuster");
+            }
         }
     }
 #else
     // Linux/Unix: ~/.cometbuster/
-    const char *home = getenv("HOME");
-    if (home) {
-        snprintf(settings_dir, sizeof(settings_dir), "%s/.cometbuster", home);
-    } else {
-        strcpy(settings_dir, "./.cometbuster");
+    {
+        const char *home = getenv("HOME");
+        if (home) {
+            snprintf(settings_dir, sizeof(settings_dir), "%s/.cometbuster", home);
+        } else {
+            strcpy(settings_dir, "./.cometbuster");
+        }
     }
 #endif
     
@@ -849,6 +853,9 @@ void on_new_game(GtkWidget *widget, gpointer data) {
 // DEBUG MENU CALLBACKS
 // ============================================================================
 
+
+#ifdef DEBUG
+
 void on_debug_jump_to_wave_5(GtkWidget *widget, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return;
@@ -917,6 +924,9 @@ void on_debug_skip_to_boss_phase(GtkWidget *widget, gpointer data) {
     fprintf(stdout, "[DEBUG] Boss fight ready! Score: %d, Multiplier: %.1fx\n", 
             game->score, game->score_multiplier);
 }
+
+#endif // DEBUG
+
 
 void on_about(GtkWidget *widget, gpointer data) {
     GtkWidget *dialog = gtk_message_dialog_new(
@@ -1406,6 +1416,7 @@ int main(int argc, char *argv[]) {
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(audio_item), audio_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), audio_item);
     
+#ifdef DEBUG
     // Debug menu
     GtkWidget *debug_menu = gtk_menu_new();
     GtkWidget *debug_item = gtk_menu_item_new_with_label("Debug");
@@ -1424,6 +1435,7 @@ int main(int argc, char *argv[]) {
     
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(debug_item), debug_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), debug_item);
+#endif // DEBUG
     
     // Help menu
     GtkWidget *help_menu = gtk_menu_new();
