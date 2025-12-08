@@ -95,10 +95,20 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->mouse_middle_pressed = false;
     game->omni_fire_cooldown = 0;
     
+    // Keyboard state
+    game->keyboard.key_a_pressed = false;
+    game->keyboard.key_d_pressed = false;
+    game->keyboard.key_w_pressed = false;
+    game->keyboard.key_s_pressed = false;
+    game->keyboard.key_z_pressed = false;
+    game->keyboard.key_x_pressed = false;
+    game->keyboard.key_space_pressed = false;
+    game->keyboard.key_ctrl_pressed = false;
+    
     // Advanced thrusters (fuel system)
     game->energy_amount = 100.0;
     game->max_energy = 100.0;
-    game->energy_burn_rate = 60.0;        // Burn 60 energy per second at full boost
+    game->energy_burn_rate = 25.0;        // Burn 25 energy per second at full boost (much slower)
     game->energy_recharge_rate = 5.0;     // Recharge 5 energy per second when idle (much slower)
     game->boost_multiplier = 2.5;       // 2.5x speed boost
     game->is_boosting = false;
@@ -474,7 +484,7 @@ void comet_buster_spawn_bullet(CometBusterGame *game) {
 }
 
 void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game) {
-    // Fire in all 8 directions (Last Starfighter style)
+    // Fire in all 32 directions (Last Starfighter style)
     if (!game) return;
     
     // Check if we have enough fuel (costs 30 fuel per omnidirectional burst)
@@ -483,7 +493,7 @@ void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game) {
     }
     
     double bullet_speed = 400.0;
-    int directions = 8;  // 8 directions in a circle
+    int directions = 32;  // 32 directions in a circle
     
     for (int i = 0; i < directions; i++) {
         if (game->bullet_count >= MAX_BULLETS) break;
@@ -496,7 +506,7 @@ void comet_buster_spawn_omnidirectional_fire(CometBusterGame *game) {
         bullet->x = game->ship_x;
         bullet->y = game->ship_y;
         
-        // Calculate angle for this direction (0, 45, 90, 135, 180, 225, 270, 315 degrees)
+        // Calculate angle for this direction (32 evenly spaced directions)
         double angle = (i * 360.0 / directions) * (M_PI / 180.0);
         
         bullet->vx = cos(angle) * bullet_speed;
@@ -577,50 +587,79 @@ void comet_buster_spawn_floating_text(CometBusterGame *game, double x, double y,
     game->floating_text_count++;
 }
 
-void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height) {
+void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height, bool mouse_active) {
     if (game->game_over || !game) return;
     
     if (game->invulnerability_time > 0) {
         game->invulnerability_time -= dt;
     }
     
-    // Rotate ship to face mouse
-    double dx = mouse_x - game->ship_x;
-    double dy = mouse_y - game->ship_y;
-    double target_angle = atan2(dy, dx);
+    // Check if any keyboard movement keys are pressed
+    bool keyboard_active = game->keyboard.key_a_pressed || 
+                          game->keyboard.key_d_pressed || 
+                          game->keyboard.key_w_pressed || 
+                          game->keyboard.key_s_pressed;
     
-    double angle_diff = target_angle - game->ship_angle;
-    while (angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
-    while (angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
-    
-    double rotation_speed = 5.0;
-    if (fabs(angle_diff) > rotation_speed * dt) {
-        if (angle_diff > 0) {
-            game->ship_angle += rotation_speed * dt;
-        } else {
+    // Use keyboard if any movement keys pressed, otherwise use mouse
+    if (keyboard_active) {
+        // KEYBOARD-BASED ARCADE CONTROLS
+        // Rotation: A=left, D=right
+        double rotation_speed = 6.0;  // Radians per second
+        if (game->keyboard.key_a_pressed) {
             game->ship_angle -= rotation_speed * dt;
         }
-    } else {
-        game->ship_angle = target_angle;
-    }
-    
-    // Right-click boost: accelerate forward in ship's facing direction
-    if (game->mouse_right_pressed && game->energy_amount > 0) {
-        game->is_boosting = true;
+        if (game->keyboard.key_d_pressed) {
+            game->ship_angle += rotation_speed * dt;
+        }
         
-        // Use ship's facing angle - completely ignore mouse
-        double boost_vx = cos(game->ship_angle) * 500.0 * game->boost_multiplier;
-        double boost_vy = sin(game->ship_angle) * 500.0 * game->boost_multiplier;
+        // Normalize angle to [0, 2π)
+        while (game->ship_angle < 0) game->ship_angle += 2.0 * M_PI;
+        while (game->ship_angle >= 2.0 * M_PI) game->ship_angle -= 2.0 * M_PI;
         
-        game->ship_vx += boost_vx * dt;
-        game->ship_vy += boost_vy * dt;
-    } else {
-        game->is_boosting = false;
+        // Thrust: W=forward, S=backward
+        double thrust_accel = 500.0;
         
-        // Normal movement: based on mouse distance
+        if (game->keyboard.key_w_pressed) {
+            double thrust_vx = cos(game->ship_angle) * thrust_accel;
+            double thrust_vy = sin(game->ship_angle) * thrust_accel;
+            
+            game->ship_vx += thrust_vx * dt;
+            game->ship_vy += thrust_vy * dt;
+        }
+        
+        if (game->keyboard.key_s_pressed) {
+            double thrust_vx = cos(game->ship_angle) * thrust_accel;
+            double thrust_vy = sin(game->ship_angle) * thrust_accel;
+            
+            game->ship_vx -= thrust_vx * dt;
+            game->ship_vy -= thrust_vy * dt;
+        }
+    } else if (mouse_active) {
+        // MOUSE-BASED CONTROLS (Original system - use mouse to aim)
+        // Rotate ship to face mouse
         double dx = mouse_x - game->ship_x;
         double dy = mouse_y - game->ship_y;
-        double mouse_dist = sqrt(dx*dx + dy*dy);
+        double target_angle = atan2(dy, dx);
+        
+        double angle_diff = target_angle - game->ship_angle;
+        while (angle_diff > M_PI) angle_diff -= 2.0 * M_PI;
+        while (angle_diff < -M_PI) angle_diff += 2.0 * M_PI;
+        
+        double rotation_speed = 5.0;
+        if (fabs(angle_diff) > rotation_speed * dt) {
+            if (angle_diff > 0) {
+                game->ship_angle += rotation_speed * dt;
+            } else {
+                game->ship_angle -= rotation_speed * dt;
+            }
+        } else {
+            game->ship_angle = target_angle;
+        }
+        
+        // Normal mouse-based movement: based on mouse distance
+        double dx_move = mouse_x - game->ship_x;
+        double dy_move = mouse_y - game->ship_y;
+        double mouse_dist = sqrt(dx_move*dx_move + dy_move*dy_move);
         double max_dist = 400.0;
         
         double acceleration = 1.0;
@@ -635,13 +674,49 @@ void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int
         double accel_magnitude = acceleration * 200.0;
         
         if (mouse_dist > 0.1) {
-            game->ship_vx += (dx / mouse_dist) * accel_magnitude * dt;
-            game->ship_vy += (dy / mouse_dist) * accel_magnitude * dt;
+            game->ship_vx += (dx_move / mouse_dist) * accel_magnitude * dt;
+            game->ship_vy += (dy_move / mouse_dist) * accel_magnitude * dt;
         }
     }
     
-    // Friction (slightly more with boost for balance)
-    double friction = game->is_boosting ? 0.92 : 0.95;
+    // BOOST: X or SPACE key (works with both control schemes)
+    // Boost adds significant forward acceleration
+    // Requires at least 2.0 energy to prevent boosting during recharge
+    if ((game->keyboard.key_x_pressed || game->keyboard.key_space_pressed) && game->energy_amount >= 2.0) {
+        game->is_boosting = true;
+        
+        // Apply boost forward acceleration in facing direction
+        double boost_accel = 800.0;  // Boost acceleration
+        double boost_vx = cos(game->ship_angle) * boost_accel;
+        double boost_vy = sin(game->ship_angle) * boost_accel;
+        
+        game->ship_vx += boost_vx * dt;
+        game->ship_vy += boost_vy * dt;
+    } else if (game->mouse_right_pressed && game->energy_amount >= 2.0) {
+        // Right-click boost (mouse) - accelerate in facing direction
+        // Requires at least 2.0 energy to prevent boosting during recharge
+        game->is_boosting = true;
+        
+        double boost_accel = 800.0;  // Same as keyboard boost
+        double boost_vx = cos(game->ship_angle) * boost_accel;
+        double boost_vy = sin(game->ship_angle) * boost_accel;
+        
+        game->ship_vx += boost_vx * dt;
+        game->ship_vy += boost_vy * dt;
+    } else {
+        game->is_boosting = false;
+    }
+    
+    // Apply max velocity cap
+    double max_speed = 400.0;
+    double current_speed = sqrt(game->ship_vx * game->ship_vx + game->ship_vy * game->ship_vy);
+    if (current_speed > max_speed) {
+        game->ship_vx = (game->ship_vx / current_speed) * max_speed;
+        game->ship_vy = (game->ship_vy / current_speed) * max_speed;
+    }
+    
+    // Apply friction/drag
+    double friction = 0.95;
     game->ship_vx *= friction;
     game->ship_vy *= friction;
     
@@ -1186,11 +1261,49 @@ void comet_buster_update_shooting(CometBusterGame *game, double dt, void *vis) {
         }
     }
     
+    // CTRL key fire (keyboard-based)
+    if (game->keyboard.key_ctrl_pressed) {
+        if (game->mouse_fire_cooldown <= 0) {
+            // Normal fire costs 0.25 fuel per bullet
+            if (game->energy_amount >= 0.25) {
+                comet_buster_spawn_bullet(game);
+                game->energy_amount -= 0.25;  // Consume 0.25 fuel
+                game->mouse_fire_cooldown = 0.05;  // ~20 bullets per second
+                
+                // Play fire sound
+#ifdef ExternalSound
+                Visualizer *visualizer = (Visualizer *)vis;
+                if (visualizer && visualizer->audio.sfx_fire) {
+                    audio_play_sound(&visualizer->audio, visualizer->audio.sfx_fire);
+                }
+#endif
+            }
+        }
+    }
+    
+    // Z key omnidirectional fire (32 directions)
+    if (game->keyboard.key_z_pressed) {
+        if (game->omni_fire_cooldown <= 0) {
+            if (game->energy_amount >= 30) {
+                comet_buster_spawn_omnidirectional_fire(game);  // This function handles energy drain
+                game->omni_fire_cooldown = 0.3;  // Slower than normal fire
+                
+                // Play fire sound
+#ifdef ExternalSound
+                Visualizer *visualizer = (Visualizer *)vis;
+                if (visualizer && visualizer->audio.sfx_fire) {
+                    audio_play_sound(&visualizer->audio, visualizer->audio.sfx_fire);
+                }
+#endif
+            }
+        }
+    }
+    
     // If middle mouse button is pressed, fire omnidirectionally (Last Starfighter style)
     if (game->mouse_middle_pressed) {
         if (game->omni_fire_cooldown <= 0) {
             if (game->energy_amount >= 30) {
-                comet_buster_spawn_omnidirectional_fire(game);
+                comet_buster_spawn_omnidirectional_fire(game);  // This function handles energy drain
                 game->omni_fire_cooldown = 0.3;  // Slower than normal fire
                 
                 // Play fire sound
@@ -1217,12 +1330,12 @@ void comet_buster_update_fuel(CometBusterGame *game, double dt) {
     if (game->is_boosting && game->energy_amount > 0) {
         // Burning fuel while boosting
         game->energy_amount -= game->energy_burn_rate * dt;
-        if (game->energy_amount < 0) {
+        if (game->energy_amount <= 0) {
             game->energy_amount = 0;
             game->is_boosting = false;
         }
-    } else if (!game->mouse_left_pressed) {
-        // Recharging fuel when not boosting AND not firing
+    } else if (!game->mouse_left_pressed && !game->keyboard.key_ctrl_pressed) {
+        // Recharging fuel when not boosting AND not firing (either mouse or keyboard)
         if (game->energy_amount < game->max_energy) {
             game->energy_amount += game->energy_recharge_rate * dt;
             if (game->energy_amount > game->max_energy) {
@@ -1254,11 +1367,24 @@ void update_comet_buster(void *vis, double dt) {
     // ✓ CRITICAL FIX: Use visualizer's mouse_left_pressed directly!
     // The visualizer already tracks mouse button state
     game->mouse_left_pressed = visualizer->mouse_left_pressed;
-    game->mouse_right_pressed = visualizer->mouse_right_pressed;  // Add right-click tracking
-    game->mouse_middle_pressed = visualizer->mouse_middle_pressed;  // Middle-click for omni-fire
+    game->mouse_right_pressed = visualizer->mouse_right_pressed;
+    game->mouse_middle_pressed = visualizer->mouse_middle_pressed;
+    
+    // Copy arcade-style keyboard input state from visualizer
+    game->keyboard.key_a_pressed = visualizer->key_a_pressed;
+    game->keyboard.key_d_pressed = visualizer->key_d_pressed;
+    game->keyboard.key_w_pressed = visualizer->key_w_pressed;
+    game->keyboard.key_s_pressed = visualizer->key_s_pressed;
+    game->keyboard.key_z_pressed = visualizer->key_z_pressed;
+    game->keyboard.key_x_pressed = visualizer->key_x_pressed;
+    game->keyboard.key_space_pressed = visualizer->key_space_pressed;
+    game->keyboard.key_ctrl_pressed = visualizer->key_ctrl_pressed;
+    
+    // Determine if mouse controls should be active (mouse has moved recently)
+    bool mouse_active = visualizer->mouse_just_moved;
     
     // Update game state
-    comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height);
+    comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
     comet_buster_update_comets(game, dt, width, height);
     comet_buster_update_shooting(game, dt, visualizer);  // Uses mouse_left_pressed state
     comet_buster_update_bullets(game, dt, width, height, visualizer);

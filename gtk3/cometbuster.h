@@ -70,6 +70,18 @@ typedef struct {
     time_t timestamp;
 } HighScore;
 
+// Keyboard input state for arcade-style controls
+typedef struct {
+    bool key_a_pressed;         // A key - turn left
+    bool key_d_pressed;         // D key - turn right
+    bool key_w_pressed;         // W key - forward thrust
+    bool key_s_pressed;         // S key - backward thrust
+    bool key_z_pressed;         // Z key - omnidirectional fire
+    bool key_x_pressed;         // X key - boost
+    bool key_space_pressed;     // SPACE key - boost
+    bool key_ctrl_pressed;      // CTRL key - fire
+} KeyboardInput;
+
 typedef struct {
     double x, y;                // Position
     double vx, vy;              // Velocity
@@ -177,6 +189,9 @@ typedef struct {
     HighScore high_scores[MAX_HIGH_SCORES];
     int high_score_count;
     
+    // Keyboard input (WASD movement)
+    KeyboardInput keyboard;
+    
 } CometBusterGame;
 
 // Initialization and cleanup
@@ -188,7 +203,7 @@ void comet_buster_reset_game(CometBusterGame *game);
 void update_comet_buster(void *vis, double dt);
 
 // Update sub-systems
-void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height);
+void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height, bool mouse_active);
 void comet_buster_update_comets(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_update_shooting(CometBusterGame *game, double dt);  // New: click-to-shoot
 void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, int height, void *vis);
