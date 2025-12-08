@@ -171,6 +171,11 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
         gui->visualizer.key_s_pressed = true;
         return TRUE;
     }
+    // Omnidirectional fire: Z
+    else if (event->keyval == GDK_KEY_z || event->keyval == GDK_KEY_Z) {
+        gui->visualizer.key_z_pressed = true;
+        return TRUE;
+    }
     // Boost: X or SPACE
     else if (event->keyval == GDK_KEY_x || event->keyval == GDK_KEY_X) {
         gui->visualizer.key_x_pressed = true;
@@ -366,6 +371,9 @@ gboolean on_key_release(GtkWidget *widget, GdkEventKey *event, gpointer data) {
     } else if (event->keyval == GDK_KEY_s || event->keyval == GDK_KEY_S) {
         gui->visualizer.key_s_pressed = false;
         return TRUE;
+    } else if (event->keyval == GDK_KEY_z || event->keyval == GDK_KEY_Z) {
+        gui->visualizer.key_z_pressed = false;
+        return TRUE;
     } else if (event->keyval == GDK_KEY_x || event->keyval == GDK_KEY_X) {
         gui->visualizer.key_x_pressed = false;
         return TRUE;
@@ -411,6 +419,7 @@ int main(int argc, char *argv[]) {
     gui.visualizer.key_d_pressed = false;
     gui.visualizer.key_w_pressed = false;
     gui.visualizer.key_s_pressed = false;
+    gui.visualizer.key_z_pressed = false;
     gui.visualizer.key_x_pressed = false;
     gui.visualizer.key_space_pressed = false;
     gui.visualizer.key_ctrl_pressed = false;

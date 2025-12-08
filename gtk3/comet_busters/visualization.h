@@ -29,6 +29,7 @@ typedef struct {
     bool key_d_pressed;         // D - turn right
     bool key_w_pressed;         // W - forward thrust
     bool key_s_pressed;         // S - backward thrust
+    bool key_z_pressed;         // Z - omnidirectional fire
     bool key_x_pressed;         // X - boost
     bool key_space_pressed;     // SPACE - boost
     bool key_ctrl_pressed;      // CTRL - fire
