@@ -625,6 +625,7 @@ int main(int argc, char *argv[]) {
     audio_play_music(&gui.audio, "music/track3.mp3", false);   // Load track 3
     audio_play_music(&gui.audio, "music/track4.mp3", false);   // Load track 4
     audio_play_music(&gui.audio, "music/track5.mp3", false);   // Load track 5
+    audio_play_music(&gui.audio, "music/track6.mp3", false);   // Load track 5
     
     // Play a random track
     audio_play_random_music(&gui.audio);
