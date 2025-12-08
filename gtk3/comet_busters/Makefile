@@ -113,18 +113,18 @@ $(shell mkdir -p $(BUILD_DIR_LINUX) $(BUILD_DIR_WIN) $(BUILD_DIR_LINUX_DEBUG) $(
 
 # Default target - build for Linux
 .PHONY: all
-all: linux
+all: cometbuster-create-wad linux
 
 # OS-specific builds
 .PHONY: windows
-windows: cometbuster-windows cometbuster-collect-dlls
+windows: cometbuster-create-wad cometbuster-windows cometbuster-collect-dlls
 
 .PHONY: linux
-linux: cometbuster-linux
+linux: cometbuster-create-wad cometbuster-linux
 
 # Debug targets
 .PHONY: debug
-debug: cometbuster-linux-debug cometbuster-windows-debug cometbuster-collect-debug-dlls
+debug: cometbuster-create-wad cometbuster-linux-debug cometbuster-windows-debug cometbuster-collect-debug-dlls
 
 #
 # Linux build targets
@@ -222,6 +222,12 @@ cometbuster-collect-dlls: $(BUILD_DIR_WIN)/$(EXECUTABLE_WIN)
 		echo "Warning: collect_dlls.sh not found. You may need to manually copy required DLLs."; \
 		echo "Required DLLs typically include: SDL2.dll, libgtk-3-0.dll, libglib-2.0-0.dll, etc."; \
 	fi
+
+.PHONY: cometbuster-create-wad
+cometbuster-create-wad:
+	@echo "Building WAD"
+	python createwad.py
+	for mydir in build/linux build/windows build/linux_debug build/windows_debug; do cp cometbuster.wad $$mydir/; done
 
 .PHONY: cometbuster-collect-debug-dlls
 cometbuster-collect-debug-dlls: $(BUILD_DIR_WIN_DEBUG)/$(EXECUTABLE_WIN_DEBUG)
@@ -333,4 +339,4 @@ help:
 	@echo "  3. ./build/linux/cometbuster  # Run the game"
 	@echo ""
 
-.PHONY: all clean install uninstall help linux windows debug wad cometbuster-collect-dlls cometbuster-collect-debug-dlls
+.PHONY: all clean install uninstall help linux windows debug wad cometbuster-collect-dlls cometbuster-collect-debug-dlls cometbuster-create-wad
