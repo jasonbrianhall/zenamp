@@ -66,6 +66,7 @@ bool audio_init(AudioManager *audio) {
     audio->current_music_track = 0;
     
     audio->sfx_fire = NULL;
+    audio->sfx_alien_fire = NULL;
     audio->sfx_explosion = NULL;
     audio->sfx_hit = NULL;
     audio->sfx_boost = NULL;
@@ -104,6 +105,7 @@ bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
     
     // Load individual sounds
     audio->sfx_fire = load_sound_from_wad(&audio->wad, "sounds/fire.mp3");
+    audio->sfx_alien_fire = load_sound_from_wad(&audio->wad, "sounds/alien_fire.mp3");
     audio->sfx_explosion = load_sound_from_wad(&audio->wad, "sounds/explosion.mp3");
     audio->sfx_hit = load_sound_from_wad(&audio->wad, "sounds/hit.mp3");
     audio->sfx_boost = load_sound_from_wad(&audio->wad, "sounds/boost.mp3");
@@ -112,13 +114,14 @@ bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
     
     int loaded = 0;
     if (audio->sfx_fire) loaded++;
+    if (audio->sfx_alien_fire) loaded++;
     if (audio->sfx_explosion) loaded++;
     if (audio->sfx_hit) loaded++;
     if (audio->sfx_boost) loaded++;
     if (audio->sfx_game_over) loaded++;
     if (audio->sfx_wave_complete) loaded++;
     
-    fprintf(stdout, "✓ Loaded %d/%d sounds from WAD\n", loaded, 6);
+    fprintf(stdout, "✓ Loaded %d/%d sounds from WAD\n", loaded, 7);
     
     return loaded > 0;
 }
@@ -142,6 +145,7 @@ void audio_cleanup(AudioManager *audio) {
     
     // Free sounds
     if (audio->sfx_fire) Mix_FreeChunk(audio->sfx_fire);
+    if (audio->sfx_alien_fire) Mix_FreeChunk(audio->sfx_alien_fire);
     if (audio->sfx_explosion) Mix_FreeChunk(audio->sfx_explosion);
     if (audio->sfx_hit) Mix_FreeChunk(audio->sfx_hit);
     if (audio->sfx_boost) Mix_FreeChunk(audio->sfx_boost);

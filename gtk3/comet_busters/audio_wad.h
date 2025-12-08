@@ -17,6 +17,7 @@ typedef struct {
     
     // Sound effects
     Mix_Chunk *sfx_fire;
+    Mix_Chunk *sfx_alien_fire;
     Mix_Chunk *sfx_explosion;
     Mix_Chunk *sfx_hit;
     Mix_Chunk *sfx_boost;

@@ -860,8 +860,10 @@ void comet_buster_update_floating_text(CometBusterGame *game, double dt) {
     }
 }
 
-void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height) {
+void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height, void *vis) {
     if (!game) return;
+    
+    Visualizer *visualizer = (Visualizer *)vis;
     
     for (int i = 0; i < game->enemy_ship_count; i++) {
         EnemyShip *ship = &game->enemy_ships[i];
@@ -1032,6 +1034,13 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     
                     comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
                     
+                    // Play alien fire sound
+#ifdef ExternalSound
+                    if (visualizer && visualizer->audio.sfx_alien_fire) {
+                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                    }
+#endif
+                    
                     // Aggressive ships shoot more frequently
                     ship->shoot_cooldown = 0.3 + (rand() % 50) / 100.0;  // 0.3-0.8 sec (faster)
                 }
@@ -1054,6 +1063,13 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         double vy = (dy_player / dist_to_player) * bullet_speed;
                         
                         comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                        
+                        // Play alien fire sound
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_alien_fire) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                        }
+#endif
                         
                         // Green ships shoot VERY fast at player too
                         ship->shoot_cooldown = 0.15 + (rand() % 25) / 100.0;  // 0.15-0.4 sec (very fast!)
@@ -1094,6 +1110,13 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             double vy = (dy / dist) * bullet_speed;
                             
                             comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                            
+                            // Play alien fire sound
+#ifdef ExternalSound
+                            if (visualizer && visualizer->audio.sfx_alien_fire) {
+                                audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                            }
+#endif
                             
                             // Green ships shoot VERY fast
                             ship->shoot_cooldown = 0.15 + (rand() % 25) / 100.0;  // 0.15-0.4 sec (very fast!)
@@ -1140,6 +1163,13 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             double vy = (dy / dist) * bullet_speed;
                             
                             comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                            
+                            // Play alien fire sound
+#ifdef ExternalSound
+                            if (visualizer && visualizer->audio.sfx_alien_fire) {
+                                audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                            }
+#endif
                             
                             // Blue ships shoot less frequently
                             ship->shoot_cooldown = 0.8 + (rand() % 100) / 100.0;  // 0.8-1.8 sec
@@ -1410,7 +1440,7 @@ void update_comet_buster(void *vis, double dt) {
         game->shield_impact_timer -= dt;
     }
     
-    comet_buster_update_enemy_ships(game, dt, width, height);  // Update enemy ships
+    comet_buster_update_enemy_ships(game, dt, width, height, visualizer);  // Update enemy ships
     comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);  // Update enemy bullets
     
     // Update fuel system
@@ -1463,6 +1493,13 @@ void update_comet_buster(void *vis, double dt) {
                         enemy->shield_impact_angle = atan2(enemy->y - game->bullets[j].y, 
                                                             enemy->x - game->bullets[j].x);
                         enemy->shield_impact_timer = 0.2;
+                        
+                        // Play alien hit sound
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_hit) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                        }
+#endif
                     } else {
                         // No shield, destroy the ship
                         comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
