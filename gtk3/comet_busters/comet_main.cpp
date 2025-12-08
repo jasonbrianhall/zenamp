@@ -1034,26 +1034,71 @@ gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return FALSE;
     
-    // Get widget dimensions
+    // Game resolution: always 1920x1080 in logical CSS pixels
+    int game_width = 1920;
+    int game_height = 1080;
+    
+    // Get widget's allocated size in CSS pixels (respects OS zoom)
     GtkAllocation allocation;
     gtk_widget_get_allocation(widget, &allocation);
     
-    // Update visualizer dimensions
-    gui->visualizer.width = allocation.width;
-    gui->visualizer.height = allocation.height;
+    // CSS pixel size is what matters for zoom calculations
+    int css_width = allocation.width;
+    int css_height = allocation.height;
     
-    // Draw game
+    // Calculate scale: CSS pixel size / game logical size
+    // At 100% OS zoom with 1920x1080 window: scale = 1.0 (normal)
+    // At 200% OS zoom with same window: CSS becomes 960x540, scale = 0.5 (half size)
+    double scale_x = (double)css_width / game_width;
+    double scale_y = (double)css_height / game_height;
+    
+    // Use uniform scaling to avoid distortion
+    double scale = (scale_x < scale_y) ? scale_x : scale_y;
+    
+    // Apply the scale transform to cairo
+    cairo_scale(cr, scale, scale);
+    
+    // Game always renders at logical size
+    gui->visualizer.width = game_width;
+    gui->visualizer.height = game_height;
+    
+    // Draw the game
     draw_comet_buster(&gui->visualizer, cr);
     
     return FALSE;
+}
+
+// Helper function to calculate current zoom scale
+static double get_current_zoom_scale(GtkWidget *widget) {
+    int game_width = 1920;
+    int game_height = 1080;
+    
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    
+    // Scale = CSS pixel size / game logical size
+    // 100% zoom: scale = 1.0
+    // 200% zoom: scale = 0.5 (half size)
+    // 50% zoom: scale = 2.0 (double size)
+    double scale_x = (double)allocation.width / game_width;
+    double scale_y = (double)allocation.height / game_height;
+    
+    // Use uniform scaling (same on both axes)
+    double scale = (scale_x < scale_y) ? scale_x : scale_y;
+    
+    return (scale > 0) ? scale : 1.0;
 }
 
 gboolean on_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return FALSE;
     
-    gui->visualizer.mouse_x = event->x;
-    gui->visualizer.mouse_y = event->y;
+    // Get the current zoom scale
+    double scale = get_current_zoom_scale(widget);
+    
+    // Convert physical screen coordinates to logical game coordinates
+    gui->visualizer.mouse_x = event->x / scale;
+    gui->visualizer.mouse_y = event->y / scale;
     
     if (event->button == 1) gui->visualizer.mouse_left_pressed = true;
     if (event->button == 2) gui->visualizer.mouse_middle_pressed = true;
@@ -1076,6 +1121,13 @@ gboolean on_button_release(GtkWidget *widget, GdkEventButton *event, gpointer da
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return FALSE;
     
+    // Get the current zoom scale
+    double scale = get_current_zoom_scale(widget);
+    
+    // Convert physical screen coordinates to logical game coordinates
+    gui->visualizer.mouse_x = event->x / scale;
+    gui->visualizer.mouse_y = event->y / scale;
+    
     if (event->button == 1) gui->visualizer.mouse_left_pressed = false;
     if (event->button == 2) gui->visualizer.mouse_middle_pressed = false;
     if (event->button == 3) gui->visualizer.mouse_right_pressed = false;
@@ -1087,10 +1139,15 @@ gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpointer dat
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return FALSE;
     
+    // Get the current zoom scale
+    double scale = get_current_zoom_scale(widget);
+    
     gui->visualizer.last_mouse_x = gui->visualizer.mouse_x;
     gui->visualizer.last_mouse_y = gui->visualizer.mouse_y;
-    gui->visualizer.mouse_x = event->x;
-    gui->visualizer.mouse_y = event->y;
+    
+    // Convert physical screen coordinates to logical game coordinates
+    gui->visualizer.mouse_x = event->x / scale;
+    gui->visualizer.mouse_y = event->y / scale;
     gui->visualizer.mouse_just_moved = true;
     gui->visualizer.mouse_movement_timer = 0.5;
     
