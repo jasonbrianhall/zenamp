@@ -40,6 +40,11 @@ typedef struct {
     GtkWidget *music_volume_label;
     GtkWidget *sfx_volume_label;
     
+    // High score entry dialog
+    GtkWidget *high_score_dialog;
+    GtkWidget *high_score_name_entry;
+    bool high_score_dialog_shown;
+    
     int music_volume;
     int sfx_volume;
     
@@ -203,8 +208,433 @@ static bool settings_save_volumes(int music_volume, int sfx_volume) {
 // END VOLUME SETTINGS PERSISTENCE FUNCTIONS
 // ============================================================
 
-// Forward declarations
-gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
+// ============================================================
+// HIGH SCORE PERSISTENCE FUNCTIONS
+// ============================================================
+
+/**
+ * Get the high scores file path
+ */
+static const char* high_scores_get_path(void) {
+    static char scores_path[512] = {0};
+    static bool initialized = false;
+    
+    if (initialized) return scores_path;
+    
+#ifdef _WIN32
+    char appdata_path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata_path))) {
+        snprintf(scores_path, sizeof(scores_path), "%s\\CometBuster\\highscores.txt", appdata_path);
+    } else {
+        const char *home = getenv("USERPROFILE");
+        if (home) {
+            snprintf(scores_path, sizeof(scores_path), "%s\\CometBuster\\highscores.txt", home);
+        } else {
+            strcpy(scores_path, ".\\CometBuster\\highscores.txt");
+        }
+    }
+#else
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(scores_path, sizeof(scores_path), "%s/.cometbuster/highscores.txt", home);
+    } else {
+        strcpy(scores_path, "./.cometbuster/highscores.txt");
+    }
+#endif
+    
+    initialized = true;
+    return scores_path;
+}
+
+/**
+ * Create the high scores directory if it doesn't exist
+ */
+static bool high_scores_ensure_dir(void) {
+#ifdef _WIN32
+    char dir[512];
+    strcpy(dir, high_scores_get_path());
+    char *last_slash = strrchr(dir, '\\');
+    if (last_slash) *last_slash = '\0';
+    
+    if (CreateDirectoryA(dir, NULL)) {
+        return true;
+    }
+    
+    DWORD attribs = GetFileAttributesA(dir);
+    if (attribs != INVALID_FILE_ATTRIBUTES && (attribs & FILE_ATTRIBUTE_DIRECTORY)) {
+        return true;
+    }
+    return false;
+#else
+    char dir[512];
+    strcpy(dir, high_scores_get_path());
+    char *last_slash = strrchr(dir, '/');
+    if (last_slash) *last_slash = '\0';
+    
+    if (mkdir(dir, 0755) == 0) {
+        return true;
+    }
+    
+    struct stat st;
+    if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+        return true;
+    }
+    return false;
+#endif
+}
+
+/**
+ * Load high scores from disk (text format)
+ */
+static void high_scores_load(CometBusterGame *game) {
+    if (!game) return;
+    
+    game->high_score_count = 0;
+    for (int i = 0; i < MAX_HIGH_SCORES; i++) {
+        game->high_scores[i].score = 0;
+        game->high_scores[i].wave = 0;
+        game->high_scores[i].timestamp = 0;
+        game->high_scores[i].player_name[0] = '\0';
+    }
+    
+    const char *path = high_scores_get_path();
+    FILE *fp = fopen(path, "r");
+    
+    if (!fp) {
+        fprintf(stdout, "[HIGH SCORES] No existing high scores file\n");
+        return;
+    }
+    
+    while (game->high_score_count < MAX_HIGH_SCORES) {
+        int score, wave;
+        time_t timestamp;
+        char name[32];
+        
+        if (fscanf(fp, "%d %d %ld %31s\n", &score, &wave, &timestamp, name) != 4) {
+            break;
+        }
+        
+        HighScore *hs = &game->high_scores[game->high_score_count];
+        hs->score = score;
+        hs->wave = wave;
+        hs->timestamp = timestamp;
+        strncpy(hs->player_name, name, sizeof(hs->player_name) - 1);
+        hs->player_name[sizeof(hs->player_name) - 1] = '\0';
+        
+        game->high_score_count++;
+    }
+    
+    fclose(fp);
+    fprintf(stdout, "[HIGH SCORES] Loaded %d high scores\n", game->high_score_count);
+}
+
+/**
+ * Save high scores to disk (text format)
+ */
+static void high_scores_save(CometBusterGame *game) {
+    if (!game) return;
+    
+    if (!high_scores_ensure_dir()) {
+        fprintf(stderr, "[HIGH SCORES] Failed to create directory\n");
+        return;
+    }
+    
+    const char *path = high_scores_get_path();
+    FILE *fp = fopen(path, "w");
+    
+    if (!fp) {
+        fprintf(stderr, "[HIGH SCORES] Failed to open file for writing\n");
+        return;
+    }
+    
+    for (int i = 0; i < game->high_score_count; i++) {
+        HighScore *hs = &game->high_scores[i];
+        fprintf(fp, "%d %d %ld %s\n", hs->score, hs->wave, hs->timestamp, hs->player_name);
+    }
+    
+    fclose(fp);
+    fprintf(stdout, "[HIGH SCORES] Saved %d high scores\n", game->high_score_count);
+}
+
+/**
+ * Add a high score (maintains sorted order)
+ */
+static void high_scores_add(CometBusterGame *game, int score, int wave, const char *name) {
+    if (!game || !name) return;
+    
+    int insert_pos = game->high_score_count;
+    for (int i = 0; i < game->high_score_count; i++) {
+        if (score > game->high_scores[i].score) {
+            insert_pos = i;
+            break;
+        }
+    }
+    
+    if (insert_pos >= MAX_HIGH_SCORES) {
+        return;
+    }
+    
+    if (game->high_score_count >= MAX_HIGH_SCORES) {
+        for (int i = MAX_HIGH_SCORES - 1; i > insert_pos; i--) {
+            game->high_scores[i] = game->high_scores[i - 1];
+        }
+    } else {
+        for (int i = game->high_score_count; i > insert_pos; i--) {
+            game->high_scores[i] = game->high_scores[i - 1];
+        }
+        game->high_score_count++;
+    }
+    
+    HighScore *hs = &game->high_scores[insert_pos];
+    hs->score = score;
+    hs->wave = wave;
+    hs->timestamp = time(NULL);
+    strncpy(hs->player_name, name, sizeof(hs->player_name) - 1);
+    hs->player_name[sizeof(hs->player_name) - 1] = '\0';
+}
+
+// ============================================================
+// END HIGH SCORE PERSISTENCE FUNCTIONS
+// ============================================================
+
+// ============================================================
+// HIGH SCORE ENTRY DIALOG FUNCTIONS
+// ============================================================
+
+/**
+ * Show high score entry dialog when game ends and score is in top 10
+ */
+void on_high_score_dialog_submit(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    const char *player_name = gtk_entry_get_text(GTK_ENTRY(gui->high_score_name_entry));
+    
+    // Only add score if player actually entered a name (not empty, not just placeholder)
+    if (player_name && strlen(player_name) > 0) {
+        high_scores_add(&gui->visualizer.comet_buster, 
+                        gui->visualizer.comet_buster.score,
+                        gui->visualizer.comet_buster.current_wave,
+                        player_name);
+        high_scores_save(&gui->visualizer.comet_buster);
+        fprintf(stdout, "[HIGH SCORE] Added score for %s: %d (Wave %d)\n", 
+                player_name, gui->visualizer.comet_buster.score, gui->visualizer.comet_buster.current_wave);
+    }
+    
+    if (gui->high_score_dialog) {
+        gtk_widget_destroy(gui->high_score_dialog);
+        gui->high_score_dialog = NULL;
+    }
+    
+    gui->game_paused = false;
+}
+
+gboolean on_high_score_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (gui) {
+        gui->high_score_dialog = NULL;
+        // Resume game (show game over screen)
+        gui->game_paused = false;
+    }
+    return FALSE;
+}
+
+gboolean on_high_score_name_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return FALSE;
+    
+    // Submit on Enter key
+    if (event->keyval == GDK_KEY_Return) {
+        on_high_score_dialog_submit(NULL, gui);
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
+void on_show_high_score_entry(CometGUI *gui) {
+    if (!gui) return;
+    
+    // If dialog already exists, bring it to front
+    if (gui->high_score_dialog) {
+        gtk_window_present(GTK_WINDOW(gui->high_score_dialog));
+        return;
+    }
+    
+    // Create high score entry dialog
+    gui->high_score_dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(gui->high_score_dialog), "New High Score!");
+    gtk_window_set_type_hint(GTK_WINDOW(gui->high_score_dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
+    gtk_window_set_default_size(GTK_WINDOW(gui->high_score_dialog), 400, 300);
+    gtk_window_set_modal(GTK_WINDOW(gui->high_score_dialog), TRUE);
+    
+    g_signal_connect(gui->high_score_dialog, "delete-event", 
+                    G_CALLBACK(on_high_score_dialog_delete), gui);
+    
+    // Create main vbox
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 15);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 20);
+    gtk_container_add(GTK_CONTAINER(gui->high_score_dialog), vbox);
+    
+    // Title
+    GtkWidget *title_label = gtk_label_new("Congratulations!");
+    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttribute *weight = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+    weight->start_index = 0;
+    weight->end_index = -1;
+    pango_attr_list_insert(attrs, weight);
+    gtk_label_set_attributes(GTK_LABEL(title_label), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(vbox), title_label, FALSE, FALSE, 0);
+    
+    // Score info
+    GtkWidget *score_label = gtk_label_new("");
+    char score_text[256];
+    snprintf(score_text, sizeof(score_text), 
+             "You achieved a HIGH SCORE!\n\nScore: %d\nWave Reached: %d",
+             gui->visualizer.comet_buster.score,
+             gui->visualizer.comet_buster.current_wave);
+    gtk_label_set_text(GTK_LABEL(score_label), score_text);
+    gtk_label_set_xalign(GTK_LABEL(score_label), 0.5);
+    gtk_box_pack_start(GTK_BOX(vbox), score_label, FALSE, FALSE, 0);
+    
+    // Separator
+    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(vbox), separator, FALSE, FALSE, 0);
+    
+    // Name entry
+    GtkWidget *name_label = gtk_label_new("Enter your name:");
+    gtk_label_set_xalign(GTK_LABEL(name_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(vbox), name_label, FALSE, FALSE, 0);
+    
+    gui->high_score_name_entry = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(gui->high_score_name_entry), 31);
+    //gtk_entry_set_placeholder_text(GTK_ENTRY(gui->high_score_name_entry), "Player");
+    g_signal_connect(gui->high_score_name_entry, "key-press-event",
+                    G_CALLBACK(on_high_score_name_key_press), gui);
+    gtk_box_pack_start(GTK_BOX(vbox), gui->high_score_name_entry, FALSE, FALSE, 0);
+    
+    // Button box
+    GtkWidget *button_box = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_button_box_set_layout(GTK_BUTTON_BOX(button_box), GTK_BUTTONBOX_CENTER);
+    gtk_box_set_spacing(GTK_BOX(button_box), 10);
+    gtk_box_pack_start(GTK_BOX(vbox), button_box, FALSE, FALSE, 0);
+    
+    // Submit button
+    GtkWidget *submit_button = gtk_button_new_with_label("Submit");
+    g_signal_connect(submit_button, "clicked",
+                    G_CALLBACK(on_high_score_dialog_submit), gui);
+    gtk_container_add(GTK_CONTAINER(button_box), submit_button);
+    
+    // Skip button
+    GtkWidget *skip_button = gtk_button_new_with_label("Skip");
+    g_signal_connect(skip_button, "clicked",
+                    G_CALLBACK(on_high_score_dialog_delete), gui);
+    gtk_container_add(GTK_CONTAINER(button_box), skip_button);
+    
+    gtk_widget_show_all(gui->high_score_dialog);
+    gtk_widget_grab_focus(gui->high_score_name_entry);
+}
+
+// ============================================================
+// END HIGH SCORE ENTRY DIALOG FUNCTIONS
+// ============================================================
+
+// ============================================================
+// HIGH SCORE VIEW DIALOG FUNCTIONS
+// ============================================================
+
+void on_view_high_scores(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // Create high score view dialog
+    GtkWidget *dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(dialog), "High Scores");
+    gtk_window_set_type_hint(GTK_WINDOW(dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 500, 400);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    
+    g_signal_connect(dialog, "delete-event", G_CALLBACK(gtk_widget_destroy), NULL);
+    
+    // Create main vbox
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 15);
+    gtk_container_add(GTK_CONTAINER(dialog), vbox);
+    
+    // Title
+    GtkWidget *title_label = gtk_label_new("HIGH SCORES");
+    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttribute *weight = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+    weight->start_index = 0;
+    weight->end_index = -1;
+    pango_attr_list_insert(attrs, weight);
+    gtk_label_set_attributes(GTK_LABEL(title_label), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(vbox), title_label, FALSE, FALSE, 0);
+    
+    // Separator
+    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_pack_start(GTK_BOX(vbox), separator, FALSE, FALSE, 0);
+    
+    // Scrolled window for high scores list
+    GtkWidget *scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(vbox), scrolled_window, TRUE, TRUE, 0);
+    
+    // Create text view for high scores
+    GtkWidget *text_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_NONE);
+    gtk_container_add(GTK_CONTAINER(scrolled_window), text_view);
+    
+    // Get text buffer and add high scores
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    GtkTextIter iter;
+    gtk_text_buffer_get_start_iter(buffer, &iter);
+    
+    // Always reload high scores from disk
+    high_scores_load(&gui->visualizer.comet_buster);
+    
+    // Format and add high scores to text buffer
+    char header[100];
+    snprintf(header, sizeof(header), "%-6s %-20s %-8s %-6s\n", 
+             "Rank", "Player Name", "Score", "Wave");
+    gtk_text_buffer_insert(buffer, &iter, header, -1);
+    
+    // Add separator line
+    gtk_text_buffer_insert(buffer, &iter, 
+                          "─────────────────────────────────────────\n", -1);
+    
+    // Add high scores
+    if (gui->visualizer.comet_buster.high_score_count == 0) {
+        gtk_text_buffer_insert(buffer, &iter, 
+                              "No high scores yet. Get playing!\n", -1);
+    } else {
+        for (int i = 0; i < gui->visualizer.comet_buster.high_score_count; i++) {
+            HighScore *score = &gui->visualizer.comet_buster.high_scores[i];
+            char score_line[100];
+            snprintf(score_line, sizeof(score_line), "#%-5d %-20s %-8d %-6d\n",
+                     i + 1, score->player_name, score->score, score->wave);
+            gtk_text_buffer_insert(buffer, &iter, score_line, -1);
+        }
+    }
+    
+    // Close button
+    GtkWidget *close_button = gtk_button_new_with_label("Close");
+    g_signal_connect_swapped(close_button, "clicked", 
+                            G_CALLBACK(gtk_widget_destroy), dialog);
+    gtk_box_pack_start(GTK_BOX(vbox), close_button, FALSE, FALSE, 0);
+    
+    gtk_widget_show_all(dialog);
+}
+
+// ============================================================
+// END HIGH SCORE VIEW DIALOG FUNCTIONS
+// ============================================================
+
 gboolean on_button_press(GtkWidget *widget, GdkEventButton *event, gpointer data);
 gboolean on_button_release(GtkWidget *widget, GdkEventButton *event, gpointer data);
 gboolean on_motion_notify(GtkWidget *widget, GdkEventMotion *event, gpointer data);
@@ -371,6 +801,16 @@ void on_new_game(GtkWidget *widget, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return;
     
+    // Close high score dialog if open
+    if (gui->high_score_dialog) {
+        gtk_widget_destroy(gui->high_score_dialog);
+        gui->high_score_dialog = NULL;
+    }
+    
+    // Reset high score dialog flag
+    gui->high_score_dialog_shown = false;
+    gui->game_paused = false;
+    
     // Reset game state
     init_comet_buster_system(&gui->visualizer);
     fprintf(stdout, "[GAME] New Game Started\n");
@@ -456,6 +896,21 @@ gboolean game_update_timer(gpointer data) {
     if (!gui->game_paused) {
         // Update game
         update_comet_buster(&gui->visualizer, 1.0 / 60.0);
+        
+        // Check if game just ended and it's a high score
+        if (gui->visualizer.comet_buster.game_over && !gui->high_score_dialog_shown) {
+            gui->high_score_dialog_shown = true;
+            
+            // Check if this is a high score
+            if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
+                                           gui->visualizer.comet_buster.score)) {
+                fprintf(stdout, "[HIGH SCORE] New high score detected: %d\n", 
+                        gui->visualizer.comet_buster.score);
+                // Pause game and show high score dialog
+                gui->game_paused = true;
+                on_show_high_score_entry(gui);
+            }
+        }
         
         // Update frame counter for FPS
         gui->frame_count++;
@@ -582,6 +1037,7 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
             break;
         case GDK_KEY_F11:
             on_toggle_fullscreen(NULL, gui);
+            return TRUE;
             break;
         case GDK_KEY_Escape:
             gui->game_paused = !gui->game_paused;
@@ -647,6 +1103,11 @@ int main(int argc, char *argv[]) {
     gui.music_volume = 100;  // Default
     gui.sfx_volume = 100;    // Default
     
+    // High score dialog
+    gui.high_score_dialog = NULL;
+    gui.high_score_name_entry = NULL;
+    gui.high_score_dialog_shown = false;
+    
     // Initialize visualizer - will be set dynamically by on_draw
     gui.visualizer.width = 640;  // Default, will be updated in on_draw
     gui.visualizer.height = 480; // Default, will be updated in on_draw
@@ -673,6 +1134,9 @@ int main(int argc, char *argv[]) {
     
     // Initialize the game
     init_comet_buster_system(&gui.visualizer);
+    
+    // Load high scores from disk
+    high_scores_load(&gui.visualizer.comet_buster);
     
     // Initialize audio system
     memset(&gui.audio, 0, sizeof(AudioManager));
@@ -742,13 +1206,17 @@ int main(int argc, char *argv[]) {
     GtkWidget *menu_bar = gtk_menu_bar_new();
     gui.menu_bar = menu_bar;  // Save reference for show/hide
     
-    // File menu
+    // Game menu
     GtkWidget *file_menu = gtk_menu_new();
-    GtkWidget *file_item = gtk_menu_item_new_with_label("File");
+    GtkWidget *file_item = gtk_menu_item_new_with_label("Game");
     
     GtkWidget *new_game_item = gtk_menu_item_new_with_label("New Game");
     g_signal_connect(new_game_item, "activate", G_CALLBACK(on_new_game), &gui);
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), new_game_item);
+    
+    GtkWidget *view_scores_item = gtk_menu_item_new_with_label("View High Scores");
+    g_signal_connect(view_scores_item, "activate", G_CALLBACK(on_view_high_scores), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), view_scores_item);
     
     GtkWidget *separator = gtk_separator_menu_item_new();
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);
