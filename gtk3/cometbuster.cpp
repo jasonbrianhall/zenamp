@@ -114,7 +114,7 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->energy_amount = 100.0;
     game->max_energy = 100.0;
     game->energy_burn_rate = 25.0;        // Burn 25 energy per second at full boost (much slower)
-    game->energy_recharge_rate = 5.0;     // Recharge 5 energy per second when idle (much slower)
+    game->energy_recharge_rate = 10.0;     // Recharge 10 energy per second when idle (much slower)
     game->boost_multiplier = 2.5;       // 2.5x speed boost
     game->is_boosting = false;
     game->boost_thrust_timer = 0.0;
@@ -253,13 +253,13 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     double diagonal_speed = speed / sqrt(2);  // Normalize diagonal speed
     
     // Randomly decide ship type:
-    // 25% chance of aggressive red ship (attacks player)
-    // 50% chance of patrol blue ship (shoots comets)
-    // 25% chance of hunter green ship (shoots comets fast, chases if close)
+    // 10% chance of aggressive red ship (attacks player)
+    // 80% chance of patrol blue ship (shoots comets)
+    // 15% chance of hunter green ship (shoots comets fast, chases if close)
     int type_roll = rand() % 100;
-    if (type_roll < 25) {
+    if (type_roll < 10) {
         ship->ship_type = 1;  // Red (aggressive)
-    } else if (type_roll < 75) {
+    } else if (type_roll < 90) {
         ship->ship_type = 0;  // Blue (patrol)
     } else {
         ship->ship_type = 2;  // Green (hunter)
@@ -780,6 +780,17 @@ void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, in
     
     for (int i = 0; i < game->bullet_count; i++) {
         Bullet *b = &game->bullets[i];
+        
+        // Remove inactive bullets from the list
+        if (!b->active) {
+            // Swap with last bullet
+            if (i != game->bullet_count - 1) {
+                game->bullets[i] = game->bullets[game->bullet_count - 1];
+            }
+            game->bullet_count--;
+            i--;
+            continue;
+        }
         
         // Update lifetime
         b->lifetime -= dt;
@@ -1462,8 +1473,10 @@ void update_comet_buster(void *vis, double dt) {
         comet_buster_update_boss(game, dt, width, height);
     }
     
-    // Spawn boss on wave 5
-    if (game->current_wave >= 5 && !game->boss_active && game->comet_count == 0) {
+    // Spawn boss on wave 5 (only if boss isn't already dead from this wave)
+    // We check: boss should be requested (wave >= 5), boss shouldn't be active, and all comets should be gone
+    // AND the boss.active flag should still be false (meaning it hasn't been initialized yet)
+    if (game->current_wave >= 5 && !game->boss_active && game->comet_count == 0 && !game->boss.active) {
         fprintf(stdout, "[UPDATE] Conditions met to spawn boss: Wave=%d, BossActive=%d, CometCount=%d\n",
                 game->current_wave, game->boss_active, game->comet_count);
         comet_buster_spawn_boss(game, width, height);
@@ -2104,15 +2117,20 @@ void comet_buster_boss_fire(CometBusterGame *game) {
     BossShip *boss = &game->boss;
     double bullet_speed = 180.0;
     
-    // Fire in multiple directions
+    // Calculate angle toward the player ship
+    double dx = game->ship_x - boss->x;
+    double dy = game->ship_y - boss->y;
+    double angle_to_ship = atan2(dy, dx);
+    
+    // Fire in multiple directions, centered on the ship
     int num_bullets = (boss->phase == 2) ? 5 : 3;  // 5 in enraged, 3 normally
     double angle_spread = 60.0 * M_PI / 180.0;  // 60 degree spread
-    double start_angle = -angle_spread / 2.0;
+    double start_angle = angle_to_ship - angle_spread / 2.0;
     
     for (int i = 0; i < num_bullets; i++) {
         double angle = start_angle + (angle_spread / (num_bullets - 1)) * i;
-        double vx = cos(angle + M_PI / 2.0) * bullet_speed;  // Down is M_PI/2
-        double vy = sin(angle + M_PI / 2.0) * bullet_speed;
+        double vx = cos(angle) * bullet_speed;
+        double vy = sin(angle) * bullet_speed;
         
         comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
     }
@@ -2279,33 +2297,67 @@ void comet_buster_load_high_scores(CometBusterGame *game) {
         game->high_scores[i].timestamp = 0;
         game->high_scores[i].player_name[0] = '\0';
     }
+    // Note: Actual loading is done by comet_main.cpp (high_scores_load function)
+    // This function is kept here for API compatibility
 }
 
 void comet_buster_save_high_scores(CometBusterGame *game) {
     if (!game) return;
+    // Note: Actual saving is done by comet_main.cpp (high_scores_save function)
+    // This function is kept here for API compatibility
 }
 
 void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name) {
-    if (!game || game->high_score_count >= MAX_HIGH_SCORES) return;
+    if (!game || !name) return;
     
-    int slot = game->high_score_count;
-    HighScore *hs = &game->high_scores[slot];
+    // Find insertion position to maintain sorted order (highest score first)
+    int insert_pos = game->high_score_count;
+    for (int i = 0; i < game->high_score_count; i++) {
+        if (score > game->high_scores[i].score) {
+            insert_pos = i;
+            break;
+        }
+    }
     
+    // Don't add if score is below the 10th place and we're already full
+    if (insert_pos >= MAX_HIGH_SCORES) {
+        return;
+    }
+    
+    // Shift scores down to make room, removing the lowest score if list is full
+    if (game->high_score_count >= MAX_HIGH_SCORES) {
+        // List is full, shift entries down from the insert position
+        for (int i = MAX_HIGH_SCORES - 1; i > insert_pos; i--) {
+            game->high_scores[i] = game->high_scores[i - 1];
+        }
+    } else {
+        // List has room, shift entries down and increment count
+        for (int i = game->high_score_count; i > insert_pos; i--) {
+            game->high_scores[i] = game->high_scores[i - 1];
+        }
+        game->high_score_count++;
+    }
+    
+    // Insert the new high score at the correct position
+    HighScore *hs = &game->high_scores[insert_pos];
     hs->score = score;
     hs->wave = wave;
     hs->timestamp = time(NULL);
     strncpy(hs->player_name, name, sizeof(hs->player_name) - 1);
+    hs->player_name[sizeof(hs->player_name) - 1] = '\0';
     
-    game->high_score_count++;
+    fprintf(stdout, "[HIGH SCORE] Added new high score: %d points at position %d\n", score, insert_pos + 1);
 }
 
 bool comet_buster_is_high_score(CometBusterGame *game, int score) {
     if (!game) return false;
     
+    // If we have fewer than 10 scores, any score is a high score
     if (game->high_score_count < MAX_HIGH_SCORES) return true;
     
-    for (int i = 0; i < game->high_score_count; i++) {
-        if (score > game->high_scores[i].score) return true;
+    // If we have 10 scores, check if the score beats the lowest (10th) score
+    if (game->high_score_count >= MAX_HIGH_SCORES) {
+        return score > game->high_scores[MAX_HIGH_SCORES - 1].score;
     }
     
     return false;
@@ -2755,7 +2807,10 @@ void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height) 
         // Boss not active - this is normal when no boss spawned
         return;
     }
-        
+    
+    fprintf(stdout, "[DRAW BOSS] Drawing boss at (%.1f, %.1f) - Health: %d, Active: %d\n", 
+            boss->x, boss->y, boss->health, boss->active);
+    
     // Draw the boss (death star) as a large circle with rotating patterns
     cairo_save(cr);
     cairo_translate(cr, boss->x, boss->y);
