@@ -611,6 +611,7 @@ void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int
         // KEYBOARD-BASED ARCADE CONTROLS
         // Rotation: A=left, D=right
         double rotation_speed = 6.0;  // Radians per second
+        mouse_active=false;
         if (game->keyboard.key_a_pressed) {
             game->ship_angle -= rotation_speed * dt;
         }
@@ -2754,10 +2755,7 @@ void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height) 
         // Boss not active - this is normal when no boss spawned
         return;
     }
-    
-    fprintf(stdout, "[DRAW BOSS] Drawing boss at (%.1f, %.1f) - Health: %d, Active: %d\n", 
-            boss->x, boss->y, boss->health, boss->active);
-    
+        
     // Draw the boss (death star) as a large circle with rotating patterns
     cairo_save(cr);
     cairo_translate(cr, boss->x, boss->y);

@@ -1076,33 +1076,41 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
         case GDK_KEY_a:
         case GDK_KEY_A:
             gui->visualizer.key_a_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_d:
         case GDK_KEY_D:
             gui->visualizer.key_d_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_w:
         case GDK_KEY_W:
             gui->visualizer.key_w_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_s:
         case GDK_KEY_S:
             gui->visualizer.key_s_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_z:
         case GDK_KEY_Z:
             gui->visualizer.key_z_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_x:
         case GDK_KEY_X:
             gui->visualizer.key_x_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_space:
             gui->visualizer.key_space_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_Control_L:
         case GDK_KEY_Control_R:
             gui->visualizer.key_ctrl_pressed = true;
+            gui->visualizer.mouse_just_moved = false;  // Disable mouse when keyboard is used
             break;
         case GDK_KEY_v:
         case GDK_KEY_V:
