@@ -1400,6 +1400,7 @@ void update_comet_buster(void *vis, double dt) {
     game->mouse_right_pressed = visualizer->mouse_right_pressed;
     game->mouse_middle_pressed = visualizer->mouse_middle_pressed;
     
+#ifdef ExternalSound
     // Copy arcade-style keyboard input state from visualizer
     game->keyboard.key_a_pressed = visualizer->key_a_pressed;
     game->keyboard.key_d_pressed = visualizer->key_d_pressed;
@@ -1412,9 +1413,16 @@ void update_comet_buster(void *vis, double dt) {
     
     // Determine if mouse controls should be active (mouse has moved recently)
     bool mouse_active = visualizer->mouse_just_moved;
+#endif
+
     
     // Update game state
+#ifdef ExternalSound
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
+#else
+    comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, true);
+#endif
+
     comet_buster_update_comets(game, dt, width, height);
     comet_buster_update_shooting(game, dt, visualizer);  // Uses mouse_left_pressed state
     comet_buster_update_bullets(game, dt, width, height, visualizer);
