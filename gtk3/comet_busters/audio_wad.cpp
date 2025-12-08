@@ -38,6 +38,30 @@ static Mix_Chunk* load_sound_from_wad(WadArchive *wad, const char *filename) {
     return chunk;
 }
 
+// Helper function to initialize shuffle order using Fisher-Yates algorithm
+static void init_shuffle_order(AudioManager *audio) {
+    if (!audio || audio->music_track_count == 0) return;
+    
+    // Initialize with sequential indices
+    for (int i = 0; i < audio->music_track_count; i++) {
+        audio->shuffle_order[i] = i;
+    }
+    
+    // Fisher-Yates shuffle
+    for (int i = audio->music_track_count - 1; i > 0; i--) {
+        int j = rand() % (i + 1);
+        // Swap
+        int temp = audio->shuffle_order[i];
+        audio->shuffle_order[i] = audio->shuffle_order[j];
+        audio->shuffle_order[j] = temp;
+    }
+    
+    audio->shuffle_position = 0;
+    audio->shuffle_initialized = true;
+    
+    fprintf(stdout, "[OK] Shuffle order initialized\n");
+}
+
 // Initialize audio system
 bool audio_init(AudioManager *audio) {
     if (!audio) {
@@ -61,9 +85,12 @@ bool audio_init(AudioManager *audio) {
     // Initialize fields
     for (int i = 0; i < 10; i++) {
         audio->music_tracks[i] = NULL;
+        audio->shuffle_order[i] = 0;
     }
     audio->music_track_count = 0;
     audio->current_music_track = 0;
+    audio->shuffle_position = 0;
+    audio->shuffle_initialized = false;
     
     audio->sfx_fire = NULL;
     audio->sfx_alien_fire = NULL;
@@ -84,7 +111,7 @@ bool audio_init(AudioManager *audio) {
     Mix_VolumeMusic(100);        // Music volume
     Mix_Volume(-1, 100);         // SFX volume (all channels)
     
-    fprintf(stdout, "✓ Audio system initialized\n");
+    fprintf(stdout, "[OK] Audio system initialized\n");
     return true;
 }
 
@@ -121,7 +148,7 @@ bool audio_load_wad(AudioManager *audio, const char *wad_filename) {
     if (audio->sfx_game_over) loaded++;
     if (audio->sfx_wave_complete) loaded++;
     
-    fprintf(stdout, "✓ Loaded %d/%d sounds from WAD\n", loaded, 7);
+    fprintf(stdout, "[OK] Loaded %d/%d sounds from WAD\n", loaded, 7);
     
     return loaded > 0;
 }
@@ -188,8 +215,6 @@ void audio_set_music_volume(AudioManager *audio, int volume) {
     
     audio->music_volume = volume;
     Mix_VolumeMusic(volume);
-    
-    int percent = (volume * 100) / 128;
 }
 
 // Get music volume (NEW)
@@ -207,8 +232,6 @@ void audio_set_sfx_volume(AudioManager *audio, int volume) {
     
     audio->sfx_volume = volume;
     Mix_Volume(-1, volume);  // Apply to all channels
-    
-    int percent = (volume * 100) / 128;
 }
 
 // Get SFX volume (NEW)
@@ -253,24 +276,36 @@ void audio_play_music(AudioManager *audio, const char *internal_path, bool loop)
     if (Mix_PlayMusic(music, loops) < 0) {
         fprintf(stderr, "Failed to play music: %s\n", Mix_GetError());
     } else {
-        fprintf(stdout, "♪ Playing: %s\n", internal_path);
+        fprintf(stdout, "[*] Playing: %s\n", internal_path);
     }
 }
 
-// Play random music from loaded tracks
+// Play random music from loaded tracks (ensures no repeats until all tracks played)
 void audio_play_random_music(AudioManager *audio) {
     if (!audio || audio->music_track_count == 0) return;
     
-    // Pick a random track
-    int track_index = rand() % audio->music_track_count;
-    Mix_Music *music = audio->music_tracks[track_index];
+    // Initialize shuffle order on first call
+    if (!audio->shuffle_initialized) {
+        init_shuffle_order(audio);
+    }
     
+    // If we've played through all tracks, re-shuffle for next cycle
+    if (audio->shuffle_position >= audio->music_track_count) {
+        init_shuffle_order(audio);
+    }
+    
+    // Get the next track from the shuffled order
+    int track_index = audio->shuffle_order[audio->shuffle_position];
+    audio->shuffle_position++;
+    
+    Mix_Music *music = audio->music_tracks[track_index];
     if (!music) return;
     
-    if (Mix_PlayMusic(music, -1) < 0) {
+    if (Mix_PlayMusic(music, 0) < 0) {  // Play once (0 loops), music_finished callback will trigger next
         fprintf(stderr, "Failed to play music: %s\n", Mix_GetError());
     } else {
-        fprintf(stdout, "♪ Playing random track %d/%d\n", track_index + 1, audio->music_track_count);
+        fprintf(stdout, "[*] Playing track %d (position %d/%d in shuffle)\n", 
+                track_index + 1, audio->shuffle_position, audio->music_track_count);
     }
 }
 
@@ -280,7 +315,7 @@ void audio_stop_music(AudioManager *audio) {
     
     if (Mix_PlayingMusic()) {
         Mix_HaltMusic();
-        fprintf(stdout, "♪ Music stopped\n");
+        fprintf(stdout, "[*] Music stopped\n");
     }
 }
 
@@ -290,7 +325,7 @@ void audio_pause_music(AudioManager *audio) {
     
     if (Mix_PlayingMusic()) {
         Mix_PauseMusic();
-        fprintf(stdout, "♪ Music paused\n");
+        fprintf(stdout, "[*] Music paused\n");
     }
 }
 
@@ -300,7 +335,7 @@ void audio_resume_music(AudioManager *audio) {
     
     if (Mix_PausedMusic()) {
         Mix_ResumeMusic();
-        fprintf(stdout, "♪ Music resumed\n");
+        fprintf(stdout, "[*] Music resumed\n");
     }
 }
 

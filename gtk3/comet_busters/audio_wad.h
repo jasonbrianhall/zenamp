@@ -15,6 +15,11 @@ typedef struct {
     int music_track_count;
     int current_music_track;
     
+    // Shuffle tracking - keeps order for random playback without repeats
+    int shuffle_order[10];       // Randomized order of track indices
+    int shuffle_position;        // Current position in the shuffle order
+    bool shuffle_initialized;    // Whether shuffle_order has been initialized
+    
     // Sound effects
     Mix_Chunk *sfx_fire;
     Mix_Chunk *sfx_alien_fire;
@@ -52,7 +57,7 @@ int audio_get_sfx_volume(AudioManager *audio);
 
 // Music playback
 void audio_play_music(AudioManager *audio, const char *internal_path, bool loop);
-void audio_play_random_music(AudioManager *audio);  // Play random track from loaded list
+void audio_play_random_music(AudioManager *audio);  // Play random track from loaded list (no repeats until all played)
 void audio_stop_music(AudioManager *audio);
 void audio_pause_music(AudioManager *audio);
 void audio_resume_music(AudioManager *audio);

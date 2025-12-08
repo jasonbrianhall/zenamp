@@ -1972,6 +1972,13 @@ void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
         game->game_over = true;
         game->game_over_timer = 3.0;
         
+        // Play game over sound effect
+        #ifdef ExternalSound
+        if (visualizer && visualizer->audio.sfx_game_over) {
+            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_game_over);
+        }
+        #endif
+        
         if (comet_buster_is_high_score(game, game->score)) {
             comet_buster_add_high_score(game, game->score, game->current_wave, "Player");
             comet_buster_save_high_scores(game);
