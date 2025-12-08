@@ -103,6 +103,37 @@ typedef struct {
 #define MAX_ENEMY_SHIPS 4
 #define MAX_ENEMY_BULLETS 64
 
+// Boss (Death Star) structure
+typedef struct {
+    double x, y;                // Position
+    double vx, vy;              // Velocity
+    double angle;               // Direction facing
+    int health;                 // Boss health (large number like 50-100)
+    int max_health;             // Maximum health
+    double shoot_cooldown;      // Time until next shot
+    int phase;                  // 0 = normal, 1 = shield up, 2 = enraged
+    double phase_timer;         // Time in current phase
+    double phase_duration;      // How long until phase changes
+    
+    // Shield system
+    int shield_health;          // Shield durability (10-20 points)
+    int max_shield_health;      // Maximum shield durability
+    bool shield_active;         // Is shield currently up?
+    double shield_impact_timer; // Visual effect
+    double shield_impact_angle; // Where shield was hit
+    
+    // Firing pattern
+    double fire_pattern_timer;  // For special firing patterns
+    int fire_pattern;           // Different firing modes
+    
+    // Visual effects
+    double rotation;            // Visual rotation
+    double rotation_speed;
+    double damage_flash_timer;  // Flash when taking damage
+    
+    bool active;                // Is the boss alive?
+} BossShip;
+
 typedef struct {
     // Ship state
     double ship_x, ship_y;
@@ -146,6 +177,11 @@ typedef struct {
     int enemy_ship_count;
     Bullet enemy_bullets[MAX_ENEMY_BULLETS];
     int enemy_bullet_count;
+    
+    // Boss (Death Star) - appears in wave 5+
+    BossShip boss;
+    bool boss_active;
+    double boss_spawn_timer;
     
     // Timing & difficulty
     double spawn_timer;         // Seconds until next spawn
@@ -226,7 +262,14 @@ void comet_buster_spawn_floating_text(CometBusterGame *game, double x, double y,
 void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height);
 void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy);
 
-// Collision & physics
+// Boss functions
+void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen_height);
+void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_boss_fire(CometBusterGame *game);
+bool comet_buster_check_bullet_boss(Bullet *b, BossShip *boss);
+void comet_buster_destroy_boss(CometBusterGame *game, int width, int height, void *vis);
+void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height);
+
 bool comet_buster_check_bullet_comet(Bullet *b, Comet *c);
 bool comet_buster_check_ship_comet(CometBusterGame *game, Comet *c);
 void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double dy, 

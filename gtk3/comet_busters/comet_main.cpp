@@ -816,6 +816,79 @@ void on_new_game(GtkWidget *widget, gpointer data) {
     fprintf(stdout, "[GAME] New Game Started\n");
 }
 
+// ============================================================================
+// DEBUG MENU CALLBACKS
+// ============================================================================
+
+void on_debug_jump_to_wave_5(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // Close high score dialog if open
+    if (gui->high_score_dialog) {
+        gtk_widget_destroy(gui->high_score_dialog);
+        gui->high_score_dialog = NULL;
+    }
+    
+    // Reset high score dialog flag
+    gui->high_score_dialog_shown = false;
+    gui->game_paused = false;
+    
+    // Initialize game first
+    init_comet_buster_system(&gui->visualizer);
+    
+    // Jump to Wave 5
+    CometBusterGame *game = &gui->visualizer.comet_buster;
+    game->current_wave = 5;
+    game->score = 10000;  // Give some starting points
+    game->score_multiplier = 1.5;  // Decent multiplier
+    
+    // Spawn Wave 5 comets
+    comet_buster_spawn_wave(game, gui->visualizer.width, gui->visualizer.height);
+    
+    fprintf(stdout, "[DEBUG] Jumped to Wave 5! Score: %d, Multiplier: %.1fx\n", 
+            game->score, game->score_multiplier);
+}
+
+void on_debug_spawn_boss(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    CometBusterGame *game = &gui->visualizer.comet_buster;
+    
+    // Clear existing comets for cleaner boss fight
+    game->comet_count = 0;
+    
+    // Ensure we're at Wave 5+
+    if (game->current_wave < 5) {
+        game->current_wave = 5;
+    }
+    
+    // Spawn the boss directly
+    comet_buster_spawn_boss(game, gui->visualizer.width, gui->visualizer.height);
+    
+    fprintf(stdout, "[DEBUG] Boss spawned directly! Wave: %d\n", game->current_wave);
+}
+
+void on_debug_skip_to_boss_phase(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    CometBusterGame *game = &gui->visualizer.comet_buster;
+    
+    // Jump to Wave 5, clear comets, and spawn boss
+    game->current_wave = 5;
+    game->comet_count = 0;
+    game->score = 50000;
+    game->score_multiplier = 2.5;
+    
+    // Spawn boss directly
+    comet_buster_spawn_boss(game, gui->visualizer.width, gui->visualizer.height);
+    
+    fprintf(stdout, "[DEBUG] Boss fight ready! Score: %d, Multiplier: %.1fx\n", 
+            game->score, game->score_multiplier);
+}
+
 void on_about(GtkWidget *widget, gpointer data) {
     GtkWidget *dialog = gtk_message_dialog_new(
         NULL,
@@ -1238,6 +1311,25 @@ int main(int argc, char *argv[]) {
     
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(audio_item), audio_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), audio_item);
+    
+    // Debug menu
+    GtkWidget *debug_menu = gtk_menu_new();
+    GtkWidget *debug_item = gtk_menu_item_new_with_label("Debug");
+    
+    GtkWidget *debug_wave5_item = gtk_menu_item_new_with_label("Jump to Wave 5");
+    g_signal_connect(debug_wave5_item, "activate", G_CALLBACK(on_debug_jump_to_wave_5), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_wave5_item);
+    
+    GtkWidget *debug_spawn_boss_item = gtk_menu_item_new_with_label("Spawn Boss (Keep Comets)");
+    g_signal_connect(debug_spawn_boss_item, "activate", G_CALLBACK(on_debug_spawn_boss), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_spawn_boss_item);
+    
+    GtkWidget *debug_skip_to_boss_item = gtk_menu_item_new_with_label("Skip to Boss Battle");
+    g_signal_connect(debug_skip_to_boss_item, "activate", G_CALLBACK(on_debug_skip_to_boss_phase), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_skip_to_boss_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(debug_item), debug_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), debug_item);
     
     // Help menu
     GtkWidget *help_menu = gtk_menu_new();

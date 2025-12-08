@@ -42,6 +42,11 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->enemy_ship_count = 0;
     game->enemy_bullet_count = 0;
     
+    // Initialize boss as inactive
+    game->boss_active = false;
+    game->boss.active = false;
+    game->boss_spawn_timer = 0;
+    
     // Initialize non-zero values - use defaults, will be set by visualizer if needed
     game->ship_x = 400.0;
     game->ship_y = 300.0;
@@ -447,8 +452,9 @@ void comet_buster_update_wave_progression(CometBusterGame *game) {
     
     // Check if all comets are destroyed to trigger next wave
     // Only trigger if we're not already in countdown (wave_complete_timer == 0)
-    if (game->comet_count == 0 && game->wave_complete_timer == 0) {
-        // All comets destroyed - start countdown to next wave
+    // AND if boss is not active (boss must be defeated before next wave)
+    if (game->comet_count == 0 && game->wave_complete_timer == 0 && !game->boss_active) {
+        // All comets destroyed and no boss active - start countdown to next wave
         game->wave_complete_timer = 2.0;  // 2 second delay before next wave
     }
 }
@@ -1400,7 +1406,6 @@ void update_comet_buster(void *vis, double dt) {
     game->mouse_right_pressed = visualizer->mouse_right_pressed;
     game->mouse_middle_pressed = visualizer->mouse_middle_pressed;
     
-#ifdef ExternalSound
     // Copy arcade-style keyboard input state from visualizer
     game->keyboard.key_a_pressed = visualizer->key_a_pressed;
     game->keyboard.key_d_pressed = visualizer->key_d_pressed;
@@ -1411,17 +1416,14 @@ void update_comet_buster(void *vis, double dt) {
     game->keyboard.key_space_pressed = visualizer->key_space_pressed;
     game->keyboard.key_ctrl_pressed = visualizer->key_ctrl_pressed;
     
-    // Determine if mouse controls should be active (mouse has moved recently)
-    bool mouse_active = visualizer->mouse_just_moved;
-#endif
+    // If ANY keyboard movement key is pressed, disable mouse control immediately
+    bool keyboard_active = visualizer->key_a_pressed || visualizer->key_d_pressed || 
+                          visualizer->key_w_pressed || visualizer->key_s_pressed;
+    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active;
 
     
     // Update game state
-#ifdef ExternalSound
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
-#else
-    comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, true);
-#endif
 
     comet_buster_update_comets(game, dt, width, height);
     comet_buster_update_shooting(game, dt, visualizer);  // Uses mouse_left_pressed state
@@ -1451,20 +1453,34 @@ void update_comet_buster(void *vis, double dt) {
     comet_buster_update_enemy_ships(game, dt, width, height, visualizer);  // Update enemy ships
     comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);  // Update enemy bullets
     
+    // Update boss if active
+    if (game->boss_active) {
+        comet_buster_update_boss(game, dt, width, height);
+    }
+    
+    // Spawn boss on wave 5
+    if (game->current_wave >= 5 && !game->boss_active && game->comet_count == 0) {
+        fprintf(stdout, "[UPDATE] Conditions met to spawn boss: Wave=%d, BossActive=%d, CometCount=%d\n",
+                game->current_wave, game->boss_active, game->comet_count);
+        comet_buster_spawn_boss(game, width, height);
+    }
+    
     // Update fuel system
     comet_buster_update_fuel(game, dt);
     
     // Handle wave completion and progression (only if not already counting down)
-    if (game->wave_complete_timer <= 0) {
+    // BUT: Don't progress if boss is active (boss must be defeated first)
+    if (game->wave_complete_timer <= 0 && !game->boss_active) {
         comet_buster_update_wave_progression(game);
     }
     
     // Handle wave complete timer (delay before next wave spawns)
-    if (game->wave_complete_timer > 0) {
+    // BUT: Don't spawn next wave if boss is still alive
+    if (game->wave_complete_timer > 0 && !game->boss_active) {
         game->wave_complete_timer -= dt;
         if (game->wave_complete_timer <= 0) {
-            // Timer expired - spawn the next wave
-            if (game->comet_count == 0) {
+            // Timer expired - spawn the next wave (but only if boss is dead)
+            if (game->comet_count == 0 && !game->boss_active) {
                 game->current_wave++;  // Increment AFTER timer expires
                 comet_buster_spawn_wave(game, width, height);
             }
@@ -1576,6 +1592,49 @@ void update_comet_buster(void *vis, double dt) {
                 comet_buster_destroy_comet(game, j, width, height, visualizer);
                 break;
             }
+        }
+    }
+    
+    // Check player bullets hitting boss
+    if (game->boss_active) {
+        for (int j = 0; j < game->bullet_count; j++) {
+            if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
+                game->bullets[j].active = false;  // Consume bullet
+                
+                // Check if boss has shield
+                if (game->boss.shield_active && game->boss.shield_health > 0) {
+                    game->boss.shield_health--;
+                    game->boss.shield_impact_timer = 0.2;
+                    game->boss.shield_impact_angle = atan2(game->boss.y - game->bullets[j].y,
+                                                           game->boss.x - game->bullets[j].x);
+                    
+#ifdef ExternalSound
+                    if (visualizer && visualizer->audio.sfx_hit) {
+                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                    }
+#endif
+                } else {
+                    // Damage boss
+                    game->boss.health--;
+                    game->boss.damage_flash_timer = 0.1;
+                    game->consecutive_hits++;
+                    
+                    if (game->boss.health <= 0) {
+                        comet_buster_destroy_boss(game, width, height, visualizer);
+                    }
+                }
+                break;
+            }
+        }
+        
+        // Check boss-player ship collisions
+        double dx = game->ship_x - game->boss.x;
+        double dy = game->ship_y - game->boss.y;
+        double dist = sqrt(dx*dx + dy*dy);
+        double collision_dist = 20.0 + 35.0;  // Player ~20px, Boss ~35px
+        
+        if (dist < collision_dist) {
+            comet_buster_on_ship_hit(game, visualizer);
         }
     }
     
@@ -1905,6 +1964,206 @@ void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int 
     game->enemy_ship_count--;
 }
 
+// ============================================================================
+// BOSS (DEATH STAR) FUNCTIONS
+// ============================================================================
+
+void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen_height) {
+    (void)screen_height;  // Suppress unused parameter warning
+    if (!game) return;
+    
+    fprintf(stdout, "[SPAWN BOSS] Attempting to spawn boss at Wave %d\n", game->current_wave);
+    
+    BossShip *boss = &game->boss;
+    memset(boss, 0, sizeof(BossShip));
+    
+    // Spawn at top center of screen
+    boss->x = screen_width / 2.0;
+    boss->y = 80.0;
+    boss->vx = 40.0 + (rand() % 40);  // Slow horizontal movement
+    boss->vy = 0;
+    boss->angle = 0;
+    
+    // Boss health
+    boss->health = 100;
+    boss->max_health = 100;
+    
+    // Shield system
+    boss->shield_health = 20;
+    boss->max_shield_health = 20;
+    boss->shield_active = true;
+    
+    // Shooting
+    boss->shoot_cooldown = 0;
+    
+    // Phases
+    boss->phase = 0;  // Start in normal phase
+    boss->phase_timer = 0;
+    boss->phase_duration = 5.0;  // 5 seconds per phase
+    
+    // Visual
+    boss->rotation = 0;
+    boss->rotation_speed = 45.0;  // degrees per second
+    boss->damage_flash_timer = 0;
+    
+    boss->active = true;
+    game->boss_active = true;
+    
+    fprintf(stdout, "[SPAWN BOSS] Boss spawned! Position: (%.1f, %.1f), Active: %d, Health: %d\n", 
+            boss->x, boss->y, boss->active, boss->health);
+}
+
+void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int height) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    if (!boss->active) {
+        game->boss_active = false;
+        return;
+    }
+    
+    // Update phase timer
+    boss->phase_timer += dt;
+    if (boss->phase_timer >= boss->phase_duration) {
+        boss->phase_timer = 0;
+        boss->phase = (boss->phase + 1) % 3;  // Cycle through phases: 0, 1, 2, 0, 1, 2...
+        
+        // Change shield state based on phase
+        if (boss->phase == 1) {
+            // Shield up phase
+            boss->shield_active = true;
+            boss->shield_health = boss->max_shield_health;
+        } else {
+            // Normal and enraged phases have weaker/no shield
+            boss->shield_active = false;
+        }
+    }
+    
+    // Movement - bounces off sides
+    boss->x += boss->vx * dt;
+    boss->y += boss->vy * dt;
+    
+    if (boss->x < 60 || boss->x > width - 60) {
+        boss->vx = -boss->vx;  // Bounce
+    }
+    
+    // Wrap position vertically
+    if (boss->y > height + 100) {
+        boss->active = false;
+        game->boss_active = false;
+        return;
+    }
+    
+    // Update rotation
+    boss->rotation += boss->rotation_speed * dt;
+    
+    // Update damage flash
+    if (boss->damage_flash_timer > 0) {
+        boss->damage_flash_timer -= dt;
+    }
+    
+    // Firing pattern based on phase
+    boss->shoot_cooldown -= dt;
+    
+    if (boss->phase == 0) {
+        // Normal phase - steady fire
+        if (boss->shoot_cooldown <= 0) {
+            comet_buster_boss_fire(game);
+            boss->shoot_cooldown = 0.5;  // Fire every 0.5 seconds
+        }
+    } else if (boss->phase == 1) {
+        // Shield phase - less firing, recharging shield
+        if (boss->shield_health < boss->max_shield_health) {
+            boss->shield_health++;  // Regen 1 HP per frame
+            if (boss->shield_health > boss->max_shield_health) {
+                boss->shield_health = boss->max_shield_health;
+            }
+        }
+        if (boss->shoot_cooldown <= 0) {
+            comet_buster_boss_fire(game);
+            boss->shoot_cooldown = 0.7;  // Fire less frequently
+        }
+    } else if (boss->phase == 2) {
+        // Enraged phase - rapid fire, wider spread
+        if (boss->shoot_cooldown <= 0) {
+            comet_buster_boss_fire(game);
+            // Fire extra bullets in spread pattern
+            comet_buster_boss_fire(game);
+            boss->shoot_cooldown = 0.3;  // Fire every 0.3 seconds
+        }
+    }
+}
+
+void comet_buster_boss_fire(CometBusterGame *game) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    double bullet_speed = 180.0;
+    
+    // Fire in multiple directions
+    int num_bullets = (boss->phase == 2) ? 5 : 3;  // 5 in enraged, 3 normally
+    double angle_spread = 60.0 * M_PI / 180.0;  // 60 degree spread
+    double start_angle = -angle_spread / 2.0;
+    
+    for (int i = 0; i < num_bullets; i++) {
+        double angle = start_angle + (angle_spread / (num_bullets - 1)) * i;
+        double vx = cos(angle + M_PI / 2.0) * bullet_speed;  // Down is M_PI/2
+        double vy = sin(angle + M_PI / 2.0) * bullet_speed;
+        
+        comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
+    }
+}
+
+bool comet_buster_check_bullet_boss(Bullet *b, BossShip *boss) {
+    if (!b || !b->active || !boss || !boss->active) return false;
+    
+    double dx = boss->x - b->x;
+    double dy = boss->y - b->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    double collision_dist = 35.0;  // Boss collision radius
+    
+    return (dist < collision_dist);
+}
+
+void comet_buster_destroy_boss(CometBusterGame *game, int width, int height, void *vis) {
+    (void)width;
+    (void)height;
+    
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    
+    // Create large explosion
+    comet_buster_spawn_explosion(game, boss->x, boss->y, 1, 60);  // HUGE explosion
+    
+    // Play explosion sound
+    if (vis) {
+        Visualizer *visualizer = (Visualizer *)vis;
+#ifdef ExternalSound
+        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_explosion);
+#endif
+    }
+    
+    // Award MASSIVE points
+    int points = 5000;  // Boss worth 5000 points!
+    int score_add = (int)(points * game->score_multiplier);
+    game->score += score_add;
+    game->consecutive_hits += 10;  // Big hit bonus
+    
+    // Floating text - BIG text
+    char text[64];
+    snprintf(text, sizeof(text), "BOSS DESTROYED! +%d", score_add);
+    comet_buster_spawn_floating_text(game, boss->x, boss->y, text, 1.0, 1.0, 0.0);  // Yellow
+    
+    // Increase multiplier significantly
+    game->score_multiplier += 1.0;
+    if (game->score_multiplier > 5.0) game->score_multiplier = 5.0;
+    
+    boss->active = false;
+    game->boss_active = false;
+}
+
+
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
     if (game->invulnerability_time > 0) return;
     
@@ -2081,6 +2340,7 @@ void draw_comet_buster(void *vis, cairo_t *cr) {
     draw_comet_buster_comets(game, cr, width, height);
     draw_comet_buster_bullets(game, cr, width, height);
     draw_comet_buster_enemy_ships(game, cr, width, height);
+    draw_comet_buster_boss(&game->boss, cr, width, height);  // Draw boss if active
     draw_comet_buster_enemy_bullets(game, cr, width, height);
     draw_comet_buster_particles(game, cr, width, height);
     draw_comet_buster_ship(game, cr, width, height);
@@ -2476,6 +2736,164 @@ void draw_comet_buster_enemy_bullets(CometBusterGame *game, cairo_t *cr, int wid
             cairo_stroke(cr);
         }
     }
+}
+
+void draw_comet_buster_boss(BossShip *boss, cairo_t *cr, int width, int height) {
+    (void)width;
+    (void)height;
+    
+    if (!boss) {
+        fprintf(stderr, "[DRAW BOSS] ERROR: boss pointer is NULL\n");
+        return;
+    }
+    
+    if (!boss->active) {
+        // Boss not active - this is normal when no boss spawned
+        return;
+    }
+    
+    fprintf(stdout, "[DRAW BOSS] Drawing boss at (%.1f, %.1f) - Health: %d, Active: %d\n", 
+            boss->x, boss->y, boss->health, boss->active);
+    
+    // Draw the boss (death star) as a large circle with rotating patterns
+    cairo_save(cr);
+    cairo_translate(cr, boss->x, boss->y);
+    cairo_rotate(cr, boss->rotation * M_PI / 180.0);  // Convert degrees to radians
+    
+    // Main body - large circle
+    double body_radius = 35.0;
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.4);  // Dark gray
+    cairo_arc(cr, 0, 0, body_radius, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    
+    // Highlight if taking damage
+    if (boss->damage_flash_timer > 0) {
+        cairo_set_source_rgba(cr, 1.0, 0.5, 0.5, 0.7);  // Red flash
+        cairo_arc(cr, 0, 0, body_radius, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+    }
+    
+    // Outer ring - metallic look
+    cairo_set_source_rgba(cr, 0.6, 0.6, 0.7, 0.8);
+    cairo_set_line_width(cr, 2.5);
+    cairo_arc(cr, 0, 0, body_radius, 0, 2.0 * M_PI);
+    cairo_stroke(cr);
+    
+    // Draw rotating pattern on the boss
+    cairo_set_line_width(cr, 1.5);
+    for (int i = 0; i < 8; i++) {
+        double angle = (i * 2.0 * M_PI / 8.0);
+        double x1 = cos(angle) * 20.0;
+        double y1 = sin(angle) * 20.0;
+        double x2 = cos(angle) * 30.0;
+        double y2 = sin(angle) * 30.0;
+        
+        cairo_set_source_rgb(cr, 0.8, 0.8, 0.9);
+        cairo_move_to(cr, x1, y1);
+        cairo_line_to(cr, x2, y2);
+        cairo_stroke(cr);
+    }
+    
+    // Core/center glow (pulsing)
+    double core_radius = 8.0;
+    cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);  // Red core
+    cairo_arc(cr, 0, 0, core_radius, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    
+    // Inner glow
+    cairo_set_source_rgba(cr, 1.0, 0.3, 0.3, 0.6);
+    cairo_arc(cr, 0, 0, core_radius + 3.0, 0, 2.0 * M_PI);
+    cairo_stroke(cr);
+    
+    cairo_restore(cr);
+    
+    // Draw health bar above boss (Red)
+    double bar_width = 80.0;
+    double bar_height = 6.0;
+    double bar_x = boss->x - bar_width / 2.0;
+    double bar_y = boss->y - 50.0;
+    
+    // Background (gray)
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_fill(cr);
+    
+    // Health fill
+    double health_ratio = (double)boss->health / boss->max_health;
+    cairo_set_source_rgb(cr, 1.0, 0.2, 0.2);  // Red
+    cairo_rectangle(cr, bar_x, bar_y, bar_width * health_ratio, bar_height);
+    cairo_fill(cr);
+    
+    // Border
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_set_line_width(cr, 1.0);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_stroke(cr);
+    
+    // Draw shield if active
+    if (boss->shield_active && boss->shield_health > 0) {
+        // Shield circle (larger than body)
+        double shield_radius = 50.0;
+        double shield_ratio = (double)boss->shield_health / boss->max_shield_health;
+        
+        cairo_save(cr);
+        cairo_translate(cr, boss->x, boss->y);
+        
+        // Outer shield glow (pulsing)
+        cairo_set_source_rgba(cr, 0.0, 0.8, 1.0, 0.3 + 0.1 * sin(boss->shield_impact_timer * 10.0));
+        cairo_arc(cr, 0, 0, shield_radius, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+        
+        // Shield outline
+        cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, 0.8);
+        cairo_set_line_width(cr, 2.0);
+        cairo_arc(cr, 0, 0, shield_radius, 0, 2.0 * M_PI);
+        cairo_stroke(cr);
+        
+        // Shield segments
+        int num_segments = 12;
+        for (int i = 0; i < num_segments; i++) {
+            if (i < (num_segments * shield_ratio)) {
+                double angle = (i * 2.0 * M_PI / num_segments);
+                double x1 = cos(angle) * (shield_radius - 3.0);
+                double y1 = sin(angle) * (shield_radius - 3.0);
+                double x2 = cos(angle) * (shield_radius + 3.0);
+                double y2 = sin(angle) * (shield_radius + 3.0);
+                
+                cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
+                cairo_set_line_width(cr, 1.5);
+                cairo_move_to(cr, x1, y1);
+                cairo_line_to(cr, x2, y2);
+                cairo_stroke(cr);
+            }
+        }
+        
+        cairo_restore(cr);
+    }
+    
+    // Draw phase indicator (top left of boss)
+    double phase_x = boss->x - 25;
+    double phase_y = boss->y - 25;
+    
+    const char *phase_text;
+    double phase_r, phase_g, phase_b;
+    
+    if (boss->phase == 0) {
+        phase_text = "NORMAL";
+        phase_r = 1.0; phase_g = 1.0; phase_b = 0.5;  // Yellow
+    } else if (boss->phase == 1) {
+        phase_text = "SHIELDED";
+        phase_r = 0.0; phase_g = 1.0; phase_b = 1.0;  // Cyan
+    } else {
+        phase_text = "ENRAGED!";
+        phase_r = 1.0; phase_g = 0.2; phase_b = 0.2;  // Red
+    }
+    
+    cairo_set_source_rgb(cr, phase_r, phase_g, phase_b);
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 10);
+    cairo_move_to(cr, phase_x, phase_y);
+    cairo_show_text(cr, phase_text);
 }
 
 void draw_comet_buster_particles(CometBusterGame *game, cairo_t *cr, int width, int height) {
