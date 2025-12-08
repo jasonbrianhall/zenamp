@@ -3,8 +3,6 @@ name: Build Zenamp
 on:
   push:
     branches: [ master, main, dev ]
-    paths-ignore:
-      - 'gtk3/comet_busters/**'
     paths:
       - 'gtk3/**.cpp'
       - 'gtk3/**.h'
@@ -14,10 +12,9 @@ on:
       - 'gtk3/Makefile'
       - '**.yml'
       - '**.yaml'
+      - '!gtk3/comet_busters/**'
   pull_request:
     branches: [ master, main, dev ]
-    paths-ignore:
-      - 'gtk3/comet_busters/**'
     paths:
       - 'gtk3/**.cpp'
       - 'gtk3/**.h'
@@ -27,6 +24,7 @@ on:
       - 'gtk3/Makefile'
       - '**.yml'
       - '**.yaml'
+      - '!gtk3/comet_busters/**'
   workflow_dispatch:
 
 env:
