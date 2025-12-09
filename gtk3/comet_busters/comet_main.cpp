@@ -45,6 +45,12 @@ typedef struct {
     GtkWidget *high_score_name_entry;
     bool high_score_dialog_shown;
     
+    // Joystick test dialog
+    GtkWidget *joystick_dialog;
+    GtkWidget *joystick_status_label;
+    GtkWidget *joystick_drawing_area;
+    guint joystick_update_timer;
+    
     int music_volume;
     int sfx_volume;
     
@@ -685,6 +691,10 @@ void on_music_volume_changed(GtkRange *range, gpointer data);
 void on_sfx_volume_changed(GtkRange *range, gpointer data);
 gboolean on_volume_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data);
 void update_volume_labels(CometGUI *gui);
+void on_joystick_test(GtkWidget *widget, gpointer data);
+gboolean on_joystick_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
+gboolean joystick_update_timer(gpointer data);
+gboolean on_joystick_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data);
 
 // Volume control dialog functions
 void update_volume_labels(CometGUI *gui) {
@@ -830,6 +840,334 @@ void on_volume_dialog_open(GtkWidget *widget, gpointer data) {
     
     gtk_widget_show_all(gui->volume_dialog);
     update_volume_labels(gui);
+}
+
+// ============================================================
+// JOYSTICK TEST DIALOG IMPLEMENTATION
+// ============================================================
+
+/**
+ * Draw joystick state visualization
+ */
+gboolean on_joystick_draw(GtkWidget *widget, cairo_t *cr, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return FALSE;
+    
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    
+    int width = allocation.width;
+    int height = allocation.height;
+    
+    // Clear background
+    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
+    cairo_paint(cr);
+    
+    JoystickState *joy = joystick_manager_get_active(&gui->visualizer.joystick_manager);
+    
+    if (!joy || !joy->connected) {
+        // Draw "No Joystick Connected" message
+        cairo_set_source_rgb(cr, 0.8, 0.4, 0.4);
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 20);
+        
+        cairo_move_to(cr, width / 2 - 100, height / 2);
+        cairo_show_text(cr, "No Joystick Connected");
+        
+        return FALSE;
+    }
+    
+    // Draw title
+    cairo_set_source_rgb(cr, 0.9, 0.9, 0.9);
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 16);
+    cairo_move_to(cr, 20, 30);
+    cairo_show_text(cr, "Joystick Input Tester");
+    
+    // Draw analog sticks
+    int stick_radius = 40;
+    int left_stick_x = 100;
+    int left_stick_y = 120;
+    int right_stick_x = width - 100;
+    int right_stick_y = 120;
+    
+    // Draw left stick circle
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.4);
+    cairo_arc(cr, left_stick_x, left_stick_y, stick_radius, 0, 2 * M_PI);
+    cairo_fill(cr);
+    
+    // Draw left stick position (invert Y)
+    cairo_set_source_rgb(cr, 0.2, 0.8, 0.2);
+    int stick_pos_x = left_stick_x + (int)(joy->axis_x * stick_radius * 0.8);
+    int stick_pos_y = left_stick_y - (int)(joy->axis_y * stick_radius * 0.8);  // Inverted
+    cairo_arc(cr, stick_pos_x, stick_pos_y, 8, 0, 2 * M_PI);
+    cairo_fill(cr);
+    
+    // Draw right stick circle
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.4);
+    cairo_arc(cr, right_stick_x, right_stick_y, stick_radius, 0, 2 * M_PI);
+    cairo_fill(cr);
+    
+    // Draw right stick position (invert Y)
+    cairo_set_source_rgb(cr, 0.2, 0.8, 0.2);
+    stick_pos_x = right_stick_x + (int)(joy->axis_rx * stick_radius * 0.8);
+    stick_pos_y = right_stick_y - (int)(joy->axis_ry * stick_radius * 0.8);  // Inverted
+    cairo_arc(cr, stick_pos_x, stick_pos_y, 8, 0, 2 * M_PI);
+    cairo_fill(cr);
+    
+    // Draw buttons grid (4 columns x 3 rows)
+    int button_width = 50;
+    int button_height = 40;
+    int button_spacing_x = 70;
+    int button_spacing_y = 55;
+    int button_start_x = 140;
+    int button_start_y = 280;
+    
+    struct {
+        bool *pressed;
+        const char *label;
+    } buttons[] = {
+        {&joy->button_a, "A"},
+        {&joy->button_b, "B"},
+        {&joy->button_x, "X"},
+        {&joy->button_y, "Y"},
+        {&joy->button_lb, "LB"},
+        {&joy->button_rb, "RB"},
+        {&joy->button_back, "Back"},
+        {&joy->button_start, "Start"},
+        {&joy->button_left_stick, "L3"},
+        {&joy->button_right_stick, "R3"},
+        {&joy->dpad_up, "↑"},
+        {&joy->dpad_down, "↓"}
+    };
+    
+    for (int i = 0; i < 12; i++) {
+        int row = i / 4;
+        int col = i % 4;
+        int x = button_start_x + col * button_spacing_x;
+        int y = button_start_y + row * button_spacing_y;
+        
+        // Draw button background
+        if (*buttons[i].pressed) {
+            cairo_set_source_rgb(cr, 0.2, 0.8, 0.2);  // Green when pressed
+        } else {
+            cairo_set_source_rgb(cr, 0.4, 0.4, 0.5);  // Gray when not pressed
+        }
+        cairo_rectangle(cr, x - button_width/2, y - button_height/2, button_width, button_height);
+        cairo_fill(cr);
+        
+        // Draw button border
+        cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+        cairo_rectangle(cr, x - button_width/2, y - button_height/2, button_width, button_height);
+        cairo_stroke(cr);
+        
+        // Draw button label
+        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11);
+        
+        // Center text better
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, buttons[i].label, &extents);
+        double text_x = x - extents.width / 2;
+        double text_y = y + extents.height / 2;
+        cairo_move_to(cr, text_x, text_y);
+        cairo_show_text(cr, buttons[i].label);
+    }
+    
+    // Draw D-Pad section (separate from main button grid)
+    cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 10);
+    cairo_move_to(cr, 140, 440);
+    cairo_show_text(cr, "D-Pad: Up/Down");
+    
+    // Draw triggers at the bottom
+    int trigger_y = height - 60;
+    int trigger_width = 100;
+    int trigger_height = 30;
+    int lt_x = 150;
+    int rt_x = width - 150;
+    
+    // Left trigger background
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.5);
+    cairo_rectangle(cr, lt_x - trigger_width/2, trigger_y - trigger_height/2, trigger_width, trigger_height);
+    cairo_fill(cr);
+    
+    // Left trigger fill (green bar showing pressure)
+    cairo_set_source_rgb(cr, 0.2, 0.8, 0.2);
+    int lt_fill = (int)(trigger_width * joy->axis_lt);
+    cairo_rectangle(cr, lt_x - trigger_width/2, trigger_y - trigger_height/2, lt_fill, trigger_height);
+    cairo_fill(cr);
+    
+    // Left trigger border
+    cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+    cairo_rectangle(cr, lt_x - trigger_width/2, trigger_y - trigger_height/2, trigger_width, trigger_height);
+    cairo_stroke(cr);
+    
+    // Right trigger background
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.5);
+    cairo_rectangle(cr, rt_x - trigger_width/2, trigger_y - trigger_height/2, trigger_width, trigger_height);
+    cairo_fill(cr);
+    
+    // Right trigger fill
+    cairo_set_source_rgb(cr, 0.2, 0.8, 0.2);
+    int rt_fill = (int)(trigger_width * joy->axis_rt);
+    cairo_rectangle(cr, rt_x - trigger_width/2, trigger_y - trigger_height/2, rt_fill, trigger_height);
+    cairo_fill(cr);
+    
+    // Right trigger border
+    cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+    cairo_rectangle(cr, rt_x - trigger_width/2, trigger_y - trigger_height/2, trigger_width, trigger_height);
+    cairo_stroke(cr);
+    
+    // Draw trigger labels
+    cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 11);
+    
+    char lt_label[32];
+    snprintf(lt_label, sizeof(lt_label), "LT: %.2f", joy->axis_lt);
+    cairo_move_to(cr, lt_x - 35, trigger_y + 25);
+    cairo_show_text(cr, lt_label);
+    
+    char rt_label[32];
+    snprintf(rt_label, sizeof(rt_label), "RT: %.2f", joy->axis_rt);
+    cairo_move_to(cr, rt_x - 35, trigger_y + 25);
+    cairo_show_text(cr, rt_label);
+    
+    return FALSE;
+}
+
+/**
+ * Update joystick dialog periodically
+ */
+gboolean joystick_update_timer(gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui || !gui->joystick_dialog) return FALSE;
+    
+    // Update joystick state
+    joystick_manager_update(&gui->visualizer.joystick_manager);
+    
+    // Redraw the joystick visualization
+    if (gui->joystick_drawing_area) {
+        gtk_widget_queue_draw(gui->joystick_drawing_area);
+    }
+    
+    // Update status label
+    if (gui->joystick_status_label) {
+        JoystickState *joy = joystick_manager_get_active(&gui->visualizer.joystick_manager);
+        char status_text[256];
+        
+        if (joy && joy->connected) {
+            snprintf(status_text, sizeof(status_text),
+                    "Left Stick: (%.2f, %.2f) | Right Stick: (%.2f, %.2f) | Triggers: LT=%.2f RT=%.2f",
+                    joy->axis_x, joy->axis_y, joy->axis_rx, joy->axis_ry, joy->axis_lt, joy->axis_rt);
+        } else {
+            snprintf(status_text, sizeof(status_text), "Waiting for joystick input...");
+        }
+        
+        gtk_label_set_text(GTK_LABEL(gui->joystick_status_label), status_text);
+    }
+    
+    return TRUE;  // Continue timer
+}
+
+/**
+ * Handle joystick dialog close
+ */
+gboolean on_joystick_dialog_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return FALSE;
+    
+    // Stop update timer
+    if (gui->joystick_update_timer) {
+        g_source_remove(gui->joystick_update_timer);
+        gui->joystick_update_timer = 0;
+    }
+    
+    gui->joystick_dialog = NULL;
+    gui->joystick_drawing_area = NULL;
+    gui->joystick_status_label = NULL;
+    
+    // Resume game
+    gui->game_paused = false;
+    fprintf(stdout, "[*] Game Resumed (Joystick Dialog Closed)\n");
+    
+    gtk_widget_destroy(widget);
+    return TRUE;
+}
+
+/**
+ * Open joystick test dialog
+ */
+void on_joystick_test(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // If dialog already exists, bring it to front
+    if (gui->joystick_dialog) {
+        gtk_window_present(GTK_WINDOW(gui->joystick_dialog));
+        return;
+    }
+    
+    // Detect joysticks first
+    joystick_manager_detect(&gui->visualizer.joystick_manager);
+    
+    // Pause the game
+    gui->game_paused = true;
+    fprintf(stdout, "[*] Game Paused (Joystick Test Dialog Open)\n");
+    
+    // Create joystick test dialog window
+    gui->joystick_dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(gui->joystick_dialog), "Joystick Tester");
+    gtk_window_set_type_hint(GTK_WINDOW(gui->joystick_dialog), GDK_WINDOW_TYPE_HINT_DIALOG);
+    gtk_window_set_default_size(GTK_WINDOW(gui->joystick_dialog), 1000, 600);
+    gtk_window_set_modal(GTK_WINDOW(gui->joystick_dialog), FALSE);
+    
+    g_signal_connect(gui->joystick_dialog, "delete-event", 
+                    G_CALLBACK(on_joystick_dialog_delete), gui);
+    
+    // Create main vbox
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 10);
+    gtk_container_add(GTK_CONTAINER(gui->joystick_dialog), vbox);
+    
+    // Title label
+    GtkWidget *title_label = gtk_label_new("Joystick Input Tester");
+    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttribute *weight = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+    weight->start_index = 0;
+    weight->end_index = -1;
+    pango_attr_list_insert(attrs, weight);
+    gtk_label_set_attributes(GTK_LABEL(title_label), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(vbox), title_label, FALSE, FALSE, 0);
+    
+    // Drawing area for visualization
+    gui->joystick_drawing_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(gui->joystick_drawing_area, -1, 400);
+    g_signal_connect(gui->joystick_drawing_area, "draw", 
+                    G_CALLBACK(on_joystick_draw), gui);
+    gtk_box_pack_start(GTK_BOX(vbox), gui->joystick_drawing_area, TRUE, TRUE, 0);
+    
+    // Status label
+    gui->joystick_status_label = gtk_label_new("Waiting for joystick input...");
+    gtk_label_set_xalign(GTK_LABEL(gui->joystick_status_label), 0.0);
+    gtk_box_pack_start(GTK_BOX(vbox), gui->joystick_status_label, FALSE, FALSE, 0);
+    
+    // Info label
+    GtkWidget *info_label = gtk_label_new(
+        "Move analog sticks and press buttons. "
+        "The display shows real-time joystick state.\n"
+        "Green = pressed/active, Gray = not pressed");
+    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
+    gtk_box_pack_start(GTK_BOX(vbox), info_label, FALSE, FALSE, 0);
+    
+    gtk_widget_show_all(gui->joystick_dialog);
+    
+    // Start update timer
+    gui->joystick_update_timer = g_timeout_add(50, joystick_update_timer, gui);  // 20 FPS
 }
 
 void on_new_game(GtkWidget *widget, gpointer data) {
@@ -1325,6 +1663,12 @@ int main(int argc, char *argv[]) {
     gui.music_volume = 100;  // Default
     gui.sfx_volume = 100;    // Default
     
+    // Joystick dialog
+    gui.joystick_dialog = NULL;
+    gui.joystick_status_label = NULL;
+    gui.joystick_drawing_area = NULL;
+    gui.joystick_update_timer = 0;
+    
     // High score dialog
     gui.high_score_dialog = NULL;
     gui.high_score_name_entry = NULL;
@@ -1353,6 +1697,9 @@ int main(int argc, char *argv[]) {
     gui.visualizer.key_x_pressed = false;
     gui.visualizer.key_space_pressed = false;
     gui.visualizer.key_ctrl_pressed = false;
+    
+    // Initialize joystick manager
+    joystick_manager_init(&gui.visualizer.joystick_manager);
     
     // Initialize the game
     init_comet_buster_system(&gui.visualizer);
@@ -1464,6 +1811,17 @@ int main(int argc, char *argv[]) {
     
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(audio_item), audio_menu);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), audio_item);
+    
+    // Options menu
+    GtkWidget *options_menu = gtk_menu_new();
+    GtkWidget *options_item = gtk_menu_item_new_with_label("Options");
+    
+    GtkWidget *joystick_test_item = gtk_menu_item_new_with_label("Joystick Test");
+    g_signal_connect(joystick_test_item, "activate", G_CALLBACK(on_joystick_test), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(options_menu), joystick_test_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(options_item), options_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), options_item);
     
 #ifdef DEBUG
     // Debug menu

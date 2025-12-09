@@ -67,7 +67,10 @@ CXXFLAGS_WIN_DEBUG = $(CXXFLAGS_WIN) $(DEBUG_FLAGS)
 CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Source files - Game code
-SOURCES_CPP_COMMON = comet_main.cpp wad.cpp audio_wad.cpp cometbuster_spawn.cpp cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp cometbuster_boss.cpp cometbuster_score.cpp cometbuster_render.cpp cometbuster_util.cpp
+SOURCES_CPP_COMMON = comet_main.cpp wad.cpp audio_wad.cpp cometbuster_spawn.cpp \
+	cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp \
+	cometbuster_boss.cpp cometbuster_score.cpp cometbuster_render.cpp \
+	cometbuster_util.cpp joystick.cpp
 
 # Source files - Miniz WAD system (C files)
 SOURCES_C = miniz.c miniz_tdef.c miniz_tinfl.c miniz_zip.c
