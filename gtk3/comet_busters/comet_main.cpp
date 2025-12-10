@@ -296,7 +296,7 @@ static bool high_scores_ensure_dir(void) {
 /**
  * Load high scores from disk (text format)
  */
-static void high_scores_load(CometBusterGame *game) {
+void high_scores_load(CometBusterGame *game) {
     if (!game) return;
     
     game->high_score_count = 0;
@@ -308,6 +308,8 @@ static void high_scores_load(CometBusterGame *game) {
     }
     
     const char *path = high_scores_get_path();
+    fprintf(stdout, "[HIGH SCORES] Loading from: %s\n", path);
+    
     FILE *fp = fopen(path, "r");
     
     if (!fp) {
@@ -315,14 +317,38 @@ static void high_scores_load(CometBusterGame *game) {
         return;
     }
     
+    fprintf(stdout, "[HIGH SCORES] File opened successfully\n");
+    
+    // DEBUG: Read entire file first to see what's in it
+    fprintf(stdout, "[HIGH SCORES DEBUG] File contents:\n");
+    rewind(fp);
+    char debug_line[256];
+    int line_num = 0;
+    while (fgets(debug_line, sizeof(debug_line), fp) != NULL) {
+        line_num++;
+        fprintf(stdout, "  Line %d: %s", line_num, debug_line);
+    }
+    
+    // Now parse the file properly
+    rewind(fp);
+    printf("[HIGH SCORES DEBUG] Now parsing file:\n");
+    
     while (game->high_score_count < MAX_HIGH_SCORES) {
         int score, wave;
         time_t timestamp;
         char name[32];
         
-        if (fscanf(fp, "%d %d %ld %31s\n", &score, &wave, &timestamp, name) != 4) {
+        int items_read = fscanf(fp, "%d %d %ld %31s", &score, &wave, &timestamp, name);
+        fprintf(stdout, "[HIGH SCORES DEBUG] Line %d: Read %d items - ", 
+                game->high_score_count + 1, items_read);
+        
+        if (items_read != 4) {
+            fprintf(stdout, "PARSE FAILED (expected 4 items)\n");
             break;
         }
+        
+        fprintf(stdout, "score=%d wave=%d ts=%ld name=%s\n", 
+                score, wave, timestamp, name);
         
         HighScore *hs = &game->high_scores[game->high_score_count];
         hs->score = score;
@@ -330,6 +356,9 @@ static void high_scores_load(CometBusterGame *game) {
         hs->timestamp = timestamp;
         strncpy(hs->player_name, name, sizeof(hs->player_name) - 1);
         hs->player_name[sizeof(hs->player_name) - 1] = '\0';
+        
+        fprintf(stdout, "[HIGH SCORES DEBUG] Stored score: %s = %d (W%d)\n", 
+                hs->player_name, hs->score, hs->wave);
         
         game->high_score_count++;
     }
@@ -341,29 +370,9 @@ static void high_scores_load(CometBusterGame *game) {
 /**
  * Save high scores to disk (text format)
  */
-static void high_scores_save(CometBusterGame *game) {
+void high_scores_save(CometBusterGame *game) {
     if (!game) return;
     
-    if (!high_scores_ensure_dir()) {
-        fprintf(stderr, "[HIGH SCORES] Failed to create directory\n");
-        return;
-    }
-    
-    const char *path = high_scores_get_path();
-    FILE *fp = fopen(path, "w");
-    
-    if (!fp) {
-        fprintf(stderr, "[HIGH SCORES] Failed to open file for writing\n");
-        return;
-    }
-    
-    for (int i = 0; i < game->high_score_count; i++) {
-        HighScore *hs = &game->high_scores[i];
-        fprintf(fp, "%d %d %ld %s\n", hs->score, hs->wave, hs->timestamp, hs->player_name);
-    }
-    
-    fclose(fp);
-    fprintf(stdout, "[HIGH SCORES] Saved %d high scores\n", game->high_score_count);
 }
 
 /**
@@ -371,17 +380,12 @@ static void high_scores_save(CometBusterGame *game) {
  */
 bool comet_buster_is_high_score(CometBusterGame *game, int score) {
     if (!game) return false;
-    
-    // If we have fewer than max scores, it's always a high score
-    if (game->high_score_count < MAX_HIGH_SCORES) {
-        return true;
+    printf("IS HIGH SCORE CALLED\n");
+    for(int i=0;i<MAX_HIGH_SCORES;i++) {
+        printf("Highscore %i %i %i %i %s\n", game->high_scores[i].score,game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name[0]);
+        if (score>game->high_scores[i].score) { printf("Is a High Score %i\n", score); return true; }
     }
     
-    // Otherwise, check if score beats the lowest high score
-    // High scores are sorted in descending order (highest first)
-    if (game->high_score_count > 0) {
-        return score > game->high_scores[game->high_score_count - 1].score;
-    }
     
     return false;
 }
@@ -389,38 +393,28 @@ bool comet_buster_is_high_score(CometBusterGame *game, int score) {
 /**
  * Add a high score (maintains sorted order)
  */
-static void high_scores_add(CometBusterGame *game, int score, int wave, const char *name) {
+void high_scores_add(CometBusterGame *game, int score, int wave, const char *name) {
     if (!game || !name) return;
-    
-    int insert_pos = game->high_score_count;
-    for (int i = 0; i < game->high_score_count; i++) {
-        if (score > game->high_scores[i].score) {
-            insert_pos = i;
+
+    // Insert new score into the last slot
+    game->high_scores[MAX_HIGH_SCORES-1].score = score;
+    game->high_scores[MAX_HIGH_SCORES-1].wave = wave;
+    game->high_scores[MAX_HIGH_SCORES-1].timestamp = time(NULL); // current time
+    strcpy(game->high_scores[MAX_HIGH_SCORES-1].player_name, name);
+
+    // Bubble-up sort to keep scores in descending order
+    for (int i = MAX_HIGH_SCORES - 1; i > 0; i--) {
+        if (game->high_scores[i].score > game->high_scores[i-1].score) {
+            HighScore temp = game->high_scores[i];
+            game->high_scores[i] = game->high_scores[i-1];
+            game->high_scores[i-1] = temp;
+        } else {
             break;
         }
     }
-    
-    if (insert_pos >= MAX_HIGH_SCORES) {
-        return;
+    for(int i=0;i<MAX_HIGH_SCORES;i++) {
+        printf("Highscore Add %i %i %i %i %s\n", game->high_scores[i].score,game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name[0]);
     }
-    
-    if (game->high_score_count >= MAX_HIGH_SCORES) {
-        for (int i = MAX_HIGH_SCORES - 1; i > insert_pos; i--) {
-            game->high_scores[i] = game->high_scores[i - 1];
-        }
-    } else {
-        for (int i = game->high_score_count; i > insert_pos; i--) {
-            game->high_scores[i] = game->high_scores[i - 1];
-        }
-        game->high_score_count++;
-    }
-    
-    HighScore *hs = &game->high_scores[insert_pos];
-    hs->score = score;
-    hs->wave = wave;
-    hs->timestamp = time(NULL);
-    strncpy(hs->player_name, name, sizeof(hs->player_name) - 1);
-    hs->player_name[sizeof(hs->player_name) - 1] = '\0';
 }
 
 // ============================================================
