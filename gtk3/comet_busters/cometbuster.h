@@ -270,6 +270,21 @@ typedef struct {
     // Keyboard input (WASD movement)
     KeyboardInput keyboard;
     
+    // Splash screen state
+   bool splash_screen_active;
+   double splash_timer;
+   int splash_comet_count;
+   Comet splash_comets[50];
+   int splash_alien_count;
+   struct {
+       double x, y;
+       double vx, vy;
+       int type;
+       double rotation;
+   } splash_aliens[20];
+
+    
+    
 } CometBusterGame;
 
 // Initialization and cleanup
@@ -360,7 +375,15 @@ void comet_buster_load_high_scores(CometBusterGame *game);
 void comet_buster_save_high_scores(CometBusterGame *game);
 void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name);
 bool comet_buster_is_high_score(CometBusterGame *game, int score);
+
+// Enemy
 void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_width, int screen_height, 
                                             int ship_type, int edge, double speed, int formation_id, int formation_size);
+
+// Splash
+void comet_buster_init_splash_screen(CometBusterGame *game, int width, int height);
+void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height);
+void comet_buster_exit_splash_screen(CometBusterGame *game);
+void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int width, int height);                                 
 
 #endif // COMETBUSTER_H

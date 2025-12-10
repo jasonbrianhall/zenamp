@@ -26,6 +26,8 @@ void comet_buster_cleanup(CometBusterGame *game) {
 void comet_buster_reset_game(CometBusterGame *game) {
     if (!game) return;
     
+    comet_buster_init_splash_screen(game, 1920, 1080); 
+    
     // Clear arrays explicitly instead of memset to avoid compiler warnings
     game->comet_count = 0;
     game->bullet_count = 0;

@@ -867,6 +867,18 @@ void update_comet_buster(void *vis, double dt) {
     // Update joystick hardware state and sync to visualizer fields
     joystick_manager_update(&visualizer->joystick_manager);
     update_visualizer_joystick(visualizer);
+
+    // Handle splash screen
+    if (game->splash_screen_active) {
+        comet_buster_update_splash_screen(game, dt, visualizer->width, visualizer->height);
+        
+        // Check for input to start game
+        if (comet_buster_splash_screen_input_detected(visualizer)) {
+            comet_buster_exit_splash_screen(game);
+            fprintf(stdout, "[SPLASH] Splash screen exited, game starting\n");
+        }
+        return;  // Don't update game yet
+    }
     
     int mouse_x = visualizer->mouse_x;
     int mouse_y = visualizer->mouse_y;
