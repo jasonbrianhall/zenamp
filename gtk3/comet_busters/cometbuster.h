@@ -105,6 +105,15 @@ typedef struct {
     int formation_size;         // How many sentinels in this formation (1, 2, or 3)
     bool has_partner;           // Is the paired sentinel still alive?
     double formation_cohesion;  // How tightly they stay together (0.0-1.0)
+    
+    // Patrol behavior system (for blue/green/purple ships)
+    double patrol_behavior_timer;   // Timer for current patrol behavior
+    double patrol_behavior_duration;// How long to maintain current behavior
+    int patrol_behavior_type;       // 0=straight, 1=circle, 2=evasive turns
+    double patrol_circle_center_x;  // Center of circle when doing circular behavior
+    double patrol_circle_center_y;
+    double patrol_circle_radius;    // Radius of circular path
+    double patrol_circle_angle;     // Current angle in circle (radians)
 } EnemyShip;
 
 #define MAX_ENEMY_SHIPS 4

@@ -343,34 +343,99 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 ship->vy = (dy / dist_to_player) * base_speed;
                 ship->angle = atan2(dy, dx);
             } else {
-                // Follow sine wave pattern
-                ship->path_time += dt;
+                // Update patrol behavior
+                ship->patrol_behavior_timer += dt;
+                if (ship->patrol_behavior_timer >= ship->patrol_behavior_duration) {
+                    // Time to change behavior
+                    ship->patrol_behavior_timer = 0.0;
+                    ship->patrol_behavior_duration = 2.0 + (rand() % 30) / 10.0;  // 2-5 seconds
+                    
+                    int behavior_roll = rand() % 100;
+                    if (behavior_roll < 70) {
+                        ship->patrol_behavior_type = 0;  // 70% straight movement
+                    } else if (behavior_roll < 90) {
+                        ship->patrol_behavior_type = 1;  // 20% circular movement
+                        // Set circle center ahead of current direction
+                        double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                        if (base_speed > 0.1) {
+                            ship->patrol_circle_center_x = ship->x + (ship->base_vx / base_speed) * 150.0;
+                            ship->patrol_circle_center_y = ship->y + (ship->base_vy / base_speed) * 150.0;
+                        }
+                        ship->patrol_circle_angle = 0.0;
+                    } else {
+                        ship->patrol_behavior_type = 2;  // 10% sudden direction change
+                        // Pick a new random direction
+                        double rand_angle = (rand() % 360) * (M_PI / 180.0);
+                        double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                        if (base_speed < 1.0) base_speed = 90.0;
+                        ship->base_vx = cos(rand_angle) * base_speed;
+                        ship->base_vy = sin(rand_angle) * base_speed;
+                    }
+                }
                 
+                // Apply patrol behavior
                 double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
                 
-                if (base_speed > 0.1) {
-                    double dir_x = ship->base_vx / base_speed;
-                    double dir_y = ship->base_vy / base_speed;
-                    
-                    double perp_x = -dir_y;
-                    double perp_y = dir_x;
-                    
-                    double wave_amplitude = 50.0;
-                    double wave_frequency = 1.5;
-                    double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
-                    
-                    ship->vx = dir_x * base_speed + perp_x * sine_offset;
-                    ship->vy = dir_y * base_speed + perp_y * sine_offset;
-                    
-                    // Update angle to face direction of movement
+                if (ship->patrol_behavior_type == 0) {
+                    // Straight movement with gentle sine wave
+                    if (base_speed > 0.1) {
+                        double dir_x = ship->base_vx / base_speed;
+                        double dir_y = ship->base_vy / base_speed;
+                        double perp_x = -dir_y;
+                        double perp_y = dir_x;
+                        double wave_amplitude = 40.0;
+                        double wave_frequency = 1.2;
+                        double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
+                        ship->vx = dir_x * base_speed + perp_x * sine_offset;
+                        ship->vy = dir_y * base_speed + perp_y * sine_offset;
+                        ship->angle = atan2(ship->vy, ship->vx);
+                    }
+                } else if (ship->patrol_behavior_type == 1) {
+                    // Circular movement
+                    ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
+                    ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                    ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                    ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
+                    ship->vx = -sin(ship->patrol_circle_angle) * base_speed;
+                    ship->vy = cos(ship->patrol_circle_angle) * base_speed;
+                } else {
+                    // Evasive turns - use base_vx/base_vy for new direction
+                    ship->vx = ship->base_vx;
+                    ship->vy = ship->base_vy;
                     ship->angle = atan2(ship->vy, ship->vx);
                 }
             }
         } else if (ship->ship_type == 3) {
-            // SENTINEL PURPLE SHIP: Defensive formation behavior
-            // Moves slowly in original direction while maintaining formation spacing
+            // SENTINEL PURPLE SHIP: Formation-based with occasional coordinated maneuvers
             
-            // First, find any other sentinels in the same formation
+            // Update patrol behavior timer
+            ship->patrol_behavior_timer += dt;
+            if (ship->patrol_behavior_timer >= ship->patrol_behavior_duration) {
+                ship->patrol_behavior_timer = 0.0;
+                ship->patrol_behavior_duration = 3.0 + (rand() % 30) / 10.0;  // 3-6 seconds (slower changes)
+                
+                int behavior_roll = rand() % 100;
+                if (behavior_roll < 75) {
+                    ship->patrol_behavior_type = 0;  // 75% formation maintenance
+                } else if (behavior_roll < 90) {
+                    ship->patrol_behavior_type = 1;  // 15% coordinated circular movement
+                    double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                    if (base_speed > 0.1) {
+                        ship->patrol_circle_center_x = ship->x + (ship->base_vx / base_speed) * 120.0;
+                        ship->patrol_circle_center_y = ship->y + (ship->base_vy / base_speed) * 120.0;
+                    }
+                    ship->patrol_circle_angle = 0.0;
+                } else {
+                    ship->patrol_behavior_type = 2;  // 10% formation-wide direction change
+                    double rand_angle = (rand() % 360) * (M_PI / 180.0);
+                    double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                    if (base_speed < 1.0) base_speed = 60.0;
+                    ship->base_vx = cos(rand_angle) * base_speed;
+                    ship->base_vy = sin(rand_angle) * base_speed;
+                }
+            }
+            
+            // Find formation center for positioning
             double formation_center_x = ship->x;
             double formation_center_y = ship->y;
             int formation_count = 0;
@@ -389,53 +454,102 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 formation_center_y /= formation_count;
             }
             
-            // Maintain formation spacing - gently move toward formation center
-            double dx_formation = formation_center_x - ship->x;
-            double dy_formation = formation_center_y - ship->y;
-            double dist_to_center = sqrt(dx_formation*dx_formation + dy_formation*dy_formation);
-            
             double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
-            if (base_speed < 1.0) base_speed = 60.0;  // Sentinels move slower
+            if (base_speed < 1.0) base_speed = 60.0;
             
-            // Small correction toward formation center
-            double correction_factor = 0.1 * ship->formation_cohesion;
-            if (dist_to_center > 100.0 && dist_to_center > 0.1) {
-                ship->vx += (dx_formation / dist_to_center) * base_speed * correction_factor;
-                ship->vy += (dy_formation / dist_to_center) * base_speed * correction_factor;
+            if (ship->patrol_behavior_type == 0) {
+                // Standard formation movement with gentle spacing correction
+                double dx_formation = formation_center_x - ship->x;
+                double dy_formation = formation_center_y - ship->y;
+                double dist_to_center = sqrt(dx_formation*dx_formation + dy_formation*dy_formation);
+                
+                double correction_factor = 0.08 * ship->formation_cohesion;
+                if (dist_to_center > 100.0 && dist_to_center > 0.1) {
+                    ship->vx = ship->base_vx * 0.7 + (dx_formation / dist_to_center) * base_speed * correction_factor;
+                    ship->vy = ship->base_vy * 0.7 + (dy_formation / dist_to_center) * base_speed * correction_factor;
+                } else {
+                    ship->vx = ship->base_vx * 0.7;
+                    ship->vy = ship->base_vy * 0.7;
+                }
+                ship->angle = atan2(ship->vy, ship->vx);
+            } else if (ship->patrol_behavior_type == 1) {
+                // Coordinated circular movement around formation center
+                ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
+                ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                ship->angle = ship->patrol_circle_angle + M_PI / 2.0;
+                ship->vx = -sin(ship->patrol_circle_angle) * base_speed * 0.8;
+                ship->vy = cos(ship->patrol_circle_angle) * base_speed * 0.8;
+            } else {
+                // Coordinated direction change
+                ship->vx = ship->base_vx * 0.8;
+                ship->vy = ship->base_vy * 0.8;
+                ship->angle = atan2(ship->vy, ship->vx);
+            }
+        } else {
+            // PATROL BLUE SHIP: More dynamic patrol with occasional evasive maneuvers
+            ship->patrol_behavior_timer += dt;
+            if (ship->patrol_behavior_timer >= ship->patrol_behavior_duration) {
+                // Time to change behavior
+                ship->patrol_behavior_timer = 0.0;
+                ship->patrol_behavior_duration = 2.0 + (rand() % 30) / 10.0;  // 2-5 seconds
+                
+                int behavior_roll = rand() % 100;
+                if (behavior_roll < 60) {
+                    ship->patrol_behavior_type = 0;  // 60% straight movement
+                } else if (behavior_roll < 80) {
+                    ship->patrol_behavior_type = 1;  // 20% circular movement
+                    // Set circle center perpendicular to current direction
+                    double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                    if (base_speed > 0.1) {
+                        double perp_x = -ship->base_vy / base_speed;
+                        double perp_y = ship->base_vx / base_speed;
+                        ship->patrol_circle_center_x = ship->x + perp_x * 100.0;
+                        ship->patrol_circle_center_y = ship->y + perp_y * 100.0;
+                    }
+                    ship->patrol_circle_angle = 0.0;
+                } else {
+                    ship->patrol_behavior_type = 2;  // 20% sudden direction change
+                    // Pick a new random direction
+                    double rand_angle = (rand() % 360) * (M_PI / 180.0);
+                    double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                    if (base_speed < 1.0) base_speed = 80.0;
+                    ship->base_vx = cos(rand_angle) * base_speed;
+                    ship->base_vy = sin(rand_angle) * base_speed;
+                }
             }
             
-            // Maintain base velocity direction but slightly slower
-            ship->vx = ship->base_vx * 0.7;
-            ship->vy = ship->base_vy * 0.7;
-            
-            // Add formation correction
-            ship->vx += (dx_formation / (dist_to_center + 1.0)) * base_speed * correction_factor;
-            ship->vy += (dy_formation / (dist_to_center + 1.0)) * base_speed * correction_factor;
-            
-            ship->angle = atan2(ship->vy, ship->vx);
-        } else {
-            // PATROL BLUE SHIP: Follow sine wave pattern, avoid comets
-            ship->path_time += dt;
-            
+            // Apply patrol behavior
             double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
             
-            if (base_speed > 0.1) {
-                // Normalize base direction
-                double dir_x = ship->base_vx / base_speed;
-                double dir_y = ship->base_vy / base_speed;
-                
-                // Perpendicular direction (for sine wave oscillation)
-                double perp_x = -dir_y;
-                double perp_y = dir_x;
-                
-                // Sine wave motion (classic Asteroids-style pattern)
-                double wave_amplitude = 50.0;  // Pixels left/right to oscillate
-                double wave_frequency = 1.5;   // Oscillations per second
-                double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
-                
-                // Calculate velocity: base direction + sine wave perpendicular motion
-                ship->vx = dir_x * base_speed + perp_x * sine_offset;
-                ship->vy = dir_y * base_speed + perp_y * sine_offset;
+            if (ship->patrol_behavior_type == 0) {
+                // Straight movement with sine wave oscillation
+                if (base_speed > 0.1) {
+                    double dir_x = ship->base_vx / base_speed;
+                    double dir_y = ship->base_vy / base_speed;
+                    double perp_x = -dir_y;
+                    double perp_y = dir_x;
+                    double wave_amplitude = 50.0;
+                    double wave_frequency = 1.5;
+                    double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
+                    ship->vx = dir_x * base_speed + perp_x * sine_offset;
+                    ship->vy = dir_y * base_speed + perp_y * sine_offset;
+                    ship->angle = atan2(ship->vy, ship->vx);
+                }
+                ship->path_time += dt;
+            } else if (ship->patrol_behavior_type == 1) {
+                // Circular movement
+                ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
+                ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
+                ship->vx = -sin(ship->patrol_circle_angle) * base_speed;
+                ship->vy = cos(ship->patrol_circle_angle) * base_speed;
+            } else {
+                // Evasive turns
+                ship->vx = ship->base_vx;
+                ship->vy = ship->base_vy;
+                ship->angle = atan2(ship->vy, ship->vx);
             }
         }
         
@@ -939,9 +1053,6 @@ void update_comet_buster(void *vis, double dt) {
     bool joy_active=false;  
     if (joystick_connected && joystick_any_input) {
          joy_active=true;
-        // CRITICAL: Disable mouse when joystick input is detected (same as keyboard)
-        visualizer->mouse_just_moved = false;
-        
         // Left stick movement
          if (active_joystick->axis_x < -0.5) {
             game->keyboard.key_a_pressed = true;  // Turn left
@@ -981,7 +1092,6 @@ void update_comet_buster(void *vis, double dt) {
     
     // Disable mouse if ANY joystick input is active
     bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joy_active;
-    printf("Mouse active %i\n", mouse_active);
     // Update game state
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
 #else

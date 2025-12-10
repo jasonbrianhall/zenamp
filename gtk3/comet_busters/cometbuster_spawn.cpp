@@ -333,7 +333,7 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
     switch (edge) {
         case 0:  // From left to right
             ship->x = -20;
-            ship->y = 50 + (rand() % (screen_height - 100));
+            ship->y = 50 + (rand() % (screen_height - 100));  // Avoid top/bottom edges
             ship->vx = speed;
             ship->vy = 0;
             ship->angle = 0;  // Facing right
@@ -342,7 +342,7 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
             break;
         case 1:  // From right to left
             ship->x = screen_width + 20;
-            ship->y = 50 + (rand() % (screen_height - 100));
+            ship->y = 50 + (rand() % (screen_height - 100));  // Avoid top/bottom edges
             ship->vx = -speed;
             ship->vy = 0;
             ship->angle = M_PI;  // Facing left
@@ -350,7 +350,7 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
             ship->base_vy = 0;
             break;
         case 2:  // From top to bottom
-            ship->x = 50 + (rand() % (screen_width - 100));
+            ship->x = 50 + (rand() % (screen_width - 100));  // Avoid left/right edges
             ship->y = -20;
             ship->vx = 0;
             ship->vy = speed;
@@ -359,7 +359,7 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
             ship->base_vy = speed;
             break;
         case 3:  // From bottom to top
-            ship->x = 50 + (rand() % (screen_width - 100));
+            ship->x = 50 + (rand() % (screen_width - 100));  // Avoid left/right edges
             ship->y = screen_height + 20;
             ship->vx = 0;
             ship->vy = -speed;
@@ -417,6 +417,14 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
     ship->shoot_cooldown = 1.0 + (rand() % 20) / 10.0;  // Shoot after 1-3 seconds
     ship->path_time = 0.0;  // Start at beginning of sine wave
     ship->active = true;
+    
+    // Initialize patrol behavior for blue, green, and purple ships
+    // Red aggressive ships (type 1) don't use patrol behaviors
+    ship->patrol_behavior_timer = 0.0;
+    ship->patrol_behavior_duration = 2.0 + (rand() % 20) / 10.0;  // 2-4 seconds before behavior change
+    ship->patrol_behavior_type = 0;  // Start with straight movement (0=straight, 1=circle, 2=evasive turns)
+    ship->patrol_circle_radius = 80.0 + (rand() % 60);  // 80-140px radius circles
+    ship->patrol_circle_angle = 0.0;
     
     // Shield system for enemy ships (varies by type)
     if (ship->ship_type == 1) {
