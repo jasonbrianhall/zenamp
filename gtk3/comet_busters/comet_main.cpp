@@ -372,8 +372,33 @@ void high_scores_load(CometBusterGame *game) {
  */
 void high_scores_save(CometBusterGame *game) {
     if (!game) return;
-    
-}
+
+    const char *path = high_scores_get_path();
+    fprintf(stdout, "[HIGH SCORES] Saving to: %s\n", path);
+
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        fprintf(stderr, "[HIGH SCORES] Failed to open file for writing\n");
+        return;
+    }
+
+    for (int i = 0; i < game->high_score_count; i++) {
+        HighScore *hs = &game->high_scores[i];
+        fprintf(fp, "%d %d %ld %s\n",
+                hs->score,
+                hs->wave,
+                (long)hs->timestamp,
+                hs->player_name);
+        fprintf(stdout, "[HIGH SCORES DEBUG] Wrote: %s = %d (W%d, ts=%ld)\n",
+                hs->player_name,
+                hs->score,
+                hs->wave,
+                (long)hs->timestamp);
+    }
+
+    fclose(fp);
+    fprintf(stdout, "[HIGH SCORES] Saved %d high scores\n", game->high_score_count);
+
 
 /**
  * Check if a score qualifies as a high score
@@ -1523,14 +1548,14 @@ gboolean game_update_timer(gpointer data) {
             gui->high_score_dialog_shown = true;
             
             // Check if this is a high score
-            if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
+            /*if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
                                            gui->visualizer.comet_buster.score)) {
                 fprintf(stdout, "[HIGH SCORE] New high score detected: %d\n", 
                         gui->visualizer.comet_buster.score);
                 // Pause game and show high score dialog
                 gui->game_paused = true;
                 on_show_high_score_entry(gui);
-            }
+            }*/
         }
         
         // Check if current music track has finished and queue the next one
