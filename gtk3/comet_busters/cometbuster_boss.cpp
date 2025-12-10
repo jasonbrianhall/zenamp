@@ -358,86 +358,164 @@ void comet_buster_spawn_queen_spawn_ships(CometBusterGame *game, int screen_widt
     
     SpawnQueenBoss *queen = &game->spawn_queen;
     
-    // ONLY SPAWN TYPE 1 (RED) OR TYPE 3 (SENTINEL/MAGENTA)
-    // NEVER SPAWN TYPE 0 (BLUE) OR TYPE 2 (GREEN) - they don't attack
+    // Spawn queen now recruits 10 ships at a time with a strategic mix!
+    // Mostly Red (aggressive attackers), some Green (miners), some Purple (sentinels)
+    // PLUS she throws large asteroids at you!
     
-    int ship_type = 0;
-    int num_ships_to_spawn = 1;
+    int ships_spawned = 0;
+    int max_ships_to_spawn = 10;  // Spawn 10 ships per recruitment
     
-    if (queen->phase == 0) {
-        // ===== PHASE 0: RECRUITMENT (75-100%) =====
-        // Red ships only - aggressive solo hunters
-        ship_type = 1;  // Red
-        num_ships_to_spawn = (rand() % 2) + 1;  // 1-2 ships
-        fprintf(stdout, "[SPAWN QUEEN] Phase 0: Spawning %d Red ships\n", num_ships_to_spawn);
-        
-    } else if (queen->phase == 1) {
-        // ===== PHASE 1: AGGRESSION (40-75%) =====
-        // Mix: 60% Red ships, 40% Sentinel formations
-        int spawn_roll = rand() % 100;
-        
-        if (spawn_roll < 60) {
-            // Spawn Red ships
-            ship_type = 1;
-            num_ships_to_spawn = (rand() % 2) + 1;  // 1-2 red ships
-            fprintf(stdout, "[SPAWN QUEEN] Phase 1: Spawning %d Red ships\n", num_ships_to_spawn);
-        } else {
-            // Spawn Sentinel formation (pair or trio)
-            ship_type = 3;
-            num_ships_to_spawn = 2 + (rand() % 2);  // 2-3 ships
-            fprintf(stdout, "[SPAWN QUEEN] Phase 1: Spawning Sentinel formation of %d\n", num_ships_to_spawn);
-        }
-        
-    } else {
-        // ===== PHASE 2: DESPERATION (0-40%) =====
-        // Mostly Sentinel formations (70%), occasional Red (30%)
-        int spawn_roll = rand() % 100;
-        
-        if (spawn_roll < 30) {
-            // Occasional solo Red ship
-            ship_type = 1;
-            num_ships_to_spawn = 1;
-            fprintf(stdout, "[SPAWN QUEEN] Phase 2: Spawning 1 Red ship\n");
-        } else {
-            // Dominant Sentinel formations
-            ship_type = 3;
-            num_ships_to_spawn = 2 + (rand() % 2);  // 2-3 ships
-            fprintf(stdout, "[SPAWN QUEEN] Phase 2: Spawning Sentinel formation of %d\n", num_ships_to_spawn);
-        }
-    }
+    // Distribute ship types across the 10 ships
+    // 60% Red (6 ships) - aggressive attackers
+    // 20% Green (2 ships) - hunters
+    // 20% Purple (2 ships) - sentinel formations
     
-    // Choose a random spawn edge
-    int edge = rand() % 8;
-    double speed = 80.0 + (rand() % 40);
-    
-    // For Sentinel ships, create a formation with coordinated ID
-    int formation_id = -1;
-    int formation_size = 1;
-    
-    if (ship_type == 3 && num_ships_to_spawn > 1) {
-        // Sentinel formation - track so they stay together
-        formation_id = game->current_wave * 100 + (int)(game->spawn_queen.spawn_timer * 10);
-        formation_size = num_ships_to_spawn;
-    }
-    
-    // Spawn all the ships
-    for (int i = 0; i < num_ships_to_spawn; i++) {
+    for (int i = 0; i < max_ships_to_spawn; i++) {
         if (game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
             fprintf(stdout, "[SPAWN QUEEN] Hit MAX_ENEMY_SHIPS limit (%d), stopping spawn\n", MAX_ENEMY_SHIPS);
             break;
         }
         
+        int ship_type = 0;
+        int formation_id = -1;
+        int formation_size = 1;
+        
+        // Distribute the types: 0-5 = Red, 6-7 = Green, 8-9 = Purple
+        if (i < 6) {
+            // Red aggressive ships
+            ship_type = 1;
+        } else if (i < 8) {
+            // Green hunter ships
+            ship_type = 2;
+        } else {
+            // Purple sentinel ships - spawn in pairs
+            ship_type = 3;
+            if (i == 8) {
+                // First sentinel - assign formation
+                formation_id = game->current_wave * 100 + (int)(game->spawn_queen.spawn_timer * 10);
+                formation_size = 2;
+            } else if (i == 9) {
+                // Second sentinel in the pair - use same formation ID
+                formation_id = game->current_wave * 100 + (int)(game->spawn_queen.spawn_timer * 10);
+                formation_size = 2;
+            }
+        }
+        
+        // Vary spawn edges to spread them out
+        int edge = (i % 8);  // Cycle through all 8 edges
+        double speed = 90.0 + (rand() % 50);  // Vary speeds
+        
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height,
                                                ship_type, edge, speed,
                                                formation_id, formation_size);
+        
+        ships_spawned++;
+        
+        // Log the spawn
+        const char *type_name = "UNKNOWN";
+        if (ship_type == 1) type_name = "Red";
+        else if (ship_type == 2) type_name = "Green";
+        else if (ship_type == 3) type_name = "Purple";
+        
+        fprintf(stdout, "[SPAWN QUEEN] Spawned ship %d/10: %s (type %d) on edge %d\n", 
+                i + 1, type_name, ship_type, edge);
     }
     
-    // Visual particle effect from queen's ports
-    for (int p = 0; p < 5; p++) {
+    fprintf(stdout, "[SPAWN QUEEN] Recruitment complete! Spawned %d ships\n", ships_spawned);
+    
+    // SPAWN LARGE ASTEROIDS as part of the recruitment wave!
+    // The spawn queen hurls massive rocks at you along with her ships
+    int asteroids_to_spawn = 4 + (rand() % 3);  // 4-6 large asteroids
+    
+    for (int a = 0; a < asteroids_to_spawn; a++) {
+        if (game->comet_count >= MAX_COMETS) {
+            fprintf(stdout, "[SPAWN QUEEN] Hit MAX_COMETS limit, can't spawn more asteroids\n");
+            break;
+        }
+        
+        // Create a large/mega asteroid
+        int slot = game->comet_count;
+        Comet *asteroid = &game->comets[slot];
+        
+        memset(asteroid, 0, sizeof(Comet));
+        
+        // Spawn from random edge of screen
+        int edge = rand() % 4;
+        
+        switch (edge) {
+            case 0:  // Top
+                asteroid->x = rand() % screen_width;
+                asteroid->y = -50;
+                break;
+            case 1:  // Right
+                asteroid->x = screen_width + 50;
+                asteroid->y = rand() % screen_height;
+                break;
+            case 2:  // Bottom
+                asteroid->x = rand() % screen_width;
+                asteroid->y = screen_height + 50;
+                break;
+            case 3:  // Left
+                asteroid->x = -50;
+                asteroid->y = rand() % screen_height;
+                break;
+        }
+        
+        // Aim at player with aggressive velocity
+        double dx = game->ship_x - asteroid->x;
+        double dy = game->ship_y - asteroid->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        
+        if (dist > 0.1) {
+            // Fast moving asteroids - queen is throwing them hard!
+            double asteroid_speed = 150.0 + (rand() % 100);  // 150-250 px/s
+            asteroid->vx = (dx / dist) * asteroid_speed;
+            asteroid->vy = (dy / dist) * asteroid_speed;
+        } else {
+            asteroid->vx = 0;
+            asteroid->vy = 0;
+        }
+        
+        // Make them LARGE - mostly mega asteroids
+        int size_roll = rand() % 100;
+        if (size_roll < 70) {
+            // 70% MEGA asteroids (huge!)
+            asteroid->size = COMET_MEGA;
+            asteroid->radius = 50;
+        } else {
+            // 30% LARGE asteroids
+            asteroid->size = COMET_LARGE;
+            asteroid->radius = 30;
+        }
+        
+        // Set properties
+        asteroid->frequency_band = rand() % 3;  // Random audio band
+        asteroid->rotation = 0;
+        asteroid->rotation_speed = 30 + (rand() % 100);  // Slower rotation for drama
+        asteroid->active = true;
+        asteroid->health = 1;
+        asteroid->base_angle = (rand() % 360) * (M_PI / 180.0);
+        
+        // Color based on frequency
+        comet_buster_get_frequency_color(asteroid->frequency_band,
+                                         &asteroid->color[0],
+                                         &asteroid->color[1],
+                                         &asteroid->color[2]);
+        
+        game->comet_count++;
+        
+        fprintf(stdout, "[SPAWN QUEEN] Hurled asteroid %d/%d at player!\n", a + 1, asteroids_to_spawn);
+    }
+    
+    fprintf(stdout, "[SPAWN QUEEN] Recruitment wave complete! 10 ships + %d asteroids incoming!\n", asteroids_to_spawn);
+    
+    // Visual particle effect from queen's ports - EVEN MORE particles for epic recruitment!
+    for (int p = 0; p < 30; p++) {
         double angle = 2.0 * M_PI * (rand() % 100) / 100.0;
-        double particle_speed = 50.0 + (rand() % 50);
+        double particle_speed = 150.0 + (rand() % 150);
         double vx = cos(angle) * particle_speed;
         double vy = sin(angle) * particle_speed;
+        // Particles would be spawned here from queen's position
     }
 }
 
