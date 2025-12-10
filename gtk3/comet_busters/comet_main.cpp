@@ -1781,40 +1781,114 @@ int main(int argc, char *argv[]) {
     
     // Create menu bar
     GtkWidget *menu_bar = gtk_menu_bar_new();
+    gui.menu_bar = menu_bar;  // Save reference for show/hide
     
-    // File menu
+    // Game menu
     GtkWidget *file_menu = gtk_menu_new();
-    GtkWidget *file_item = gtk_menu_item_new_with_label("File");
+    GtkWidget *file_item = gtk_menu_item_new_with_label("Game");
+    
+    GtkWidget *new_game_item = gtk_menu_item_new_with_label("New Game");
+    g_signal_connect(new_game_item, "activate", G_CALLBACK(on_new_game), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), new_game_item);
+    
+    GtkWidget *view_scores_item = gtk_menu_item_new_with_label("View High Scores");
+    g_signal_connect(view_scores_item, "activate", G_CALLBACK(on_view_high_scores), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), view_scores_item);
+    
+    GtkWidget *pause_item = gtk_menu_item_new_with_label("Pause/Resume (P)");
+    g_signal_connect(pause_item, "activate", G_CALLBACK(on_toggle_pause), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), pause_item);
+    
+    GtkWidget *separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);
+    
+    GtkWidget *quit_item = gtk_menu_item_new_with_label("Quit");
+    g_signal_connect(quit_item, "activate", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), quit_item);
+    
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_item), file_menu);
-    
-    GtkWidget *exit_item = gtk_menu_item_new_with_label("Exit");
-    g_signal_connect(exit_item, "activate", G_CALLBACK(gtk_main_quit), NULL);
-    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), exit_item);
-    
-    // Controls menu
-    GtkWidget *controls_menu = gtk_menu_new();
-    GtkWidget *controls_item = gtk_menu_item_new_with_label("Controls");
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(controls_item), controls_menu);
-    
-    GtkWidget *volume_item = gtk_menu_item_new_with_label("Volume (V)");
-    g_signal_connect(volume_item, "activate", G_CALLBACK(on_volume_dialog_open), &gui);
-    gtk_menu_shell_append(GTK_MENU_SHELL(controls_menu), volume_item);
-    
-    gtk_menu_shell_append(GTK_MENU_SHELL(controls_menu), gtk_separator_menu_item_new());
-    
-    GtkWidget *joystick_test_item = gtk_menu_item_new_with_label("Joystick Tester");
-    g_signal_connect(joystick_test_item, "activate", G_CALLBACK(on_joystick_test), &gui);
-    gtk_menu_shell_append(GTK_MENU_SHELL(controls_menu), joystick_test_item);
-    
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), file_item);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), controls_item);
+    
+    // Audio menu
+    GtkWidget *audio_menu = gtk_menu_new();
+    GtkWidget *audio_item = gtk_menu_item_new_with_label("Audio");
+    
+    GtkWidget *volume_settings_item = gtk_menu_item_new_with_label("Volume Settings (V)");
+    g_signal_connect(volume_settings_item, "activate", G_CALLBACK(on_volume_dialog_open), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(audio_menu), volume_settings_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(audio_item), audio_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), audio_item);
+    
+    // Options menu
+    GtkWidget *options_menu = gtk_menu_new();
+    GtkWidget *options_item = gtk_menu_item_new_with_label("Options");
+    
+    GtkWidget *joystick_test_item = gtk_menu_item_new_with_label("Joystick Test");
+    g_signal_connect(joystick_test_item, "activate", G_CALLBACK(on_joystick_test), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(options_menu), joystick_test_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(options_item), options_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), options_item);
+    
+#ifdef DEBUG
+    // Debug menu
+    GtkWidget *debug_menu = gtk_menu_new();
+    GtkWidget *debug_item = gtk_menu_item_new_with_label("Debug");
+    
+    GtkWidget *debug_wave5_item = gtk_menu_item_new_with_label("Jump to Wave 5");
+    g_signal_connect(debug_wave5_item, "activate", G_CALLBACK(on_debug_jump_to_wave_5), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_wave5_item);
+    
+    GtkWidget *debug_spawn_boss_item = gtk_menu_item_new_with_label("Spawn Boss (Keep Comets)");
+    g_signal_connect(debug_spawn_boss_item, "activate", G_CALLBACK(on_debug_spawn_boss), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_spawn_boss_item);
+    
+    GtkWidget *debug_skip_to_boss_item = gtk_menu_item_new_with_label("Skip to Boss Battle");
+    g_signal_connect(debug_skip_to_boss_item, "activate", G_CALLBACK(on_debug_skip_to_boss_phase), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_skip_to_boss_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(debug_item), debug_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), debug_item);
+#endif // DEBUG
+    
+    // Help menu
+    GtkWidget *help_menu = gtk_menu_new();
+    GtkWidget *help_item = gtk_menu_item_new_with_label("Help");
+    
+    GtkWidget *game_controls_item = gtk_menu_item_new_with_label("Game Controls");
+    g_signal_connect(game_controls_item, "activate", G_CALLBACK(on_game_controls), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), game_controls_item);
+    
+    GtkWidget *fullscreen_item = gtk_menu_item_new_with_label("Toggle Fullscreen (F11)");
+    g_signal_connect(fullscreen_item, "activate", G_CALLBACK(on_toggle_fullscreen), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), fullscreen_item);
+    
+    GtkWidget *help_separator = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), help_separator);
+    
+    GtkWidget *about_item = gtk_menu_item_new_with_label("About CometBuster");
+    g_signal_connect(about_item, "activate", G_CALLBACK(on_about), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), about_item);
+    
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(help_item), help_menu);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), help_item);
     
     gtk_box_pack_start(GTK_BOX(main_vbox), menu_bar, FALSE, FALSE, 0);
     
+    // Create vbox for game content
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_box_pack_start(GTK_BOX(main_vbox), vbox, TRUE, TRUE, 0);
+    
+    // Status label
+    gui.status_label = gtk_label_new("");
+    gtk_box_pack_start(GTK_BOX(vbox), gui.status_label, FALSE, FALSE, 5);
+    update_status_text(&gui);
+    
     // Drawing area - scales with window
     gui.drawing_area = gtk_drawing_area_new();
-    gtk_widget_set_size_request(gui.drawing_area, -1, -1);
-    gtk_widget_set_can_focus(gui.drawing_area, TRUE);
+    gtk_widget_set_size_request(gui.drawing_area, -1, -1);  // Dynamic sizing
+    gtk_widget_set_can_focus(gui.drawing_area, TRUE);  // Allow focus
     gtk_widget_add_events(gui.drawing_area, 
                          GDK_BUTTON_PRESS_MASK | 
                          GDK_BUTTON_RELEASE_MASK | 
@@ -1827,19 +1901,14 @@ int main(int argc, char *argv[]) {
     g_signal_connect(gui.drawing_area, "motion-notify-event", G_CALLBACK(on_motion_notify), &gui);
     g_signal_connect(gui.drawing_area, "key-press-event", G_CALLBACK(on_key_press), &gui);
     g_signal_connect(gui.drawing_area, "key-release-event", G_CALLBACK(on_key_release), &gui);
-    gtk_box_pack_start(GTK_BOX(main_vbox), gui.drawing_area, TRUE, TRUE, 0);
-    
-    // Status label
-    gui.status_label = gtk_label_new("Ready");
-    gtk_box_pack_start(GTK_BOX(main_vbox), gui.status_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), gui.drawing_area, TRUE, TRUE, 0);
     
     gtk_widget_show_all(gui.window);
     
     // Grab keyboard focus on drawing area so key events go there
     gtk_widget_grab_focus(gui.drawing_area);
-    
     // Start game update timer (approximately 60 FPS)
-    gui.update_timer_id = g_timeout_add(17, game_update_timer, &gui);
+    gui.update_timer_id = g_timeout_add(17, game_update_timer, &gui);  // ~60 FPS
     
     gtk_main();
     
@@ -1851,4 +1920,3 @@ int main(int argc, char *argv[]) {
     
     return 0;
 }
-
