@@ -23,11 +23,13 @@ void draw_comet_buster(void *vis, cairo_t *cr) {
     int width = visualizer->width;
     int height = visualizer->height;
     
+#ifdef ExternalSound
     // Draw splash screen if active
     if (game->splash_screen_active) {
         comet_buster_draw_splash_screen(game, cr, width, height);
         return;  // Don't draw game yet
     }
+#endif
     
     // Background
     cairo_set_source_rgb(cr, 0.04, 0.06, 0.15);

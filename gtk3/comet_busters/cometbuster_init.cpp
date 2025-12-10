@@ -113,7 +113,10 @@ void comet_buster_reset_game(CometBusterGame *game) {
     // PHASE 3: Initialize splash screen (MUST BE LAST - spawns all the objects)
     // This will spawn 18 comets + 3 more (boss) + 1 boss + 3 enemy ships
     // These objects MUST NOT be cleared after this point!
+
+#ifdef ExternalSound
     comet_buster_init_splash_screen(game, 1920, 1080);
+#endif
     
     // Load high scores from file (if they exist)
     comet_buster_load_high_scores(game);

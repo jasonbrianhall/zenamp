@@ -862,6 +862,8 @@ void update_comet_buster(void *vis, double dt) {
     
     CometBusterGame *game = &visualizer->comet_buster;
 
+#ifdef ExternalSound
+
     // Update joystick hardware state and sync to visualizer fields
     joystick_manager_update(&visualizer->joystick_manager);
     update_visualizer_joystick(visualizer);
@@ -877,6 +879,8 @@ void update_comet_buster(void *vis, double dt) {
         }
         return;  // Don't update game yet
     }
+#endif
+
     
     int mouse_x = visualizer->mouse_x;
     int mouse_y = visualizer->mouse_y;
