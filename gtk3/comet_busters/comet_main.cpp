@@ -1585,16 +1585,10 @@ gboolean game_update_timer(gpointer data) {
         update_comet_buster(&gui->visualizer, 1.0 / 60.0);
         
         // Check if game just ended and it's a high score
-        /*if (gui->visualizer.comet_buster.game_over || gui->visualizer.comet_buster.ship_lives<=0) { 
-           printf("Game Over\n"); 
-        } else {
-            printf("Game not over %i %i\n", gui->visualizer.comet_buster.game_over, gui->visualizer.comet_buster.ship_lives<=0);
-        }*/
-        if ((gui->visualizer.comet_buster.game_over || gui->visualizer.comet_buster.ship_lives<=0) && !gui->high_score_dialog_shown) {
+        if (gui->visualizer.comet_buster.game_over || gui->visualizer.comet_buster.ship_lives<=0) {
             // Check if this is a high score
-            printf("GAME FUCKING OVER, CHECK HIGH SCORE\n");
             if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
-                                           gui->visualizer.comet_buster.score)) {
+                                           gui->visualizer.comet_buster.score) && !gui->high_score_dialog_shown) {
                 gui->high_score_dialog_shown = true;
                 fprintf(stdout, "[HIGH SCORE] New high score detected: %d\n", 
                         gui->visualizer.comet_buster.score);
