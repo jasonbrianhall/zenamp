@@ -464,7 +464,6 @@ void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer) {
         if (visualizer && visualizer->audio.sfx_game_over) {
             audio_play_sound(&visualizer->audio, visualizer->audio.sfx_game_over);
         }
-        comet_buster_is_high_score(game, 1000000);
         #endif
         
         // Don't add high score here - let the GUI dialog handle player name entry

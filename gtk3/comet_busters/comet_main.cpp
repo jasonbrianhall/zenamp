@@ -15,6 +15,7 @@
     #include <unistd.h>
     #include <sys/stat.h>
     #include <sys/types.h>
+    #include <signal.h>
 #endif
 
 typedef struct {
@@ -333,19 +334,53 @@ void high_scores_load(CometBusterGame *game) {
     rewind(fp);
     printf("[HIGH SCORES DEBUG] Now parsing file:\n");
     
-    while (game->high_score_count < MAX_HIGH_SCORES) {
+    char line[256];
+    while (game->high_score_count < MAX_HIGH_SCORES && fgets(line, sizeof(line), fp) != NULL) {
         int score, wave;
         time_t timestamp;
         char name[32];
         
-        int items_read = fscanf(fp, "%d %d %ld %31s", &score, &wave, &timestamp, name);
+        // Parse: score wave timestamp name (name can have spaces)
+        // Format: 38565 5 1765397762 John Doe
+        int items_read = sscanf(line, "%d %d %ld", &score, &wave, &timestamp);
+        
         fprintf(stdout, "[HIGH SCORES DEBUG] Line %d: Read %d items - ", 
                 game->high_score_count + 1, items_read);
         
-        if (items_read != 4) {
-            fprintf(stdout, "PARSE FAILED (expected 4 items)\n");
-            break;
+        if (items_read != 3) {
+            fprintf(stdout, "PARSE FAILED (expected at least 3 items)\n");
+            continue;
         }
+        
+        // Extract name - everything after the third field
+        char *name_start = line;
+        int field_count = 0;
+        int pos = 0;
+        
+        // Skip past score, wave, and timestamp fields
+        while (field_count < 3 && pos < (int)strlen(line)) {
+            if (line[pos] == ' ') {
+                field_count++;
+                pos++;
+                // Skip multiple spaces
+                while (line[pos] == ' ') pos++;
+            } else {
+                pos++;
+            }
+        }
+        
+        name_start = &line[pos];
+        
+        // Remove trailing newline from name
+        int name_len = strlen(name_start);
+        if (name_len > 0 && name_start[name_len - 1] == '\n') {
+            name_start[name_len - 1] = '\0';
+            name_len--;
+        }
+        
+        // Copy name
+        strncpy(name, name_start, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
         
         fprintf(stdout, "score=%d wave=%d ts=%ld name=%s\n", 
                 score, wave, timestamp, name);
@@ -374,7 +409,7 @@ void high_scores_save(CometBusterGame *game) {
     if (!game) return;
 
     const char *path = high_scores_get_path();
-    fprintf(stdout, "[HIGH SCORES] Saving to: %s\n", path);
+    printf("[HIGH SCORES] Saving to: %s\n", path);
 
     FILE *fp = fopen(path, "w");
     if (!fp) {
@@ -382,8 +417,12 @@ void high_scores_save(CometBusterGame *game) {
         return;
     }
 
-    for (int i = 0; i < game->high_score_count; i++) {
+    int saved_count = 0;
+    for (int i = 0; i < MAX_HIGH_SCORES; i++) {
         HighScore *hs = &game->high_scores[i];
+        // Skip zero scores (empty slots)
+        if (hs->score == 0) continue;
+        
         fprintf(fp, "%d %d %ld %s\n",
                 hs->score,
                 hs->wave,
@@ -394,11 +433,12 @@ void high_scores_save(CometBusterGame *game) {
                 hs->score,
                 hs->wave,
                 (long)hs->timestamp);
+        saved_count++;
     }
-
+    fflush(fp);   // force write to disk
     fclose(fp);
-    fprintf(stdout, "[HIGH SCORES] Saved %d high scores\n", game->high_score_count);
-
+    printf("[HIGH SCORES] Saved %d high scores\n", saved_count);
+}
 
 /**
  * Check if a score qualifies as a high score
@@ -407,7 +447,7 @@ bool comet_buster_is_high_score(CometBusterGame *game, int score) {
     if (!game) return false;
     printf("IS HIGH SCORE CALLED\n");
     for(int i=0;i<MAX_HIGH_SCORES;i++) {
-        printf("Highscore %i %i %i %i %s\n", game->high_scores[i].score,game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name[0]);
+        printf("Highscore %i %i %i %s\n", game->high_scores[i].score, game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name);
         if (score>game->high_scores[i].score) { printf("Is a High Score %i\n", score); return true; }
     }
     
@@ -438,7 +478,7 @@ void high_scores_add(CometBusterGame *game, int score, int wave, const char *nam
         }
     }
     for(int i=0;i<MAX_HIGH_SCORES;i++) {
-        printf("Highscore Add %i %i %i %i %s\n", game->high_scores[i].score,game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name[0]);
+        printf("Highscore Add %i %i %i %s\n", game->high_scores[i].score,game->high_scores[i].wave, game->high_scores[i].timestamp, game->high_scores[i].player_name);
     }
 }
 
@@ -475,6 +515,7 @@ void on_high_score_dialog_submit(GtkWidget *widget, gpointer data) {
         gui->high_score_dialog = NULL;
     }
     
+    //gui->high_score_dialog_shown = false;
     gui->game_paused = false;
 }
 
@@ -1544,18 +1585,23 @@ gboolean game_update_timer(gpointer data) {
         update_comet_buster(&gui->visualizer, 1.0 / 60.0);
         
         // Check if game just ended and it's a high score
-        if (gui->visualizer.comet_buster.game_over && !gui->high_score_dialog_shown) {
-            gui->high_score_dialog_shown = true;
-            
+        /*if (gui->visualizer.comet_buster.game_over || gui->visualizer.comet_buster.ship_lives<=0) { 
+           printf("Game Over\n"); 
+        } else {
+            printf("Game not over %i %i\n", gui->visualizer.comet_buster.game_over, gui->visualizer.comet_buster.ship_lives<=0);
+        }*/
+        if ((gui->visualizer.comet_buster.game_over || gui->visualizer.comet_buster.ship_lives<=0) && !gui->high_score_dialog_shown) {
             // Check if this is a high score
-            /*if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
+            printf("GAME FUCKING OVER, CHECK HIGH SCORE\n");
+            if (comet_buster_is_high_score(&gui->visualizer.comet_buster, 
                                            gui->visualizer.comet_buster.score)) {
+                gui->high_score_dialog_shown = true;
                 fprintf(stdout, "[HIGH SCORE] New high score detected: %d\n", 
                         gui->visualizer.comet_buster.score);
                 // Pause game and show high score dialog
                 gui->game_paused = true;
                 on_show_high_score_entry(gui);
-            }*/
+            }
         }
         
         // Check if current music track has finished and queue the next one
@@ -1765,6 +1811,15 @@ gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer data) {
             fprintf(stdout, "%s\n", gui->game_paused ? "[*] Game Paused" : "[*] Game Resumed");
             return TRUE;
             break;
+        case GDK_KEY_c:
+        case GDK_KEY_C:
+            // CTRL+C to quit
+            if ((event->state & GDK_CONTROL_MASK)) {
+                fprintf(stdout, "[*] CTRL+C pressed - exiting\n");
+                gtk_main_quit();
+                return TRUE;
+            }
+            break;
     }
     
     return FALSE;
@@ -1811,8 +1866,21 @@ gboolean on_key_release(GtkWidget *widget, GdkEventKey *event, gpointer data) {
     return FALSE;
 }
 
+// Signal handler for CTRL+C from terminal
+#ifndef _WIN32
+static void sigint_handler(int sig) {
+    fprintf(stdout, "\n[*] SIGINT received - exiting cleanly\n");
+    gtk_main_quit();
+}
+#endif
+
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
+    
+    // Set up signal handler for CTRL+C from terminal
+#ifndef _WIN32
+    signal(SIGINT, sigint_handler);
+#endif
     
     CometGUI gui;
     memset(&gui, 0, sizeof(CometGUI));
@@ -1834,7 +1902,7 @@ int main(int argc, char *argv[]) {
     // High score dialog
     gui.high_score_dialog = NULL;
     gui.high_score_name_entry = NULL;
-    gui.high_score_dialog_shown = false;
+    gui.high_score_dialog_shown = NULL;
     
     // Initialize visualizer - will be set dynamically by on_draw
     gui.visualizer.width = 640;  // Default, will be updated in on_draw
