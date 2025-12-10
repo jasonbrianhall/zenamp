@@ -547,13 +547,13 @@ void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen
     boss->vy = 100.0;  // Scroll down at 100 pixels per second
     boss->angle = 0;
     
-    // Boss health - reduced from 100 to 60
-    boss->health = 60;
-    boss->max_health = 60;
+    // Boss health - tripled for epic final battle
+    boss->health = 180;
+    boss->max_health = 180;
     
-    // Shield system - reduced from 20 to 10, shield reduces damage but doesn't block it
-    boss->shield_health = 10;
-    boss->max_shield_health = 10;
+    // Shield system - also increased proportionally
+    boss->shield_health = 30;
+    boss->max_shield_health = 30;
     boss->shield_active = true;
     
     // Shooting

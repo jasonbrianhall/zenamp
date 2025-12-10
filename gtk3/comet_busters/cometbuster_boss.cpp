@@ -98,6 +98,143 @@ void comet_buster_update_boss(CometBusterGame *game, double dt, int width, int h
             boss->shoot_cooldown = 0.5;
         }
     }
+    
+    // RANDOM ASTEROID SPAWNING - Boss occasionally throws asteroids at player!
+    // Small chance each frame to spawn an asteroid
+    if (game->comet_count < MAX_COMETS && (rand() % 1000) < 15) {  // ~1.5% chance per frame
+        // Create an asteroid
+        int slot = game->comet_count;
+        Comet *asteroid = &game->comets[slot];
+        
+        memset(asteroid, 0, sizeof(Comet));
+        
+        // Spawn from random screen corner/edge (away from boss position)
+        // This way asteroids don't immediately hit the boss
+        int spawn_location = rand() % 4;
+        double spawn_x, spawn_y;
+        
+        switch(spawn_location) {
+            case 0:  // Top-left corner
+                spawn_x = -50;
+                spawn_y = -50;
+                break;
+            case 1:  // Top-right corner
+                spawn_x = width + 50;
+                spawn_y = -50;
+                break;
+            case 2:  // Bottom-left corner
+                spawn_x = -50;
+                spawn_y = height + 50;
+                break;
+            case 3:  // Bottom-right corner
+                spawn_x = width + 50;
+                spawn_y = height + 50;
+                break;
+        }
+        
+        asteroid->x = spawn_x;
+        asteroid->y = spawn_y;
+        
+        // Velocity - aimed at player with randomness
+        double dx = game->ship_x - asteroid->x;
+        double dy = game->ship_y - asteroid->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        
+        if (dist > 0.1) {
+            double asteroid_speed = 80.0 + (rand() % 60);  // 80-140 px/s
+            // Add randomness so it's not perfectly aimed
+            double angle_noise = (rand() % 60 - 30) * (M_PI / 180.0);  // ±30 degrees
+            double aimed_angle = atan2(dy, dx) + angle_noise;
+            
+            asteroid->vx = cos(aimed_angle) * asteroid_speed;
+            asteroid->vy = sin(aimed_angle) * asteroid_speed;
+        } else {
+            asteroid->vx = (rand() % 100 - 50);
+            asteroid->vy = (rand() % 100 - 50);
+        }
+        
+        // Sizes - mix of small to large
+        int size_roll = rand() % 100;
+        if (size_roll < 40) {
+            asteroid->size = COMET_LARGE;
+            asteroid->radius = 30;
+        } else if (size_roll < 75) {
+            asteroid->size = COMET_MEDIUM;
+            asteroid->radius = 20;
+        } else {
+            asteroid->size = COMET_SMALL;
+            asteroid->radius = 10;
+        }
+        
+        // Set properties
+        asteroid->frequency_band = rand() % 3;
+        asteroid->rotation = 0;
+        asteroid->rotation_speed = 50 + (rand() % 200);
+        asteroid->active = true;
+        asteroid->health = 1;
+        asteroid->base_angle = (rand() % 360) * (M_PI / 180.0);
+        
+        // Color based on frequency
+        comet_buster_get_frequency_color(asteroid->frequency_band,
+                                         &asteroid->color[0],
+                                         &asteroid->color[1],
+                                         &asteroid->color[2]);
+        
+        game->comet_count++;
+        
+        fprintf(stdout, "[BOSS] Hurled asteroid from corner! (Total on screen: %d)\n", game->comet_count);
+    }
+    
+    // PURPLE SENTINEL SHIP SUMMONING - Boss calls for backup occasionally!
+    // Summon sentinel formations periodically - especially in enraged phase
+    double summon_chance = 5.0;  // Base chance per 1000 frames
+    
+    if (boss->phase == 2) {
+        // Enraged phase - MORE aggressive summoning
+        summon_chance = 12.0;  // ~1.2% per frame in enraged
+    }
+    
+    if (game->enemy_ship_count < MAX_ENEMY_SHIPS && (rand() % 1000) < summon_chance) {
+        // Summon a wave of 15 purple sentinel ships!
+        int ships_to_summon = 15;
+        int summon_formation_id = game->current_wave * 1000 + (int)(boss->phase_timer * 100);
+        int ships_summoned = 0;
+        
+        fprintf(stdout, "[BOSS] SUMMONING PURPLE SENTINEL FLEET! 15 ships incoming!\n");
+        
+        for (int i = 0; i < ships_to_summon; i++) {
+            if (game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
+                fprintf(stdout, "[BOSS] Hit MAX_ENEMY_SHIPS limit, summoning stopped at %d ships\n", ships_summoned);
+                break;
+            }
+            
+            // Spread ships across all screen edges
+            int edge = (i % 8);  // Cycle through edges 0-7
+            double speed = 100.0 + (rand() % 60);  // 100-160 px/s
+            
+            // Purple sentinels - spawn in coordinated formations
+            int formation_id = summon_formation_id + (i / 2);  // 2 ships per formation
+            int formation_size = 2;
+            
+            comet_buster_spawn_enemy_ship_internal(game, width, height,
+                                                   3,  // Type 3 = Purple sentinel
+                                                   edge, speed,
+                                                   formation_id, formation_size);
+            
+            ships_summoned++;
+        }
+        
+        fprintf(stdout, "[BOSS] Purple sentinel fleet summoned! (%d ships deployed)\n", ships_summoned);
+        
+        // Visual effect - boss ports flash with energy
+        for (int p = 0; p < 40; p++) {
+            double angle = 2.0 * M_PI * (rand() % 100) / 100.0;
+            double particle_speed = 200.0 + (rand() % 150);
+            double vx = cos(angle) * particle_speed;
+            double vy = sin(angle) * particle_speed;
+            // Particles burst from boss
+        }
+    }
 }
 
 void comet_buster_boss_fire(CometBusterGame *game) {
