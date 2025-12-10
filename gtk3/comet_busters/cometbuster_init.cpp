@@ -121,6 +121,4 @@ void comet_buster_reset_game_with_splash(CometBusterGame *game, bool show_splash
 #endif
     }
     
-    // Load high scores from file (if they exist)
-    comet_buster_load_high_scores(game);
 }
