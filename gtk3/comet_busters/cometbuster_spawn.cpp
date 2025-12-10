@@ -495,6 +495,11 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
 }
 
 void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy) {
+    comet_buster_spawn_enemy_bullet_from_ship(game, x, y, vx, vy, -1);
+}
+
+void comet_buster_spawn_enemy_bullet_from_ship(CometBusterGame *game, double x, double y, 
+                                               double vx, double vy, int owner_ship_id) {
     if (!game || game->enemy_bullet_count >= MAX_ENEMY_BULLETS) {
         return;
     }
@@ -507,12 +512,14 @@ void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, 
     bullet->vx = vx;
     bullet->vy = vy;
     bullet->angle = atan2(vy, vx);
-    bullet->lifetime = 10.0;  // Bullets live for 10 seconds
+    bullet->lifetime = 10.0;
     bullet->max_lifetime = 10.0;
     bullet->active = true;
+    bullet->owner_ship_id = owner_ship_id;
     
     game->enemy_bullet_count++;
 }
+
 
 void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen_height) {
     if (!game) return;

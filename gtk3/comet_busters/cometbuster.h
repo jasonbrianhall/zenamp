@@ -42,6 +42,7 @@ typedef struct {
     double lifetime;            // Seconds remaining
     double max_lifetime;
     bool active;
+    int owner_ship_id;
 } Bullet;
 
 typedef struct {
@@ -317,6 +318,8 @@ void comet_buster_spawn_explosion(CometBusterGame *game, double x, double y, int
 void comet_buster_spawn_floating_text(CometBusterGame *game, double x, double y, const char *text, double r, double g, double b);
 void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int screen_height);
 void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy);
+void comet_buster_spawn_enemy_bullet_from_ship(CometBusterGame *game, double x, double y, double vx, double vy, int owner_ship_id);
+
 
 // Boss functions
 void comet_buster_spawn_boss(CometBusterGame *game, int screen_width, int screen_height);
@@ -383,5 +386,6 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
 void comet_buster_init_splash_screen(CometBusterGame *game, int width, int height);
 void comet_buster_exit_splash_screen(CometBusterGame *game);
 void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int width, int height);                                 
+
 
 #endif // COMETBUSTER_H

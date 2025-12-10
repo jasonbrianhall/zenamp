@@ -543,7 +543,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         double vx = (dx_player / dist_to_player) * bullet_speed;
                         double vy = (dy_player / dist_to_player) * bullet_speed;
                         
-                        comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                        comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
                         
                         // Play alien fire sound
 #ifdef ExternalSound
@@ -590,7 +590,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             double vx = (dx / dist) * bullet_speed;
                             double vy = (dy / dist) * bullet_speed;
                             
-                            comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                            comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
                             
                             // Play alien fire sound
 #ifdef ExternalSound
@@ -643,7 +643,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             double vx = (dx / dist) * bullet_speed;
                             double vy = (dy / dist) * bullet_speed;
                             
-                            comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                            comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
                             
                             // Play alien fire sound
 #ifdef ExternalSound
@@ -1103,6 +1103,9 @@ void update_comet_buster(void *vis, double dt) {
             Bullet *bullet = &game->enemy_bullets[j];
             if (!bullet->active) continue;
             
+            // CRITICAL: Skip if bullet came from this same ship
+            if (bullet->owner_ship_id == i) continue;
+            
             double dx = target_ship->x - bullet->x;
             double dy = target_ship->y - bullet->y;
             double dist = sqrt(dx*dx + dy*dy);
@@ -1112,7 +1115,7 @@ void update_comet_buster(void *vis, double dt) {
                 // Bullet is destroyed
                 bullet->active = false;
                 
-                // Ship takes damage from friendly fire
+                // Ship takes damage from friendly fire (from OTHER ships)
                 if (target_ship->shield_health > 0) {
                     target_ship->shield_health--;
                     target_ship->shield_impact_angle = atan2(target_ship->y - bullet->y,
