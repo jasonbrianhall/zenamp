@@ -517,8 +517,8 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     
                     // Play alien fire sound
 #ifdef ExternalSound
-                    if (visualizer && visualizer->audio.sfx_alien_fire) {
-                        audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                    if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
+                        //audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
                     }
 #endif
                     
@@ -547,7 +547,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         
                         // Play alien fire sound
 #ifdef ExternalSound
-                        if (visualizer && visualizer->audio.sfx_alien_fire) {
+                        if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
                             audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
                         }
 #endif
@@ -594,7 +594,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             
                             // Play alien fire sound
 #ifdef ExternalSound
-                            if (visualizer && visualizer->audio.sfx_alien_fire) {
+                            if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
                                 audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
                             }
 #endif
@@ -647,7 +647,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                             
                             // Play alien fire sound
 #ifdef ExternalSound
-                            if (visualizer && visualizer->audio.sfx_alien_fire) {
+                            if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
                                 audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
                             }
 #endif
@@ -1094,10 +1094,79 @@ void update_comet_buster(void *vis, double dt) {
         }
     }
     
+    // Check enemy bullets hitting enemy ships (friendly fire)
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *target_ship = &game->enemy_ships[i];
+        if (!target_ship->active) continue;
+        
+        for (int j = 0; j < game->enemy_bullet_count; j++) {
+            Bullet *bullet = &game->enemy_bullets[j];
+            if (!bullet->active) continue;
+            
+            double dx = target_ship->x - bullet->x;
+            double dy = target_ship->y - bullet->y;
+            double dist = sqrt(dx*dx + dy*dy);
+            double collision_dist = 15.0;  // Enemy ship collision radius
+            
+            if (dist < collision_dist) {
+                // Bullet is destroyed
+                bullet->active = false;
+                
+                // Ship takes damage from friendly fire
+                if (target_ship->shield_health > 0) {
+                    target_ship->shield_health--;
+                    target_ship->shield_impact_angle = atan2(target_ship->y - bullet->y,
+                                                              target_ship->x - bullet->x);
+                    target_ship->shield_impact_timer = 0.2;
+                } else {
+                    // No shield - ship is destroyed by friendly fire
+                    comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
+                    
+                    // Award player points for friendly fire destruction
+                    game->score += (int)(150 * game->score_multiplier);
+                    break;  // Exit inner loop since we destroyed the ship
+                }
+                break;  // Bullet hit this ship, move to next bullet
+            }
+        }
+    }
+    
     // Check enemy bullet-ship collisions
     for (int i = 0; i < game->enemy_bullet_count; i++) {
         if (comet_buster_check_enemy_bullet_ship(game, &game->enemy_bullets[i])) {
             comet_buster_on_ship_hit(game, visualizer);
+        }
+    }
+    
+    // Check enemy ship-enemy ship collisions (ships destroy each other on contact)
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *ship1 = &game->enemy_ships[i];
+        if (!ship1->active) continue;
+        
+        for (int j = i + 1; j < game->enemy_ship_count; j++) {
+            EnemyShip *ship2 = &game->enemy_ships[j];
+            if (!ship2->active) continue;
+            
+            double dx = ship2->x - ship1->x;
+            double dy = ship2->y - ship1->y;
+            double dist = sqrt(dx*dx + dy*dy);
+            double collision_dist = 15.0 + 15.0;  // Both have ~15px radius
+            
+            if (dist < collision_dist) {
+                // Both ships are destroyed
+                ship1->active = false;
+                ship2->active = false;
+                
+                // Spawn explosion at midpoint
+                double ex = (ship1->x + ship2->x) / 2.0;
+                double ey = (ship1->y + ship2->y) / 2.0;
+                comet_buster_spawn_explosion(game, ex, ey, 1, 15);  // Mid-frequency explosion
+                
+                // Award points for mutual destruction
+                game->score += (int)(250 * game->score_multiplier);
+                
+                break;  // Exit inner loop after collision
+            }
         }
     }
     
@@ -1154,6 +1223,71 @@ void update_comet_buster(void *vis, double dt) {
     
     // Check player bullets hitting boss (either Spawn Queen or regular boss)
     if (game->boss_active) {
+        // Check boss-comet collisions first (comets can damage boss)
+        for (int j = 0; j < game->comet_count; j++) {
+            Comet *comet = &game->comets[j];
+            if (!comet->active) continue;
+            
+            // Check against regular boss
+            if (game->boss.active) {
+                BossShip *boss = &game->boss;
+                double dx = boss->x - comet->x;
+                double dy = boss->y - comet->y;
+                double dist = sqrt(dx*dx + dy*dy);
+                double collision_dist = 50.0 + comet->radius;  // Boss is big (~50px)
+                
+                if (dist < collision_dist) {
+                    // Boss takes damage from comet collision
+                    if (boss->shield_active && boss->shield_health > 0) {
+                        boss->shield_health--;
+                        boss->shield_impact_angle = atan2(boss->y - comet->y,
+                                                           boss->x - comet->x);
+                        boss->shield_impact_timer = 0.2;
+                    } else {
+                        // Shield down - full damage
+                        boss->health -= 2;  // More damage from comets than from bullets without shield
+                    }
+                    
+                    boss->damage_flash_timer = 0.1;
+                    
+                    // Comet is destroyed
+                    comet_buster_destroy_comet(game, j, width, height, visualizer);
+                    
+                    if (boss->health <= 0) {
+                        comet_buster_destroy_boss(game, width, height, visualizer);
+                    }
+                    break;
+                }
+            }
+            // Also check Spawn Queen
+            else if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
+                SpawnQueenBoss *queen = &game->spawn_queen;
+                double dx = queen->x - comet->x;
+                double dy = queen->y - comet->y;
+                double dist = sqrt(dx*dx + dy*dy);
+                double collision_dist = 60.0 + comet->radius;  // Queen is larger (~60px)
+                
+                if (dist < collision_dist) {
+                    // Queen takes damage from comet
+                    if (queen->shield_health > 0) {
+                        queen->shield_health--;
+                    } else {
+                        queen->health -= 2;  // More damage from comets
+                    }
+                    
+                    queen->damage_flash_timer = 0.1;
+                    
+                    // Comet is destroyed
+                    comet_buster_destroy_comet(game, j, width, height, visualizer);
+                    
+                    if (queen->health <= 0) {
+                        comet_buster_destroy_spawn_queen(game, width, height, visualizer);
+                    }
+                    break;
+                }
+            }
+        }
+        
         // Check Spawn Queen collision first
         if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
             for (int j = 0; j < game->bullet_count; j++) {
