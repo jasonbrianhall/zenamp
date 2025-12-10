@@ -1228,6 +1228,112 @@ void on_toggle_pause(GtkWidget *widget, gpointer data) {
 
 #ifdef DEBUG
 
+/**
+ * Handle wave selection from dropdown menu
+ */
+void on_debug_wave_selected(GtkComboBox *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // Get selected wave number
+    gint active_index = gtk_combo_box_get_active(widget);
+    if (active_index < 0) return;
+    
+    int selected_wave = active_index + 1;  // Waves are 1-32, combo box is 0-31
+    
+    // Close high score dialog if open
+    if (gui->high_score_dialog) {
+        gtk_widget_destroy(gui->high_score_dialog);
+        gui->high_score_dialog = NULL;
+    }
+    
+    // Reset high score dialog flag
+    gui->high_score_dialog_shown = false;
+    gui->game_paused = false;
+    
+    // Initialize game WITHOUT splash screen
+    comet_buster_reset_game_with_splash(&gui->visualizer.comet_buster, false);
+    
+    // Jump to selected wave
+    CometBusterGame *game = &gui->visualizer.comet_buster;
+    game->current_wave = selected_wave;
+    game->score = selected_wave * 5000;  // Scale score with wave
+    game->score_multiplier = 1.0f + (selected_wave * 0.1f);  // Increase multiplier per wave
+    
+    // Spawn wave comets
+    comet_buster_spawn_wave(game, gui->visualizer.width, gui->visualizer.height);
+    
+    fprintf(stdout, "[DEBUG] Jumped to Wave %d! Score: %d, Multiplier: %.2fx\n", 
+            selected_wave, game->score, game->score_multiplier);
+}
+
+/**
+ * Open debug wave selection dropdown dialog
+ */
+void on_debug_wave_selector(GtkWidget *widget, gpointer data) {
+    CometGUI *gui = (CometGUI*)data;
+    if (!gui) return;
+    
+    // Pause the game
+    gui->game_paused = true;
+    
+    // Create dialog
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        "Select Wave",
+        GTK_WINDOW(gui->window),
+        GTK_DIALOG_MODAL,
+        "Cancel", GTK_RESPONSE_CANCEL,
+        "Jump to Wave", GTK_RESPONSE_OK,
+        NULL);
+    
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 300, 150);
+    
+    // Create main vbox
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 20);
+    
+    // Create label
+    GtkWidget *label = gtk_label_new("Select a wave (1-32):");
+    gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
+    
+    // Create combo box
+    GtkWidget *combo_box = gtk_combo_box_text_new();
+    
+    // Add wave options 1-32
+    for (int i = 1; i <= 32; i++) {
+        char wave_text[32];
+        snprintf(wave_text, sizeof(wave_text), "Wave %d", i);
+        gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_box), NULL, wave_text);
+    }
+    
+    // Set default selection to Wave 1
+    gtk_combo_box_set_active(GTK_COMBO_BOX(combo_box), 0);
+    
+    gtk_box_pack_start(GTK_BOX(vbox), combo_box, FALSE, FALSE, 0);
+    
+    // Add vbox to dialog
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_add(GTK_CONTAINER(content_area), vbox);
+    
+    gtk_widget_show_all(dialog);
+    
+    // Run dialog
+    gint response = gtk_dialog_run(GTK_DIALOG(dialog));
+    
+    if (response == GTK_RESPONSE_OK) {
+        // Call the wave selection handler
+        on_debug_wave_selected(GTK_COMBO_BOX(combo_box), gui);
+    }
+    
+    // Resume game if cancelled
+    if (response != GTK_RESPONSE_OK) {
+        gui->game_paused = false;
+        fprintf(stdout, "[DEBUG] Wave selection cancelled\n");
+    }
+    
+    gtk_widget_destroy(dialog);
+}
+
 void on_debug_jump_to_wave_5(GtkWidget *widget, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return;
@@ -1247,8 +1353,8 @@ void on_debug_jump_to_wave_5(GtkWidget *widget, gpointer data) {
     
     // Jump to Wave 5
     CometBusterGame *game = &gui->visualizer.comet_buster;
-    game->current_wave = 10;
-    game->score = 10000;  // Give some starting points
+    game->current_wave = 5;
+    game->score = 25000;  // Give some starting points
     game->score_multiplier = 1.5;  // Decent multiplier
     
     // Spawn Wave 5 comets
@@ -1852,6 +1958,13 @@ int main(int argc, char *argv[]) {
     // Debug menu
     GtkWidget *debug_menu = gtk_menu_new();
     GtkWidget *debug_item = gtk_menu_item_new_with_label("Debug");
+    
+    GtkWidget *debug_wave_selector_item = gtk_menu_item_new_with_label("Wave Selector (1-32)");
+    g_signal_connect(debug_wave_selector_item, "activate", G_CALLBACK(on_debug_wave_selector), &gui);
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_wave_selector_item);
+    
+    GtkWidget *debug_separator1 = gtk_separator_menu_item_new();
+    gtk_menu_shell_append(GTK_MENU_SHELL(debug_menu), debug_separator1);
     
     GtkWidget *debug_wave5_item = gtk_menu_item_new_with_label("Jump to Wave 5");
     g_signal_connect(debug_wave5_item, "activate", G_CALLBACK(on_debug_jump_to_wave_5), &gui);
