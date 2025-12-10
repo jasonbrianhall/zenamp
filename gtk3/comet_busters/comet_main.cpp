@@ -1330,14 +1330,31 @@ void on_game_controls(GtkWidget *widget, gpointer data) {
         GTK_MESSAGE_INFO,
         GTK_BUTTONS_OK,
         "Game Controls:\n\n"
-        "A/D - Move Left/Right\n"
-        "W/S - Move Up/Down\n"
-        "Z/X - Rotate Ship\n"
-        "SPACE - Fire Weapons\n"
-        "CTRL - Boost Speed\n"
-        "V - Open Volume Settings\n"
-        "F11 - Toggle Fullscreen\n"
-        "ESC - Pause/Resume Game"
+        "Keyboard:"
+        "A/D    - Turn Left/Right\n"
+        "W/S    - Move Up/Down\n"
+        "CTRL   - Fire Weapons\n"
+        "Z      - Omni-direcitonal Fire Weapons\n"
+        "X      - Boost Speed\n"
+        "V      - Open Volume Settings\n"
+        "F11    - Toggle Fullscreen\n"
+        "ESC/P  - Pause/Resume Game\n"
+        "\n"
+        "Mouse:\n"
+        "Left Button   - Shoot\n"
+        "Right Button  - Boost\n"
+        "Middle Button - Omnidirectional Fire\n"
+        "Cursor        - Ship will follow cursor\n"
+        ""
+        "Joystick:"
+        "Up/Down       - Move Forward/Backward\n"
+        "Left/Right    - Turn that direction\n"
+        "Middle Button - Omnidirectional Fire\n"
+        "B             - Fire\n"
+        "X             - Boost\n"
+        "RT            - Omnidirectional Fire\n"
+
+
     );
     
     gtk_dialog_run(GTK_DIALOG(dialog));

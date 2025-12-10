@@ -895,8 +895,6 @@ void update_comet_buster(void *vis, double dt) {
         first_run = false;
     }
     
-    // ✓ CRITICAL FIX: Use visualizer's mouse_left_pressed directly!
-    // The visualizer already tracks mouse button state
     game->mouse_left_pressed = visualizer->mouse_left_pressed;
     game->mouse_right_pressed = visualizer->mouse_right_pressed;
     game->mouse_middle_pressed = visualizer->mouse_middle_pressed;
@@ -937,10 +935,15 @@ void update_comet_buster(void *vis, double dt) {
             joystick_any_input = true;
         }
     }
-    
+  
+    bool joy_active=false;  
     if (joystick_connected && joystick_any_input) {
+         joy_active=true;
+        // CRITICAL: Disable mouse when joystick input is detected (same as keyboard)
+        visualizer->mouse_just_moved = false;
+        
         // Left stick movement
-        if (active_joystick->axis_x < -0.5) {
+         if (active_joystick->axis_x < -0.5) {
             game->keyboard.key_a_pressed = true;  // Turn left
         }
         if (active_joystick->axis_x > 0.5) {
@@ -977,8 +980,8 @@ void update_comet_buster(void *vis, double dt) {
                           visualizer->key_w_pressed || visualizer->key_s_pressed;
     
     // Disable mouse if ANY joystick input is active
-    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joystick_any_input;
-    
+    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joy_active;
+    printf("Mouse active %i\n", mouse_active);
     // Update game state
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
 #else
