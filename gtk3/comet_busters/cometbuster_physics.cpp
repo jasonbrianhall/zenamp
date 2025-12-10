@@ -1245,17 +1245,44 @@ void update_comet_buster(void *vis, double dt) {
                 
                 if (dist < collision_dist) {
                     // Boss takes damage from comet collision
+                    // Damage scales with comet size
+                    int comet_damage = 2;  // Base damage
+                    switch (comet->size) {
+                        case COMET_SMALL:   comet_damage = 1; break;
+                        case COMET_MEDIUM:  comet_damage = 2; break;
+                        case COMET_LARGE:   comet_damage = 3; break;
+                        case COMET_MEGA:    comet_damage = 4; break;
+                        case COMET_SPECIAL: comet_damage = 4; break;
+                        default:            comet_damage = 2; break;
+                    }
+                    
                     if (boss->shield_active && boss->shield_health > 0) {
-                        boss->shield_health--;
+                        // Shield absorbs damage from smaller comets, reduces damage from larger ones
+                        boss->shield_health--;  // Shield always takes 1 hit
                         boss->shield_impact_angle = atan2(boss->y - comet->y,
                                                            boss->x - comet->x);
                         boss->shield_impact_timer = 0.2;
+                        
+                        // Large comets penetrate shields
+                        if (comet->size >= COMET_LARGE) {
+                            boss->health -= 1;  // Penetrating damage
+                        }
                     } else {
-                        // Shield down - full damage
-                        boss->health -= 2;  // More damage from comets than from bullets without shield
+                        // Shield down - full damage scaled by comet size
+                        boss->health -= comet_damage;
                     }
                     
                     boss->damage_flash_timer = 0.1;
+                    
+                    // On splash screen, don't apply collision knockback to boss
+                    // The comet is still destroyed normally, but boss doesn't move backwards
+                    if (!game->splash_screen_active) {
+                        // Apply collision impulse to boss to push it back (normal gameplay)
+                        double nx = (boss->x - comet->x) / dist;
+                        double ny = (boss->y - comet->y) / dist;
+                        boss->vx += nx * comet->radius;  // Push boss away from comet
+                        boss->vy += ny * comet->radius;
+                    }
                     
                     // Comet is destroyed
                     comet_buster_destroy_comet(game, j, width, height, visualizer);
@@ -1275,14 +1302,42 @@ void update_comet_buster(void *vis, double dt) {
                 double collision_dist = 60.0 + comet->radius;  // Queen is larger (~60px)
                 
                 if (dist < collision_dist) {
-                    // Queen takes damage from comet
+                    // Queen takes damage from comet collision
+                    // Damage scales with comet size
+                    int comet_damage = 2;  // Base damage
+                    switch (comet->size) {
+                        case COMET_SMALL:   comet_damage = 1; break;
+                        case COMET_MEDIUM:  comet_damage = 2; break;
+                        case COMET_LARGE:   comet_damage = 3; break;
+                        case COMET_MEGA:    comet_damage = 4; break;
+                        case COMET_SPECIAL: comet_damage = 4; break;
+                        default:            comet_damage = 2; break;
+                    }
+                    
                     if (queen->shield_health > 0) {
-                        queen->shield_health--;
+                        // Shield absorbs damage from smaller comets, reduces damage from larger ones
+                        queen->shield_health--;  // Shield always takes 1 hit
+                        
+                        // Large comets penetrate shields
+                        if (comet->size >= COMET_LARGE) {
+                            queen->health -= 1;  // Penetrating damage
+                        }
                     } else {
-                        queen->health -= 2;  // More damage from comets
+                        // Shield down - full damage scaled by comet size
+                        queen->health -= comet_damage;
                     }
                     
                     queen->damage_flash_timer = 0.1;
+                    
+                    // On splash screen, don't apply collision knockback to queen
+                    // The comet is still destroyed normally, but queen doesn't move backwards
+                    if (!game->splash_screen_active) {
+                        // Apply collision impulse to queen to push it back (normal gameplay)
+                        double nx = (queen->x - comet->x) / dist;
+                        double ny = (queen->y - comet->y) / dist;
+                        queen->vx += nx * comet->radius;  // Push queen away from comet
+                        queen->vy += ny * comet->radius;
+                    }
                     
                     // Comet is destroyed
                     comet_buster_destroy_comet(game, j, width, height, visualizer);
