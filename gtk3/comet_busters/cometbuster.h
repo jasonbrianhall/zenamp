@@ -383,10 +383,7 @@ void comet_buster_wrap_position(double *x, double *y, int width, int height);
 double comet_buster_distance(double x1, double y1, double x2, double y2);
 void comet_buster_get_frequency_color(int frequency_band, double *r, double *g, double *b);
 
-// High score management
-void comet_buster_load_high_scores(CometBusterGame *game);
-void comet_buster_save_high_scores(CometBusterGame *game);
-void comet_buster_add_high_score(CometBusterGame *game, int score, int wave, const char *name);
+// High score management - implemented in comet_main.cpp
 bool comet_buster_is_high_score(CometBusterGame *game, int score);
 
 // Enemy

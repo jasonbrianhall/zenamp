@@ -421,6 +421,5 @@ void comet_buster_exit_splash_screen(CometBusterGame *game) {
     game->is_boosting = false;
     game->boost_thrust_timer = 0.0;
     
-    comet_buster_load_high_scores(game);
     comet_buster_spawn_wave(game, 1920, 1080);
 }

@@ -367,6 +367,26 @@ static void high_scores_save(CometBusterGame *game) {
 }
 
 /**
+ * Check if a score qualifies as a high score
+ */
+bool comet_buster_is_high_score(CometBusterGame *game, int score) {
+    if (!game) return false;
+    
+    // If we have fewer than max scores, it's always a high score
+    if (game->high_score_count < MAX_HIGH_SCORES) {
+        return true;
+    }
+    
+    // Otherwise, check if score beats the lowest high score
+    // High scores are sorted in descending order (highest first)
+    if (game->high_score_count > 0) {
+        return score > game->high_scores[game->high_score_count - 1].score;
+    }
+    
+    return false;
+}
+
+/**
  * Add a high score (maintains sorted order)
  */
 static void high_scores_add(CometBusterGame *game, int score, int wave, const char *name) {

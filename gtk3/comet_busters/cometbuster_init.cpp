@@ -102,7 +102,7 @@ void comet_buster_reset_game_with_splash(CometBusterGame *game, bool show_splash
     game->bullet_count = 0;
     game->particle_count = 0;
     game->floating_text_count = 0;
-    game->high_score_count = 0;
+    // NOTE: high_score_count is NOT reset - high scores persist from disk load
     game->enemy_ship_count = 0;
     game->enemy_bullet_count = 0;
     
