@@ -296,10 +296,8 @@ void comet_buster_update_floating_text(CometBusterGame *game, double dt) {
     }
 }
 
-void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height, void *vis) {
+void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer) {
     if (!game) return;
-    
-    Visualizer *visualizer = (Visualizer *)vis;
     
     for (int i = 0; i < game->enemy_ship_count; i++) {
         EnemyShip *ship = &game->enemy_ships[i];
@@ -870,7 +868,7 @@ void update_comet_buster(void *vis, double dt) {
 
     // Handle splash screen
     if (game->splash_screen_active) {
-        comet_buster_update_splash_screen(game, dt, visualizer->width, visualizer->height);
+        comet_buster_update_splash_screen(game, dt, visualizer->width, visualizer->height, visualizer);
         
         // Check for input to start game
         if (comet_buster_splash_screen_input_detected(visualizer)) {

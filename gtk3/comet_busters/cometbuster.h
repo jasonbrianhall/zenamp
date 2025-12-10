@@ -382,7 +382,6 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
 
 // Splash
 void comet_buster_init_splash_screen(CometBusterGame *game, int width, int height);
-void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_exit_splash_screen(CometBusterGame *game);
 void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int width, int height);                                 
 

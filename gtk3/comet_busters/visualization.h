@@ -222,5 +222,6 @@ void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer);
 void joystick_manager_update(JoystickManager *manager);
 void update_visualizer_joystick(Visualizer *vis);
 bool comet_buster_splash_screen_input_detected(Visualizer *visualizer);
+void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
 
 #endif

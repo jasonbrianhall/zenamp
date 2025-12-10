@@ -7,31 +7,48 @@
 #include "cometbuster.h"
 #include "visualization.h"
 
-// Initialize splash screen
+// Initialize splash screen with lots of objects for impressive visuals
 void comet_buster_init_splash_screen(CometBusterGame *game, int width, int height) {
     if (!game) return;
     
     game->splash_screen_active = true;
     game->splash_timer = 0.0;
     
-    // Set wave to 32 so spawn function calculates 32 comets normally
-    game->current_wave = 32;
+    // Directly spawn lots of comets for impressive splash screen visuals
+    // Instead of relying on wave calculations, we spawn 18 comets directly
+    comet_buster_spawn_random_comets(game, 18, width, height);
     
-    // Use the normal spawn function with wave 32
-    comet_buster_spawn_wave(game, width, height);
+    // Spawn a boss to make the splash screen look dramatic and dynamic
+    comet_buster_spawn_boss(game, width, height);
     
-    fprintf(stdout, "[SPLASH] Splash screen initialized with %d comets\n", 
-            game->comet_count);
+    // Spawn 3 enemy ships for additional visual variety
+    for (int i = 0; i < 3; i++) {
+        comet_buster_spawn_enemy_ship(game, width, height);
+    }
+    
+    fprintf(stdout, "[SPLASH] Splash screen initialized:\n");
+    fprintf(stdout, "  - %d comets\n", game->comet_count);
+    fprintf(stdout, "  - Boss active: %d\n", game->boss_active);
+    fprintf(stdout, "  - %d enemy ships\n", game->enemy_ship_count);
 }
 
-// Update splash screen
-void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height) {
+// Update splash screen - now includes enemy ship and boss animation
+void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer) {
     if (!game || !game->splash_screen_active) return;
     
     game->splash_timer += dt;
     
     // Use actual game physics engine for comets
     comet_buster_update_comets(game, dt, width, height);
+    
+    // Also update enemy ships so they move and animate on the splash screen
+    // Note: visualizer parameter is required for enemy ship update logic
+    comet_buster_update_enemy_ships(game, dt, width, height, visualizer);
+    
+    // Update boss if active (so it animates on splash screen)
+    if (game->boss_active) {
+        comet_buster_update_boss(game, dt, width, height);
+    }
 }
 
 // Draw splash screen using existing game rendering functions
@@ -41,7 +58,7 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     // Draw background (dark space)
     cairo_set_source_rgb(cr, 0.04, 0.06, 0.15);
     cairo_paint(cr);
-    
+
     // Draw grid
     cairo_set_source_rgb(cr, 0.1, 0.15, 0.35);
     cairo_set_line_width(cr, 0.5);
@@ -55,9 +72,14 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     }
     cairo_stroke(cr);
     
-    // Use existing game functions to draw comets and ships
+    // Use existing game functions to draw all animated objects
     draw_comet_buster_comets(game, cr, width, height);
     draw_comet_buster_enemy_ships(game, cr, width, height);
+    
+    // Draw boss if active
+    if (game->boss_active) {
+        draw_comet_buster_boss(&game->boss, cr, width, height);
+    }
     
     // Draw title "COMET BUSTER"
     cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
@@ -69,7 +91,7 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     double title_x = (width - extents.width) / 2.0;
     double title_y = height / 2.0;
     
-    // Draw glowing text
+    // Draw glowing text effect
     for (int i = 5; i > 0; i--) {
         double alpha = 0.1 * (5 - i) / 5.0;
         cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, alpha);
@@ -77,7 +99,7 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
         cairo_show_text(cr, "COMET BUSTER");
     }
     
-    // Draw bright main text
+    // Draw bright main title text
     cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
     cairo_move_to(cr, title_x, title_y);
     cairo_show_text(cr, "COMET BUSTER");
@@ -90,7 +112,7 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     double subtitle_x = (width - extents.width) / 2.0;
     double subtitle_y = title_y + 80;
     
-    // Blinking text effect
+    // Blinking text effect for subtitle
     double blink_alpha = 0.5 + 0.5 * sin(game->splash_timer * 3.0);
     cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, blink_alpha);
     cairo_move_to(cr, subtitle_x, subtitle_y);
@@ -119,7 +141,8 @@ bool comet_buster_splash_screen_input_detected(Visualizer *visualizer) {
     }
     
     // Any mouse click
-    if (visualizer->mouse_left_pressed || visualizer->mouse_right_pressed || visualizer->mouse_middle_pressed || visualizer->key_ctrl_pressed || visualizer->joystick_button_a || visualizer->joystick_button_b || visualizer->joystick_button_x || visualizer->joystick_button_y) {
+    if (visualizer->mouse_left_pressed || visualizer->mouse_right_pressed || 
+        visualizer->mouse_middle_pressed) {
         return true;
     }
     
