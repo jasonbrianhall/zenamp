@@ -899,11 +899,32 @@ void update_comet_buster(void *vis, double dt) {
     game->keyboard.key_ctrl_pressed = visualizer->key_ctrl_pressed;
     
     // ========== JOYSTICK INPUT ==========
-    // Override keyboard with joystick if joystick is being used
+    // Get joystick state
     JoystickState *active_joystick = joystick_manager_get_active(&visualizer->joystick_manager);
-    bool joystick_active = (active_joystick && active_joystick->connected);
+    bool joystick_connected = (active_joystick && active_joystick->connected);
     
-    if (joystick_active) {
+    // Check if ANY joystick input is active (buttons, sticks, triggers)
+    bool joystick_any_input = false;
+    if (joystick_connected) {
+        // Check stick movement
+        if (fabs(active_joystick->axis_x) > 0.3 || fabs(active_joystick->axis_y) > 0.3) {
+            joystick_any_input = true;
+        }
+        // Check triggers
+        if (active_joystick->axis_lt > 0.1 || active_joystick->axis_rt > 0.1) {
+            joystick_any_input = true;
+        }
+        // Check any button
+        if (active_joystick->button_a || active_joystick->button_b || 
+            active_joystick->button_x || active_joystick->button_y ||
+            active_joystick->button_lb || active_joystick->button_rb ||
+            active_joystick->button_start || active_joystick->button_back ||
+            active_joystick->button_left_stick || active_joystick->button_right_stick) {
+            joystick_any_input = true;
+        }
+    }
+    
+    if (joystick_connected && joystick_any_input) {
         // Left stick movement
         if (active_joystick->axis_x < -0.5) {
             game->keyboard.key_a_pressed = true;  // Turn left
@@ -941,13 +962,8 @@ void update_comet_buster(void *vis, double dt) {
     bool keyboard_active = visualizer->key_a_pressed || visualizer->key_d_pressed || 
                           visualizer->key_w_pressed || visualizer->key_s_pressed;
     
-    // Also disable mouse if joystick is being used for movement
-    bool joystick_movement_active = joystick_active && (
-        active_joystick->axis_x < -0.5 || active_joystick->axis_x > 0.5 ||
-        active_joystick->axis_y > 0.5 || active_joystick->axis_y < -0.5
-    );
-    
-    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joystick_movement_active;
+    // Disable mouse if ANY joystick input is active
+    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joystick_any_input;
     
     // Update game state
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);
