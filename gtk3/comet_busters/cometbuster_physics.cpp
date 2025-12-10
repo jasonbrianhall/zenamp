@@ -404,13 +404,27 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         target_vy = ship->vy;
                     }
                 } else if (ship->patrol_behavior_type == 1) {
-                    // Circular movement
+                    // Circular movement - move smoothly instead of teleporting
                     ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
-                    ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                    ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                    ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
-                    target_vx = -sin(ship->patrol_circle_angle) * base_speed;
-                    target_vy = cos(ship->patrol_circle_angle) * base_speed;
+                    
+                    // Calculate target position on circle
+                    double target_x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                    double target_y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                    
+                    // Move toward target instead of teleporting
+                    double dx_circle = target_x - ship->x;
+                    double dy_circle = target_y - ship->y;
+                    double dist_to_target = sqrt(dx_circle*dx_circle + dy_circle*dy_circle);
+                    
+                    if (dist_to_target > 0.1) {
+                        target_vx = (dx_circle / dist_to_target) * base_speed;
+                        target_vy = (dy_circle / dist_to_target) * base_speed;
+                    } else {
+                        target_vx = -sin(ship->patrol_circle_angle) * base_speed;
+                        target_vy = cos(ship->patrol_circle_angle) * base_speed;
+                    }
+                    
+                    ship->angle = atan2(target_vy, target_vx);  // Face direction of movement
                 } else {
                     // Evasive turns - use base_vx/base_vy for new direction
                     target_vx = ship->base_vx;
@@ -492,13 +506,27 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     target_vy = ship->base_vy * 0.7;
                 }
             } else if (ship->patrol_behavior_type == 1) {
-                // Coordinated circular movement around formation center
+                // Coordinated circular movement around formation center - move smoothly
                 ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
-                ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                ship->angle = ship->patrol_circle_angle + M_PI / 2.0;
-                target_vx = -sin(ship->patrol_circle_angle) * base_speed * 0.8;
-                target_vy = cos(ship->patrol_circle_angle) * base_speed * 0.8;
+                
+                // Calculate target position on circle
+                double target_x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                double target_y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                
+                // Move toward target instead of teleporting
+                double dx_circle = target_x - ship->x;
+                double dy_circle = target_y - ship->y;
+                double dist_to_target = sqrt(dx_circle*dx_circle + dy_circle*dy_circle);
+                
+                if (dist_to_target > 0.1) {
+                    target_vx = (dx_circle / dist_to_target) * base_speed * 0.8;
+                    target_vy = (dy_circle / dist_to_target) * base_speed * 0.8;
+                } else {
+                    target_vx = -sin(ship->patrol_circle_angle) * base_speed * 0.8;
+                    target_vy = cos(ship->patrol_circle_angle) * base_speed * 0.8;
+                }
+                
+                ship->angle = atan2(target_vy, target_vx);  // Face direction of movement
             } else {
                 // Coordinated direction change
                 target_vx = ship->base_vx * 0.8;
@@ -565,13 +593,27 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 }
                 ship->path_time += dt;
             } else if (ship->patrol_behavior_type == 1) {
-                // Circular movement
+                // Circular movement - move smoothly along circle, don't teleport
                 ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
-                ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
-                ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
-                target_vx = -sin(ship->patrol_circle_angle) * base_speed;
-                target_vy = cos(ship->patrol_circle_angle) * base_speed;
+                
+                // Calculate target position on circle
+                double target_x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                double target_y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
+                
+                // Move toward target position instead of teleporting
+                double dx_circle = target_x - ship->x;
+                double dy_circle = target_y - ship->y;
+                double dist_to_target = sqrt(dx_circle*dx_circle + dy_circle*dy_circle);
+                
+                if (dist_to_target > 0.1) {
+                    target_vx = (dx_circle / dist_to_target) * base_speed;
+                    target_vy = (dy_circle / dist_to_target) * base_speed;
+                } else {
+                    target_vx = -sin(ship->patrol_circle_angle) * base_speed;
+                    target_vy = cos(ship->patrol_circle_angle) * base_speed;
+                }
+                
+                ship->angle = atan2(target_vy, target_vx);  // Face direction of movement
             } else {
                 // Evasive turns
                 target_vx = ship->base_vx;
@@ -1416,24 +1458,33 @@ void update_comet_buster(void *vis, double dt) {
             double collision_dist = 15.0;  // Enemy ship collision radius
             
             if (dist < collision_dist) {
-                // Bullet is destroyed
-                bullet->active = false;
+                // Try to provoke blue ships first
+                bool was_provoked = comet_buster_hit_enemy_ship_provoke(game, i);
                 
-                // Ship takes damage from friendly fire (from OTHER ships)
-                if (target_ship->shield_health > 0) {
-                    target_ship->shield_health--;
-                    target_ship->shield_impact_angle = atan2(target_ship->y - bullet->y,
-                                                              target_ship->x - bullet->x);
-                    target_ship->shield_impact_timer = 0.2;
-                } else {
-                    // No shield - ship is destroyed by friendly fire
-                    comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
+                if (!was_provoked) {
+                    // Bullet destroys on impact
+                    bullet->active = false;
                     
-                    // Award player points for friendly fire destruction
-                    game->score += (int)(150 * game->score_multiplier);
-                    break;  // Exit inner loop since we destroyed the ship
+                    // Ship takes damage from friendly fire (from OTHER ships)
+                    if (target_ship->shield_health > 0) {
+                        target_ship->shield_health--;
+                        target_ship->shield_impact_angle = atan2(target_ship->y - bullet->y,
+                                                                  target_ship->x - bullet->x);
+                        target_ship->shield_impact_timer = 0.2;
+                    } else {
+                        // No shield - ship is destroyed by friendly fire
+                        comet_buster_destroy_enemy_ship(game, i, width, height, visualizer);
+                        
+                        // Award player points for friendly fire destruction
+                        game->score += (int)(150 * game->score_multiplier);
+                        break;  // Exit inner loop since we destroyed the ship
+                    }
+                    break;  // Bullet hit this ship, move to next bullet
+                } else {
+                    // Blue ship was provoked, bullet destroys on impact
+                    bullet->active = false;
+                    break;
                 }
-                break;  // Bullet hit this ship, move to next bullet
             }
         }
     }
