@@ -863,6 +863,10 @@ void update_comet_buster(void *vis, double dt) {
     if (!visualizer) return;
     
     CometBusterGame *game = &visualizer->comet_buster;
+
+    // Update joystick hardware state and sync to visualizer fields
+    joystick_manager_update(&visualizer->joystick_manager);
+    update_visualizer_joystick(visualizer);
     
     int mouse_x = visualizer->mouse_x;
     int mouse_y = visualizer->mouse_y;
@@ -884,7 +888,7 @@ void update_comet_buster(void *vis, double dt) {
     game->mouse_middle_pressed = visualizer->mouse_middle_pressed;
     
 #ifdef ExternalSound
-        // Copy arcade-style keyboard input state from visualizer
+    // Copy arcade-style keyboard input state from visualizer
     game->keyboard.key_a_pressed = visualizer->key_a_pressed;
     game->keyboard.key_d_pressed = visualizer->key_d_pressed;
     game->keyboard.key_w_pressed = visualizer->key_w_pressed;
@@ -894,10 +898,56 @@ void update_comet_buster(void *vis, double dt) {
     game->keyboard.key_space_pressed = visualizer->key_space_pressed;
     game->keyboard.key_ctrl_pressed = visualizer->key_ctrl_pressed;
     
+    // ========== JOYSTICK INPUT ==========
+    // Override keyboard with joystick if joystick is being used
+    JoystickState *active_joystick = joystick_manager_get_active(&visualizer->joystick_manager);
+    bool joystick_active = (active_joystick && active_joystick->connected);
+    
+    if (joystick_active) {
+        // Left stick movement
+        if (active_joystick->axis_x < -0.5) {
+            game->keyboard.key_a_pressed = true;  // Turn left
+        }
+        if (active_joystick->axis_x > 0.5) {
+            game->keyboard.key_d_pressed = true;  // Turn right
+        }
+        if (active_joystick->axis_y > 0.5) {
+            game->keyboard.key_w_pressed = true;  // Forward thrust
+        }
+        if (active_joystick->axis_y < -0.5) {
+            game->keyboard.key_s_pressed = true;  // Backward thrust
+        }
+        
+        // Firing (triggers and B button)
+        if (active_joystick->axis_lt > 0.3 || 
+            active_joystick->axis_rt > 0.3 || 
+            active_joystick->button_b) {
+            game->keyboard.key_ctrl_pressed = true;  // Fire
+        }
+        
+        // Special abilities (X/LB for boost)
+        if (active_joystick->button_x || active_joystick->button_lb) {
+            game->keyboard.key_space_pressed = true;  // Boost
+        }
+        
+        // Omnidirectional fire (Y/RB)
+        if (active_joystick->button_y || active_joystick->button_rb) {
+            game->keyboard.key_z_pressed = true;  // Omnidirectional fire
+        }
+    }
+    // ====================================
+    
     // If ANY keyboard movement key is pressed, disable mouse control immediately
     bool keyboard_active = visualizer->key_a_pressed || visualizer->key_d_pressed || 
                           visualizer->key_w_pressed || visualizer->key_s_pressed;
-    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active;
+    
+    // Also disable mouse if joystick is being used for movement
+    bool joystick_movement_active = joystick_active && (
+        active_joystick->axis_x < -0.5 || active_joystick->axis_x > 0.5 ||
+        active_joystick->axis_y > 0.5 || active_joystick->axis_y < -0.5
+    );
+    
+    bool mouse_active = visualizer->mouse_just_moved && !keyboard_active && !joystick_movement_active;
     
     // Update game state
     comet_buster_update_ship(game, dt, mouse_x, mouse_y, width, height, mouse_active);

@@ -364,3 +364,46 @@ GameOptions game_options_default(void) {
     
     return opts;
 }
+
+void update_visualizer_joystick(Visualizer *vis) {
+    if (!vis) return;
+    
+    JoystickState *js = joystick_manager_get_active(&vis->joystick_manager);
+    
+    if (!js || !js->connected) {
+        vis->joystick_stick_x = 0.0;
+        vis->joystick_stick_y = 0.0;
+        vis->joystick_stick_rx = 0.0;
+        vis->joystick_stick_ry = 0.0;
+        vis->joystick_trigger_lt = 0.0;
+        vis->joystick_trigger_rt = 0.0;
+        vis->joystick_button_a = false;
+        vis->joystick_button_b = false;
+        vis->joystick_button_x = false;
+        vis->joystick_button_y = false;
+        vis->joystick_button_lb = false;
+        vis->joystick_button_rb = false;
+        vis->joystick_button_start = false;
+        vis->joystick_button_back = false;
+        vis->joystick_button_left_stick = false;
+        vis->joystick_button_right_stick = false;
+        return;
+    }
+    
+    vis->joystick_stick_x = js->axis_x;
+    vis->joystick_stick_y = js->axis_y;
+    vis->joystick_stick_rx = js->axis_rx;
+    vis->joystick_stick_ry = js->axis_ry;
+    vis->joystick_trigger_lt = js->axis_lt;
+    vis->joystick_trigger_rt = js->axis_rt;
+    vis->joystick_button_a = js->button_a;
+    vis->joystick_button_b = js->button_b;
+    vis->joystick_button_x = js->button_x;
+    vis->joystick_button_y = js->button_y;
+    vis->joystick_button_lb = js->button_lb;
+    vis->joystick_button_rb = js->button_rb;
+    vis->joystick_button_start = js->button_start;
+    vis->joystick_button_back = js->button_back;
+    vis->joystick_button_left_stick = js->button_left_stick;
+    vis->joystick_button_right_stick = js->button_right_stick;
+}

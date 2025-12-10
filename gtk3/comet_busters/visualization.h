@@ -98,32 +98,56 @@ typedef struct {
     int width, height;
     double volume_level;
     CometBusterGame comet_buster;
-    AudioManager audio;              // Audio system
+    AudioManager audio;
     
     // Input handling
     int mouse_x;
     int mouse_y;
-    int last_mouse_x;               // Track last mouse position
+    int last_mouse_x;
     int last_mouse_y;
-    double mouse_movement_timer;    // Time since last mouse movement
-    bool mouse_just_moved;          // Did mouse move this frame?
+    double mouse_movement_timer;
+    bool mouse_just_moved;
     bool mouse_left_pressed;
     bool mouse_right_pressed;
     bool mouse_middle_pressed;
     
     // Arcade-style keyboard input
-    bool key_a_pressed;         // A - turn left
-    bool key_d_pressed;         // D - turn right
-    bool key_w_pressed;         // W - forward thrust
-    bool key_s_pressed;         // S - backward thrust
-    bool key_z_pressed;         // Z - omnidirectional fire
-    bool key_x_pressed;         // X - boost
-    bool key_space_pressed;     // SPACE - boost
-    bool key_ctrl_pressed;      // CTRL - fire
+    bool key_a_pressed;
+    bool key_d_pressed;
+    bool key_w_pressed;
+    bool key_s_pressed;
+    bool key_z_pressed;
+    bool key_x_pressed;
+    bool key_space_pressed;
+    bool key_ctrl_pressed;
     
-    // Joystick support
+    // Joystick manager
     JoystickManager joystick_manager;
     GameOptions options;
+        
+    // Joystick Analog Sticks (normalized -1.0 to 1.0)
+    double joystick_stick_x;        // Left stick X
+    double joystick_stick_y;        // Left stick Y
+    double joystick_stick_rx;       // Right stick X
+    double joystick_stick_ry;       // Right stick Y
+    
+    // Joystick Triggers (0.0 to 1.0)
+    double joystick_trigger_lt;     // Left trigger
+    double joystick_trigger_rt;     // Right trigger
+    
+    // Joystick Buttons
+    bool joystick_button_a;         // A button
+    bool joystick_button_b;         // B button
+    bool joystick_button_x;         // X button
+    bool joystick_button_y;         // Y button
+    bool joystick_button_lb;        // Left bumper
+    bool joystick_button_rb;        // Right bumper
+    bool joystick_button_start;     // Start button
+    bool joystick_button_back;      // Back button
+    bool joystick_button_left_stick;  // Left stick click
+    bool joystick_button_right_stick; // Right stick click
+    
+    // ====================================================
     
 } Visualizer;
 
@@ -195,5 +219,7 @@ void update_comet_buster(void *vis_ptr, double dt);
 void draw_comet_buster(void *vis_ptr, cairo_t *cr);
 void comet_buster_cleanup(CometBusterGame *game);
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer);
+void joystick_manager_update(JoystickManager *manager);
+void update_visualizer_joystick(Visualizer *vis);
 
 #endif
