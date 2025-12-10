@@ -119,7 +119,7 @@ bool comet_buster_splash_screen_input_detected(Visualizer *visualizer) {
     }
     
     // Any mouse click
-    if (visualizer->mouse_left_pressed) {
+    if (visualizer->mouse_left_pressed || visualizer->mouse_right_pressed || visualizer->mouse_middle_pressed || visualizer->key_ctrl_pressed || visualizer->joystick_button_a || visualizer->joystick_button_b || visualizer->joystick_button_x || visualizer->joystick_button_y) {
         return true;
     }
     
