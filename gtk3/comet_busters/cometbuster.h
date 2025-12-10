@@ -303,7 +303,6 @@ void comet_buster_update_bullets(CometBusterGame *game, double dt, int width, in
 void comet_buster_update_particles(CometBusterGame *game, double dt);
 void comet_buster_update_floating_text(CometBusterGame *game, double dt);
 void comet_buster_update_fuel(CometBusterGame *game, double dt);  // Advanced thrusters fuel system
-void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height);
 void comet_buster_update_enemy_bullets(CometBusterGame *game, double dt, int width, int height, void *vis);
 
 // Spawning

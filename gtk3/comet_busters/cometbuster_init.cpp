@@ -26,25 +26,7 @@ void comet_buster_cleanup(CometBusterGame *game) {
 void comet_buster_reset_game(CometBusterGame *game) {
     if (!game) return;
     
-    comet_buster_init_splash_screen(game, 1920, 1080); 
-    
-    // Clear arrays explicitly instead of memset to avoid compiler warnings
-    game->comet_count = 0;
-    game->bullet_count = 0;
-    game->particle_count = 0;
-    game->floating_text_count = 0;
-    game->high_score_count = 0;
-    game->enemy_ship_count = 0;
-    game->enemy_bullet_count = 0;
-    
-    // Initialize boss as inactive
-    game->boss_active = false;
-    game->boss.active = false;
-    game->spawn_queen.active = false;
-    game->spawn_queen.is_spawn_queen = false;
-    game->boss_spawn_timer = 0;
-    game->last_boss_wave = 0;  // Track which wave had the boss
-    
+    // PHASE 1: Initialize all game state variables FIRST
     // Initialize non-zero values - use defaults, will be set by visualizer if needed
     game->ship_x = 400.0;
     game->ship_y = 300.0;
@@ -74,13 +56,6 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->last_life_milestone = 0;  // Track score milestones for extra lives
     game->game_over = false;
     game->game_won = false;
-    
-    // Object counts
-    game->comet_count = 0;
-    game->bullet_count = 0;
-    game->particle_count = 0;
-    game->floating_text_count = 0;
-    game->high_score_count = 0;
     
     // Timing
     game->spawn_timer = 1.0;
@@ -117,9 +92,29 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->is_boosting = false;
     game->boost_thrust_timer = 0.0;
     
+    // PHASE 2: Clear object arrays
+    // IMPORTANT: Do this BEFORE splash screen spawning so we have a clean slate
+    game->comet_count = 0;
+    game->bullet_count = 0;
+    game->particle_count = 0;
+    game->floating_text_count = 0;
+    game->high_score_count = 0;
+    game->enemy_ship_count = 0;
+    game->enemy_bullet_count = 0;
+    
+    // Initialize boss as inactive (before splash screen so it can be activated by splash)
+    game->boss_active = false;
+    game->boss.active = false;
+    game->spawn_queen.active = false;
+    game->spawn_queen.is_spawn_queen = false;
+    game->boss_spawn_timer = 0;
+    game->last_boss_wave = 0;  // Track which wave had the boss
+    
+    // PHASE 3: Initialize splash screen (MUST BE LAST - spawns all the objects)
+    // This will spawn 18 comets + 3 more (boss) + 1 boss + 3 enemy ships
+    // These objects MUST NOT be cleared after this point!
+    comet_buster_init_splash_screen(game, 1920, 1080);
+    
     // Load high scores from file (if they exist)
     comet_buster_load_high_scores(game);
-    
-    // Spawn initial comets (with default screen size, will be updated on first update)
-    comet_buster_spawn_wave(game, 800, 600);
 }

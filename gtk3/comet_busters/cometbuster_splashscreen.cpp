@@ -45,9 +45,40 @@ void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int wid
     // Note: visualizer parameter is required for enemy ship update logic
     comet_buster_update_enemy_ships(game, dt, width, height, visualizer);
     
+    // Update enemy bullets fired by ships
+    comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);
+    
     // Update boss if active (so it animates on splash screen)
     if (game->boss_active) {
         comet_buster_update_boss(game, dt, width, height);
+    }
+    
+    // Update particles (explosions, etc.)
+    comet_buster_update_particles(game, dt);
+    
+    // Check collisions between enemy bullets and comets for visual effects
+    for (int i = 0; i < game->enemy_bullet_count; i++) {
+        if (!game->enemy_bullets[i].active) continue;
+        
+        Bullet *bullet = &game->enemy_bullets[i];
+        
+        for (int j = 0; j < game->comet_count; j++) {
+            if (!game->comets[j].active) continue;
+            
+            Comet *comet = &game->comets[j];
+            
+            if (comet_buster_check_bullet_comet(bullet, comet)) {
+                // Create visual impact
+                bullet->active = false;
+                
+                // Spawn particles at collision point
+                double px = (bullet->x + comet->x) / 2.0;
+                double py = (bullet->y + comet->y) / 2.0;
+                comet_buster_spawn_explosion(game, px, py, comet->frequency_band, 8);
+                
+                break;
+            }
+        }
     }
 }
 
@@ -75,6 +106,8 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     // Use existing game functions to draw all animated objects
     draw_comet_buster_comets(game, cr, width, height);
     draw_comet_buster_enemy_ships(game, cr, width, height);
+    draw_comet_buster_enemy_bullets(game, cr, width, height);  // Draw bullets from enemy ships
+    draw_comet_buster_particles(game, cr, width, height);      // Draw collision effects
     
     // Draw boss if active
     if (game->boss_active) {
