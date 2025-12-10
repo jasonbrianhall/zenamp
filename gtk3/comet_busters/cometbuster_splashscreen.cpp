@@ -7,6 +7,61 @@
 #include "cometbuster.h"
 #include "visualization.h"
 
+// ============================================================================
+// OPENING CRAWL TEXT - PROPER LINE BY LINE
+// ============================================================================
+
+static const char *OPENING_CRAWL_LINES[] = {
+    "",
+    "",
+    "COMET BUSTER",
+    "",
+    "In the not so distant future in a galaxy not so far away",
+    "",
+    "",
+    "The Kepler-442 Asteroid Field, once a",
+    "treasure trove of minerals, now lies in ruin.",
+    "Asteroids fracture, comets drift, factions clash.",
+    "",
+    "Red warships hunt without mercy.",
+    "Blue patrols guard with fragile honor.",
+    "Green drones strip-mine with ruthless speed.",
+    "And now... the PURPLE SENTINELS arrive—",
+    "enigmatic guardians with unknown intent.",
+    "",
+    "You fly the DESTINY—",
+    "an ancient warship of unknown origin,",
+    "reborn as a mining vessel,",
+    "armed with rapid-fire cannons,",
+    "advanced thrusters, and omnidirectional fire.",
+    "",
+    "It is fragile, yet fierce.",
+    "It carries no banner, no allegiance,",
+    "only the will to survive.",
+    "",
+    "But survival is not enough.",
+    "Beyond the factions loom colossal threats:",
+    "MEGA BOSS SHIPS, engines of annihilation,",
+    "whose presence darkens the field itself.",
+    "",
+    "And deeper still, from the void,",
+    "alien forces gather—",
+    "a tide that consumes all in its path.",
+    "",
+    "Your mission: endure the chaos,",
+    "outwit rival factions,",
+    "and face the horrors that await.",
+    "",
+    "The asteroid field is no longer a mine.",
+    "It is a crucible of war.",
+    "",
+    "Survive. Score. Ascend.",
+    "",
+    "",
+};
+
+#define NUM_CRAWL_LINES (sizeof(OPENING_CRAWL_LINES) / sizeof(OPENING_CRAWL_LINES[0]))
+
 // Initialize splash screen with lots of objects for impressive visuals
 void comet_buster_init_splash_screen(CometBusterGame *game, int width, int height) {
     if (!game) return;
@@ -15,11 +70,11 @@ void comet_buster_init_splash_screen(CometBusterGame *game, int width, int heigh
     game->splash_timer = 0.0;
     
     // Directly spawn lots of comets for impressive splash screen visuals
-    // Instead of relying on wave calculations, we spawn 18 comets directly
-    comet_buster_spawn_random_comets(game, 18, width, height);
+    // Instead of relying on wave calculations, we spawn 32 comets directly
+    comet_buster_spawn_random_comets(game, 32, width, height);
     
     // Spawn a boss to make the splash screen look dramatic and dynamic
-    comet_buster_spawn_boss(game, width, height);
+    //comet_buster_spawn_boss(game, width, height);
     
     // Spawn 3 enemy ships for additional visual variety
     for (int i = 0; i < 3; i++) {
@@ -82,7 +137,7 @@ void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int wid
     }
 }
 
-// Draw splash screen using existing game rendering functions
+// Draw splash screen with proper line-by-line scrolling crawl
 void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int width, int height) {
     if (!game || !game->splash_screen_active) return;
     
@@ -106,50 +161,151 @@ void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int wid
     // Use existing game functions to draw all animated objects
     draw_comet_buster_comets(game, cr, width, height);
     draw_comet_buster_enemy_ships(game, cr, width, height);
-    draw_comet_buster_enemy_bullets(game, cr, width, height);  // Draw bullets from enemy ships
-    draw_comet_buster_particles(game, cr, width, height);      // Draw collision effects
+    draw_comet_buster_enemy_bullets(game, cr, width, height);
+    draw_comet_buster_particles(game, cr, width, height);
     
     // Draw boss if active
     if (game->boss_active) {
         draw_comet_buster_boss(&game->boss, cr, width, height);
     }
     
-    // Draw title "COMET BUSTER"
-    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, 120.0);
+    // Dim the background with overlay for text visibility
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.3);
+    cairo_paint(cr);
     
-    // Text measurement for centering
-    cairo_text_extents_t extents;
-    cairo_text_extents(cr, "COMET BUSTER", &extents);
-    double title_x = (width - extents.width) / 2.0;
-    double title_y = height / 2.0;
-    
-    // Draw glowing text effect
-    for (int i = 5; i > 0; i--) {
-        double alpha = 0.1 * (5 - i) / 5.0;
-        cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, alpha);
-        cairo_move_to(cr, title_x, title_y);
-        cairo_show_text(cr, "COMET BUSTER");
+    // ===== OPENING CRAWL PHASE =====
+    // Duration: approximately 0-38 seconds (much longer to account for extended fade zones)
+    double scroll_speed = 1.0;  // seconds per line - SLOWER
+
+    if (game->splash_timer < 38.0) {
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 24.0);
+        
+        // Yellow Star Wars style text
+        cairo_set_source_rgb(cr, 1.0, 0.95, 0.0);
+        
+        // Calculate line height
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, "A", &extents);
+        double line_height = extents.height * 1.8;
+        
+        // Each line appears and scrolls from bottom to top SLOWLY
+        // Scroll speed: one line per 0.6 seconds (slower than before)
+        double lines_visible = (height + 200.0) / line_height;
+        
+        // Calculate which lines should be visible
+        double current_line_offset = (game->splash_timer / scroll_speed);
+        double fractional_offset = fmod(game->splash_timer, scroll_speed) / scroll_speed;
+        
+        // Draw all lines that could be visible
+        for (int i = 0; i < (int)lines_visible + 2; i++) {
+            int line_index = (int)current_line_offset + i;
+            if (line_index < 0 || line_index >= (int)NUM_CRAWL_LINES) continue;
+            
+            // Calculate Y position (lines scroll up from bottom to top)
+            double y_pos = height - (fractional_offset * line_height) + (i * line_height) - (current_line_offset * line_height);
+            
+            // Calculate fade for lines entering (bottom) and leaving (top) - MUCH LONGER FADE
+            double alpha = 1.0;
+            if (y_pos < 200.0) {
+                alpha = y_pos / 200.0;  // Fade in at top - MUCH LONGER (200px instead of 120px)
+            } else if (y_pos > height - 200.0) {
+                alpha = (height - y_pos) / 200.0;  // Fade out at bottom - MUCH LONGER
+            }
+            
+            if (alpha < 0.0) alpha = 0.0;
+            if (alpha > 1.0) alpha = 1.0;
+            
+            cairo_set_source_rgba(cr, 1.0, 0.95, 0.0, alpha);
+            
+            // Center the text
+            cairo_text_extents(cr, OPENING_CRAWL_LINES[line_index], &extents);
+            double x_pos = (width - extents.width) / 2.0;
+            
+            cairo_move_to(cr, x_pos, y_pos);
+            cairo_show_text(cr, OPENING_CRAWL_LINES[line_index]);
+        }
     }
-    
-    // Draw bright main title text
-    cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
-    cairo_move_to(cr, title_x, title_y);
-    cairo_show_text(cr, "COMET BUSTER");
-    
-    // Draw subtitle
-    cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(cr, 28.0);
-    
-    cairo_text_extents(cr, "Press any key to start", &extents);
-    double subtitle_x = (width - extents.width) / 2.0;
-    double subtitle_y = title_y + 80;
-    
-    // Blinking text effect for subtitle
-    double blink_alpha = 0.5 + 0.5 * sin(game->splash_timer * 3.0);
-    cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, blink_alpha);
-    cairo_move_to(cr, subtitle_x, subtitle_y);
-    cairo_show_text(cr, "Press any key to start");
+    // ===== TITLE PHASE =====
+    // After crawl ends, show big GALAXY RAIDERS title
+    else if (game->splash_timer < 43.0) {
+        // Fade in the title
+        double phase_timer = game->splash_timer - 38.0;
+        double title_alpha = phase_timer / 2.0;  // Fade in over 2 seconds
+        if (title_alpha > 1.0) title_alpha = 1.0;
+        
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 120.0);
+        
+        // Draw glowing text effect
+        for (int i = 5; i > 0; i--) {
+            double alpha = 0.1 * (5 - i) / 5.0 * title_alpha;
+            cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, alpha);
+            
+            cairo_text_extents_t extents;
+            cairo_text_extents(cr, "COMET BUSTERS", &extents);
+            double title_x = (width - extents.width) / 2.0;
+            double title_y = height / 2.0 + 20;
+            
+            cairo_move_to(cr, title_x, title_y);
+            cairo_show_text(cr, "COMET BUSTERS");
+        }
+        
+        // Draw bright main title text
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, "COMET BUSTERS", &extents);
+        double title_x = (width - extents.width) / 2.0;
+        double title_y = height / 2.0 + 20;
+        
+        cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, title_alpha);
+        cairo_move_to(cr, title_x, title_y);
+        cairo_show_text(cr, "COMET BUSTERS");
+        
+        // Draw subtitle
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 28.0);
+        
+        cairo_text_extents(cr, "Press fire key to start", &extents);
+        double subtitle_x = (width - extents.width) / 2.0;
+        double subtitle_y = title_y + 80;
+        
+        // Blinking text effect for subtitle
+        double blink_alpha = 0.5 + 0.5 * sin(game->splash_timer * 3.0);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, blink_alpha * title_alpha);
+        cairo_move_to(cr, subtitle_x, subtitle_y);
+        cairo_show_text(cr, "Press fire key to start");
+    }
+    // ===== WAIT PHASE =====
+    // Just show the title and wait for input
+    else {
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 120.0);
+        
+        // Full brightness
+        cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
+        
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, "COMET BUSTERS", &extents);
+        double title_x = (width - extents.width) / 2.0;
+        double title_y = height / 2.0 + 20;
+        
+        cairo_move_to(cr, title_x, title_y);
+        cairo_show_text(cr, "COMET BUSTERS");
+        
+        // Draw subtitle
+        cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 28.0);
+        
+        cairo_text_extents(cr, "Press fire key to start", &extents);
+        double subtitle_x = (width - extents.width) / 2.0;
+        double subtitle_y = title_y + 80;
+        
+        // Blinking text effect for subtitle
+        double blink_alpha = 0.5 + 0.5 * sin(game->splash_timer * 3.0);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, blink_alpha);
+        cairo_move_to(cr, subtitle_x, subtitle_y);
+        cairo_show_text(cr, "Press fire key to start");
+    }
 }
 
 // Check if splash screen should exit (any key pressed)
