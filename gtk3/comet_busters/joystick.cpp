@@ -366,11 +366,20 @@ GameOptions game_options_default(void) {
 }
 
 void update_visualizer_joystick(Visualizer *vis) {
-    if (!vis) return;
+    if (!vis) {
+        fprintf(stderr, "[JOYSTICK] ERROR: vis pointer is NULL\n");
+        return;
+    }
+    
+    fprintf(stdout, "[JOYSTICK] Joystick manager num_joysticks: %d, active: %d\n", 
+            vis->joystick_manager.num_joysticks, vis->joystick_manager.active_joystick);
     
     JoystickState *js = joystick_manager_get_active(&vis->joystick_manager);
     
-    if (!js || !js->connected) {
+    fprintf(stdout, "[JOYSTICK] Got active joystick pointer: %p\n", (void*)js);
+    
+    if (!js) {
+        fprintf(stderr, "[JOYSTICK] ERROR: joystick pointer is NULL\n");
         vis->joystick_stick_x = 0.0;
         vis->joystick_stick_y = 0.0;
         vis->joystick_stick_rx = 0.0;
@@ -390,6 +399,36 @@ void update_visualizer_joystick(Visualizer *vis) {
         return;
     }
     
+    if (!js->connected) {
+        fprintf(stdout, "[JOYSTICK] Joystick not connected (device_id=%d)\n", js->device_id);
+        vis->joystick_stick_x = 0.0;
+        vis->joystick_stick_y = 0.0;
+        vis->joystick_stick_rx = 0.0;
+        vis->joystick_stick_ry = 0.0;
+        vis->joystick_trigger_lt = 0.0;
+        vis->joystick_trigger_rt = 0.0;
+        vis->joystick_button_a = false;
+        vis->joystick_button_b = false;
+        vis->joystick_button_x = false;
+        vis->joystick_button_y = false;
+        vis->joystick_button_lb = false;
+        vis->joystick_button_rb = false;
+        vis->joystick_button_start = false;
+        vis->joystick_button_back = false;
+        vis->joystick_button_left_stick = false;
+        vis->joystick_button_right_stick = false;
+        return;
+    }
+    
+    fprintf(stdout, "[JOYSTICK] Connected: %s (device_id=%d)\n", js->name, js->device_id);
+    fprintf(stdout, "[JOYSTICK] Axes: X=%.2f Y=%.2f RX=%.2f RY=%.2f LT=%.2f RT=%.2f\n", 
+            js->axis_x, js->axis_y, js->axis_rx, js->axis_ry, js->axis_lt, js->axis_rt);
+    fprintf(stdout, "[JOYSTICK] Buttons: A=%d B=%d X=%d Y=%d LB=%d RB=%d Start=%d Back=%d\n",
+            js->button_a, js->button_b, js->button_x, js->button_y, 
+            js->button_lb, js->button_rb, js->button_start, js->button_back);
+    fprintf(stdout, "[JOYSTICK] Stick clicks: L=%d R=%d\n", 
+            js->button_left_stick, js->button_right_stick);
+    
     vis->joystick_stick_x = js->axis_x;
     vis->joystick_stick_y = js->axis_y;
     vis->joystick_stick_rx = js->axis_rx;
@@ -406,4 +445,7 @@ void update_visualizer_joystick(Visualizer *vis) {
     vis->joystick_button_back = js->button_back;
     vis->joystick_button_left_stick = js->button_left_stick;
     vis->joystick_button_right_stick = js->button_right_stick;
+    
+    fprintf(stdout, "[JOYSTICK] Copied to visualizer fields\n");
 }
+
