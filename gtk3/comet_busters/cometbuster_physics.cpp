@@ -1492,7 +1492,17 @@ void update_comet_buster(void *vis, double dt) {
     // Check enemy bullet-ship collisions
     for (int i = 0; i < game->enemy_bullet_count; i++) {
         if (comet_buster_check_enemy_bullet_ship(game, &game->enemy_bullets[i])) {
+            fprintf(stdout, "[COLLISION] Enemy bullet hit player ship! Bullet removed.\n");
             comet_buster_on_ship_hit(game, visualizer);
+            // Bullet disappears on impact with player ship
+            game->enemy_bullets[i].active = false;
+            // Swap with last and remove
+            if (i != game->enemy_bullet_count - 1) {
+                game->enemy_bullets[i] = game->enemy_bullets[game->enemy_bullet_count - 1];
+            }
+            game->enemy_bullet_count--;
+            i--;
+            continue;
         }
     }
     
@@ -1644,7 +1654,8 @@ void update_comet_buster(void *vis, double dt) {
                     break;
                 }
             }
-            // Also check Spawn Queen
+            // Also check Spawn Queen - NOTE: Spawn Queen is IMMUNE to asteroid damage!
+            // She can only be damaged by player bullets
             else if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
                 SpawnQueenBoss *queen = &game->spawn_queen;
                 double dx = queen->x - comet->x;
@@ -1652,50 +1663,12 @@ void update_comet_buster(void *vis, double dt) {
                 double dist = sqrt(dx*dx + dy*dy);
                 double collision_dist = 60.0 + comet->radius;  // Queen is larger (~60px)
                 
+                // Spawn Queen is IMMUNE to asteroid damage - asteroids just pass through
+                // IMPORTANT: The Spawn Queen (Mothership) cannot be damaged by asteroids,
+                // only by direct player gunfire. This is by design - asteroids are her weapon!
                 if (dist < collision_dist) {
-                    // Queen takes damage from comet collision
-                    // Damage scales with comet size
-                    int comet_damage = 2;  // Base damage
-                    switch (comet->size) {
-                        case COMET_SMALL:   comet_damage = 1; break;
-                        case COMET_MEDIUM:  comet_damage = 2; break;
-                        case COMET_LARGE:   comet_damage = 3; break;
-                        case COMET_MEGA:    comet_damage = 4; break;
-                        case COMET_SPECIAL: comet_damage = 4; break;
-                        default:            comet_damage = 2; break;
-                    }
-                    
-                    if (queen->shield_health > 0) {
-                        // Shield absorbs damage from smaller comets, reduces damage from larger ones
-                        queen->shield_health--;  // Shield always takes 1 hit
-                        
-                        // Large comets penetrate shields
-                        if (comet->size >= COMET_LARGE) {
-                            queen->health -= 1;  // Penetrating damage
-                        }
-                    } else {
-                        // Shield down - full damage scaled by comet size
-                        queen->health -= comet_damage;
-                    }
-                    
-                    queen->damage_flash_timer = 0.1;
-                    
-                    // On splash screen, don't apply collision knockback to queen
-                    // The comet is still destroyed normally, but queen doesn't move backwards
-                    if (!game->splash_screen_active) {
-                        // Apply collision impulse to queen to push it back (normal gameplay)
-                        double nx = (queen->x - comet->x) / dist;
-                        double ny = (queen->y - comet->y) / dist;
-                        queen->vx += nx * comet->radius;  // Push queen away from comet
-                        queen->vy += ny * comet->radius;
-                    }
-                    
-                    // Comet is destroyed
+                    // Simply destroy the comet, but do NOT damage the queen
                     comet_buster_destroy_comet(game, j, width, height, visualizer);
-                    
-                    if (queen->health <= 0) {
-                        comet_buster_destroy_spawn_queen(game, width, height, visualizer);
-                    }
                     break;
                 }
             }
@@ -1735,6 +1708,21 @@ void update_comet_buster(void *vis, double dt) {
             
             if (dist < collision_dist) {
                 comet_buster_on_ship_hit(game, visualizer);
+                
+                // Push player away from Spawn Queen to prevent clipping inside
+                if (dist > 0.1) {
+                    double nx = dx / dist;  // Normal vector
+                    double ny = dy / dist;
+                    
+                    // Push player to safe distance
+                    double push_distance = collision_dist + 5.0;  // Extra buffer
+                    game->ship_x = game->spawn_queen.x + nx * push_distance;
+                    game->ship_y = game->spawn_queen.y + ny * push_distance;
+                    
+                    // Also apply knockback velocity
+                    game->ship_vx = nx * 200.0;  // Push away at 200 px/s
+                    game->ship_vy = ny * 200.0;
+                }
             }
         }
         // Regular Death Star boss collision
@@ -1791,6 +1779,21 @@ void update_comet_buster(void *vis, double dt) {
             
             if (dist < collision_dist) {
                 comet_buster_on_ship_hit(game, visualizer);
+                
+                // Push player away from boss to prevent clipping inside
+                if (dist > 0.1) {
+                    double nx = dx / dist;  // Normal vector
+                    double ny = dy / dist;
+                    
+                    // Push player to safe distance
+                    double push_distance = collision_dist + 5.0;  // Extra buffer
+                    game->ship_x = game->boss.x + nx * push_distance;
+                    game->ship_y = game->boss.y + ny * push_distance;
+                    
+                    // Also apply knockback velocity
+                    game->ship_vx = nx * 200.0;  // Push away at 200 px/s
+                    game->ship_vy = ny * 200.0;
+                }
             }
         }
     }
