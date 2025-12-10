@@ -98,6 +98,37 @@ bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b) {
     return dist < 15.0;  // Player ship collision radius
 }
 
+/**
+ * Check if an enemy bullet hits another enemy ship
+ * Returns true if bullet hit a ship (and handles the collision)
+ * Returns -1 if hit the ship that fired the bullet (friendly fire - ignore)
+ * Returns the index of the hit ship, or -1 if no hit or friendly fire
+ */
+int comet_buster_check_enemy_bullet_enemy_ship(CometBusterGame *game, Bullet *b) {
+    if (!b->active) return -1;
+    
+    // Check collision with all enemy ships
+    for (int i = 0; i < game->enemy_ship_count; i++) {
+        EnemyShip *ship = &game->enemy_ships[i];
+        
+        if (!ship->active) continue;
+        
+        // ← KEY FIX: Don't hit the ship that fired this bullet (prevent self-damage)
+        if (b->owner_ship_id == i) continue;
+        
+        double dx = ship->x - b->x;
+        double dy = ship->y - b->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        
+        // Enemy ship collision radius is 15 pixels
+        if (dist < 15.0) {
+            return i;  // Return the ship index that was hit
+        }
+    }
+    
+    return -1;  // No hit
+}
+
 void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height, void *vis) {
     (void)width;
     (void)height;

@@ -310,21 +310,26 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
         }
         
         if (ship->ship_type == 1) {
-            // AGGRESSIVE RED SHIP: Chase player
+            // AGGRESSIVE RED SHIP: Chase player with smooth turning
             double dx = game->ship_x - ship->x;
             double dy = game->ship_y - ship->y;
             double dist_to_player = sqrt(dx*dx + dy*dy);
             
             if (dist_to_player > 0.1) {
-                // Move toward player at constant speed
+                // Move toward player at constant speed with smooth turning
                 double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
                 if (base_speed < 1.0) base_speed = 100.0;  // Default speed if not set
                 
-                ship->vx = (dx / dist_to_player) * base_speed;
-                ship->vy = (dy / dist_to_player) * base_speed;
+                double target_vx = (dx / dist_to_player) * base_speed;
+                double target_vy = (dy / dist_to_player) * base_speed;
+                
+                // Smooth turning: red ships turn faster when chasing
+                double turn_rate = 0.20;  // Red ships are aggressive, turn quickly
+                ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+                ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
                 
                 // Update angle to face player
-                ship->angle = atan2(dy, dx);
+                ship->angle = atan2(ship->vy, ship->vx);
             }
         } else if (ship->ship_type == 2) {
             // HUNTER GREEN SHIP: Follow sine wave, but chase player if close
@@ -335,13 +340,18 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
             double chase_range = 300.0;  // Switch to chasing if player within 300px
             
             if (dist_to_player < chase_range && dist_to_player > 0.1) {
-                // Chase player
+                // Chase player - with smooth turning
                 double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
                 if (base_speed < 1.0) base_speed = 90.0;
                 
-                ship->vx = (dx / dist_to_player) * base_speed;
-                ship->vy = (dy / dist_to_player) * base_speed;
-                ship->angle = atan2(dy, dx);
+                double target_vx = (dx / dist_to_player) * base_speed;
+                double target_vy = (dy / dist_to_player) * base_speed;
+                
+                // Smooth turning: blend current velocity with target direction
+                double turn_rate = 0.15;  // 0.0-1.0, higher = snappier, lower = smoother
+                ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+                ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
+                ship->angle = atan2(ship->vy, ship->vx);
             } else {
                 // Update patrol behavior
                 ship->patrol_behavior_timer += dt;
@@ -375,6 +385,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 
                 // Apply patrol behavior
                 double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+                double target_vx, target_vy;
                 
                 if (ship->patrol_behavior_type == 0) {
                     // Straight movement with gentle sine wave
@@ -386,9 +397,11 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         double wave_amplitude = 40.0;
                         double wave_frequency = 1.2;
                         double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
-                        ship->vx = dir_x * base_speed + perp_x * sine_offset;
-                        ship->vy = dir_y * base_speed + perp_y * sine_offset;
-                        ship->angle = atan2(ship->vy, ship->vx);
+                        target_vx = dir_x * base_speed + perp_x * sine_offset;
+                        target_vy = dir_y * base_speed + perp_y * sine_offset;
+                    } else {
+                        target_vx = ship->vx;
+                        target_vy = ship->vy;
                     }
                 } else if (ship->patrol_behavior_type == 1) {
                     // Circular movement
@@ -396,14 +409,19 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                     ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                     ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
-                    ship->vx = -sin(ship->patrol_circle_angle) * base_speed;
-                    ship->vy = cos(ship->patrol_circle_angle) * base_speed;
+                    target_vx = -sin(ship->patrol_circle_angle) * base_speed;
+                    target_vy = cos(ship->patrol_circle_angle) * base_speed;
                 } else {
                     // Evasive turns - use base_vx/base_vy for new direction
-                    ship->vx = ship->base_vx;
-                    ship->vy = ship->base_vy;
-                    ship->angle = atan2(ship->vy, ship->vx);
+                    target_vx = ship->base_vx;
+                    target_vy = ship->base_vy;
                 }
+                
+                // Smooth turning towards target velocity
+                double turn_rate = 0.12;  // Smoother for patrol behaviors
+                ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+                ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
+                ship->angle = atan2(ship->vy, ship->vx);
             }
         } else if (ship->ship_type == 3) {
             // SENTINEL PURPLE SHIP: Formation-based with occasional coordinated maneuvers
@@ -457,6 +475,8 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
             double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
             if (base_speed < 1.0) base_speed = 60.0;
             
+            double target_vx, target_vy;
+            
             if (ship->patrol_behavior_type == 0) {
                 // Standard formation movement with gentle spacing correction
                 double dx_formation = formation_center_x - ship->x;
@@ -465,27 +485,31 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 
                 double correction_factor = 0.08 * ship->formation_cohesion;
                 if (dist_to_center > 100.0 && dist_to_center > 0.1) {
-                    ship->vx = ship->base_vx * 0.7 + (dx_formation / dist_to_center) * base_speed * correction_factor;
-                    ship->vy = ship->base_vy * 0.7 + (dy_formation / dist_to_center) * base_speed * correction_factor;
+                    target_vx = ship->base_vx * 0.7 + (dx_formation / dist_to_center) * base_speed * correction_factor;
+                    target_vy = ship->base_vy * 0.7 + (dy_formation / dist_to_center) * base_speed * correction_factor;
                 } else {
-                    ship->vx = ship->base_vx * 0.7;
-                    ship->vy = ship->base_vy * 0.7;
+                    target_vx = ship->base_vx * 0.7;
+                    target_vy = ship->base_vy * 0.7;
                 }
-                ship->angle = atan2(ship->vy, ship->vx);
             } else if (ship->patrol_behavior_type == 1) {
                 // Coordinated circular movement around formation center
                 ship->patrol_circle_angle += (base_speed / ship->patrol_circle_radius) * dt;
                 ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                 ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                 ship->angle = ship->patrol_circle_angle + M_PI / 2.0;
-                ship->vx = -sin(ship->patrol_circle_angle) * base_speed * 0.8;
-                ship->vy = cos(ship->patrol_circle_angle) * base_speed * 0.8;
+                target_vx = -sin(ship->patrol_circle_angle) * base_speed * 0.8;
+                target_vy = cos(ship->patrol_circle_angle) * base_speed * 0.8;
             } else {
                 // Coordinated direction change
-                ship->vx = ship->base_vx * 0.8;
-                ship->vy = ship->base_vy * 0.8;
-                ship->angle = atan2(ship->vy, ship->vx);
+                target_vx = ship->base_vx * 0.8;
+                target_vy = ship->base_vy * 0.8;
             }
+            
+            // Smooth turning towards target velocity
+            double turn_rate = 0.10;  // Smooth turning for formation flights
+            ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+            ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
+            ship->angle = atan2(ship->vy, ship->vx);
         } else {
             // PATROL BLUE SHIP: More dynamic patrol with occasional evasive maneuvers
             ship->patrol_behavior_timer += dt;
@@ -521,6 +545,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
             
             // Apply patrol behavior
             double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+            double target_vx, target_vy;
             
             if (ship->patrol_behavior_type == 0) {
                 // Straight movement with sine wave oscillation
@@ -532,9 +557,11 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     double wave_amplitude = 50.0;
                     double wave_frequency = 1.5;
                     double sine_offset = sin(ship->path_time * wave_frequency * M_PI) * wave_amplitude;
-                    ship->vx = dir_x * base_speed + perp_x * sine_offset;
-                    ship->vy = dir_y * base_speed + perp_y * sine_offset;
-                    ship->angle = atan2(ship->vy, ship->vx);
+                    target_vx = dir_x * base_speed + perp_x * sine_offset;
+                    target_vy = dir_y * base_speed + perp_y * sine_offset;
+                } else {
+                    target_vx = ship->vx;
+                    target_vy = ship->vy;
                 }
                 ship->path_time += dt;
             } else if (ship->patrol_behavior_type == 1) {
@@ -543,14 +570,19 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 ship->x = ship->patrol_circle_center_x + cos(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                 ship->y = ship->patrol_circle_center_y + sin(ship->patrol_circle_angle) * ship->patrol_circle_radius;
                 ship->angle = ship->patrol_circle_angle + M_PI / 2.0;  // Face tangent to circle
-                ship->vx = -sin(ship->patrol_circle_angle) * base_speed;
-                ship->vy = cos(ship->patrol_circle_angle) * base_speed;
+                target_vx = -sin(ship->patrol_circle_angle) * base_speed;
+                target_vy = cos(ship->patrol_circle_angle) * base_speed;
             } else {
                 // Evasive turns
-                ship->vx = ship->base_vx;
-                ship->vy = ship->base_vy;
-                ship->angle = atan2(ship->vy, ship->vx);
+                target_vx = ship->base_vx;
+                target_vy = ship->base_vy;
             }
+            
+            // Smooth turning towards target velocity
+            double turn_rate = 0.14;  // Slightly sharper for blue ships, less formation-locked
+            ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+            ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
+            ship->angle = atan2(ship->vy, ship->vx);
         }
         
         // Emergency collision avoidance (only when VERY close)
@@ -627,7 +659,8 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     double vx = (dx / dist) * bullet_speed;
                     double vy = (dy / dist) * bullet_speed;
                     
-                    comet_buster_spawn_enemy_bullet(game, ship->x, ship->y, vx, vy);
+                    // Pass ship index (i) so bullet knows who fired it
+                    comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
                     
                     // Play alien fire sound
 #ifdef ExternalSound
@@ -641,14 +674,63 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                 }
             }
         } else if (ship->ship_type == 2) {
-            // GREEN SHIPS: Shoot at nearest comet VERY fast, OR at player if close
-            double chase_range = 300.0;  // Range to start shooting at player
+            // GREEN SHIPS: Shoot at blue ships if close (to provoke them), OR at nearest comet VERY fast, OR at player if close
+            double provoke_range = 200.0;  // Range to shoot at blue ships
+            double chase_range = 300.0;    // Range to start shooting at player
             double dx_player = game->ship_x - ship->x;
             double dy_player = game->ship_y - ship->y;
             double dist_to_player = sqrt(dx_player*dx_player + dy_player*dy_player);
             
-            // Check if player is within range
-            if (dist_to_player < chase_range) {
+            // Priority 1: Try to shoot at nearby blue ships to provoke them
+            bool found_blue_ship = false;
+            int nearest_blue_idx = -1;
+            double nearest_blue_dist = 1e9;
+            
+            for (int j = 0; j < game->enemy_ship_count; j++) {
+                EnemyShip *target_ship = &game->enemy_ships[j];
+                if (!target_ship->active || target_ship->ship_type != 0) continue;  // Only target blue ships (type 0)
+                
+                double dx = target_ship->x - ship->x;
+                double dy = target_ship->y - ship->y;
+                double dist = sqrt(dx*dx + dy*dy);
+                
+                if (dist < provoke_range && dist < nearest_blue_dist) {
+                    nearest_blue_dist = dist;
+                    nearest_blue_idx = j;
+                    found_blue_ship = true;
+                }
+            }
+            
+            if (found_blue_ship) {
+                // Shoot at the blue ship to provoke it
+                ship->shoot_cooldown -= dt;
+                if (ship->shoot_cooldown <= 0) {
+                    EnemyShip *target = &game->enemy_ships[nearest_blue_idx];
+                    double dx = target->x - ship->x;
+                    double dy = target->y - ship->y;
+                    double dist = sqrt(dx*dx + dy*dy);
+                    
+                    if (dist > 0.01) {
+                        double bullet_speed = 150.0;
+                        double vx = (dx / dist) * bullet_speed;
+                        double vy = (dy / dist) * bullet_speed;
+                        
+                        comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
+                        
+                        // Play alien fire sound
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                        }
+#endif
+                        
+                        // Green ships shoot VERY fast when provoking
+                        ship->shoot_cooldown = 0.2 + (rand() % 25) / 100.0;  // 0.2-0.45 sec
+                    }
+                }
+            }
+            // Priority 2: Check if player is within range
+            else if (dist_to_player < chase_range) {
                 // Shoot at player
                 ship->shoot_cooldown -= dt;
                 if (ship->shoot_cooldown <= 0) {
@@ -670,8 +752,9 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                         ship->shoot_cooldown = 0.15 + (rand() % 25) / 100.0;  // 0.15-0.4 sec (very fast!)
                     }
                 }
-            } else if (game->comet_count > 0) {
-                // Player not in range, shoot at nearest comet instead
+            }
+            // Priority 3: Shoot at nearest comet
+            else if (game->comet_count > 0) {
                 ship->shoot_cooldown -= dt;
                 if (ship->shoot_cooldown <= 0) {
                     // Find nearest comet
@@ -719,6 +802,110 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
                     } else {
                         // Reload even if no target in range
                         ship->shoot_cooldown = 0.3;
+                    }
+                }
+            }
+        } else if (ship->ship_type == 3) {
+            // PURPLE SENTINEL SHIPS: Shoot at blue ships if close (to provoke them), OR at nearest comet
+            double provoke_range = 200.0;  // Range to shoot at blue ships
+            
+            // Priority 1: Try to shoot at nearby blue ships to provoke them
+            bool found_blue_ship = false;
+            int nearest_blue_idx = -1;
+            double nearest_blue_dist = 1e9;
+            
+            for (int j = 0; j < game->enemy_ship_count; j++) {
+                EnemyShip *target_ship = &game->enemy_ships[j];
+                if (!target_ship->active || target_ship->ship_type != 0) continue;  // Only target blue ships (type 0)
+                
+                double dx = target_ship->x - ship->x;
+                double dy = target_ship->y - ship->y;
+                double dist = sqrt(dx*dx + dy*dy);
+                
+                if (dist < provoke_range && dist < nearest_blue_dist) {
+                    nearest_blue_dist = dist;
+                    nearest_blue_idx = j;
+                    found_blue_ship = true;
+                }
+            }
+            
+            if (found_blue_ship) {
+                // Shoot at the blue ship to provoke it
+                ship->shoot_cooldown -= dt;
+                if (ship->shoot_cooldown <= 0) {
+                    EnemyShip *target = &game->enemy_ships[nearest_blue_idx];
+                    double dx = target->x - ship->x;
+                    double dy = target->y - ship->y;
+                    double dist = sqrt(dx*dx + dy*dy);
+                    
+                    if (dist > 0.01) {
+                        double bullet_speed = 150.0;
+                        double vx = (dx / dist) * bullet_speed;
+                        double vy = (dy / dist) * bullet_speed;
+                        
+                        comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
+                        
+                        // Play alien fire sound
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                        }
+#endif
+                        
+                        // Purple ships shoot fairly fast when provoking
+                        ship->shoot_cooldown = 0.4 + (rand() % 30) / 100.0;  // 0.4-0.7 sec
+                    }
+                }
+            }
+            // Priority 2: Shoot at nearest comet
+            else if (game->comet_count > 0) {
+                ship->shoot_cooldown -= dt;
+                if (ship->shoot_cooldown <= 0) {
+                    // Find nearest comet
+                    int nearest_comet_idx = -1;
+                    double nearest_dist = 1e9;
+                    
+                    for (int j = 0; j < game->comet_count; j++) {
+                        Comet *comet = &game->comets[j];
+                        if (!comet->active) continue;
+                        
+                        double dx = comet->x - ship->x;
+                        double dy = comet->y - ship->y;
+                        double dist = sqrt(dx*dx + dy*dy);
+                        
+                        if (dist < nearest_dist) {
+                            nearest_dist = dist;
+                            nearest_comet_idx = j;
+                        }
+                    }
+                    
+                    // Shoot at nearest comet if in range
+                    if (nearest_comet_idx >= 0 && nearest_dist < 600.0) {
+                        Comet *target = &game->comets[nearest_comet_idx];
+                        double dx = target->x - ship->x;
+                        double dy = target->y - ship->y;
+                        double dist = sqrt(dx*dx + dy*dy);
+                        
+                        if (dist > 0.01) {
+                            double bullet_speed = 150.0;
+                            double vx = (dx / dist) * bullet_speed;
+                            double vy = (dy / dist) * bullet_speed;
+                            
+                            comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, i);
+                            
+                            // Play alien fire sound
+#ifdef ExternalSound
+                            if (visualizer && visualizer->audio.sfx_alien_fire && !game->splash_screen_active) {
+                                audio_play_sound(&visualizer->audio, visualizer->audio.sfx_alien_fire);
+                            }
+#endif
+                            
+                            // Purple ships shoot at moderate speed
+                            ship->shoot_cooldown = 0.5 + (rand() % 30) / 100.0;  // 0.5-0.8 sec
+                        }
+                    } else {
+                        // Reload even if no target in range
+                        ship->shoot_cooldown = 0.5;
                     }
                 }
             }

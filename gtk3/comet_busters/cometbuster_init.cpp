@@ -24,6 +24,10 @@ void comet_buster_cleanup(CometBusterGame *game) {
 }
 
 void comet_buster_reset_game(CometBusterGame *game) {
+    comet_buster_reset_game_with_splash(game, true);
+}
+
+void comet_buster_reset_game_with_splash(CometBusterGame *game, bool show_splash) {
     if (!game) return;
     
     // PHASE 1: Initialize all game state variables FIRST
@@ -110,13 +114,12 @@ void comet_buster_reset_game(CometBusterGame *game) {
     game->boss_spawn_timer = 0;
     game->last_boss_wave = 0;  // Track which wave had the boss
     
-    // PHASE 3: Initialize splash screen (MUST BE LAST - spawns all the objects)
-    // This will spawn 18 comets + 3 more (boss) + 1 boss + 3 enemy ships
-    // These objects MUST NOT be cleared after this point!
-
+    // PHASE 3: Initialize splash screen only if requested
+    if (show_splash) {
 #ifdef ExternalSound
-    comet_buster_init_splash_screen(game, 1920, 1080);
+        comet_buster_init_splash_screen(game, 1920, 1080);
 #endif
+    }
     
     // Load high scores from file (if they exist)
     comet_buster_load_high_scores(game);

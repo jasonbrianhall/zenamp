@@ -301,6 +301,7 @@ typedef struct {
 void init_comet_buster_system(void *vis);
 void comet_buster_cleanup(CometBusterGame *game);
 void comet_buster_reset_game(CometBusterGame *game);
+void comet_buster_reset_game_with_splash(CometBusterGame *game, bool show_splash);
 
 // Main update
 void update_comet_buster(void *vis, double dt);
@@ -354,6 +355,7 @@ void comet_buster_handle_comet_collision(Comet *c1, Comet *c2, double dx, double
 void comet_buster_destroy_comet(CometBusterGame *game, int comet_index, int width, int height, void *vis);
 bool comet_buster_check_bullet_enemy_ship(Bullet *b, EnemyShip *e);
 bool comet_buster_check_enemy_bullet_ship(CometBusterGame *game, Bullet *b);
+int comet_buster_check_enemy_bullet_enemy_ship(CometBusterGame *game, Bullet *b);
 void comet_buster_destroy_enemy_ship(CometBusterGame *game, int ship_index, int width, int height, void *vis);
 bool comet_buster_hit_enemy_ship_provoke(CometBusterGame *game, int ship_index);  // New: provoke blue ships
 

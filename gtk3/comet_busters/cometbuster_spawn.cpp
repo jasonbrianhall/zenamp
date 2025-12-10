@@ -515,6 +515,9 @@ void comet_buster_spawn_enemy_bullet_from_ship(CometBusterGame *game, double x, 
     int slot = game->enemy_bullet_count;
     Bullet *bullet = &game->enemy_bullets[slot];
     
+    // Initialize ALL fields to prevent garbage data
+    memset(bullet, 0, sizeof(Bullet));
+    
     bullet->x = x;
     bullet->y = y;
     bullet->vx = vx;
@@ -523,7 +526,7 @@ void comet_buster_spawn_enemy_bullet_from_ship(CometBusterGame *game, double x, 
     bullet->lifetime = 10.0;
     bullet->max_lifetime = 10.0;
     bullet->active = true;
-    bullet->owner_ship_id = owner_ship_id;
+    bullet->owner_ship_id = owner_ship_id;  // EXPLICITLY set the owner
     
     game->enemy_bullet_count++;
 }
