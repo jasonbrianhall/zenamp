@@ -540,7 +540,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
             ship->angle = atan2(ship->vy, ship->vx);
         } else if (ship->ship_type == 4) {
             // BROWN COAT ELITE BLUE SHIP
-            comet_buster_update_brown_coat_ship(game, i, dt);
+            comet_buster_update_brown_coat_ship(game, i, dt, visualizer);
         } else {
             // PATROL BLUE SHIP: More dynamic patrol with occasional evasive maneuvers
             ship->patrol_behavior_timer += dt;
@@ -1202,8 +1202,7 @@ void comet_buster_update_fuel(CometBusterGame *game, double dt) {
     }
 }
 
-void update_comet_buster(void *vis, double dt) {
-    Visualizer *visualizer = (Visualizer *)vis;
+void update_comet_buster(Visualizer *visualizer, double dt) {
     if (!visualizer) return;
     
     CometBusterGame *game = &visualizer->comet_buster;
@@ -1819,7 +1818,7 @@ void update_comet_buster(void *vis, double dt) {
     }
 }
 
-void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt) {
+void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt, Visualizer *visualizer) {
     if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) return;
     
     EnemyShip *ship = &game->enemy_ships[ship_index];
@@ -1901,14 +1900,14 @@ void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, 
     // Standard rapid fire (3x faster than other ships)
     ship->shoot_cooldown -= dt;
     if (ship->shoot_cooldown <= 0) {
-        comet_buster_brown_coat_standard_fire(game, ship_index);
+        comet_buster_brown_coat_standard_fire(game, ship_index, visualizer);
         // Fire rate: every 0.1 seconds (3 shots per 0.3 seconds of other ships)
         ship->shoot_cooldown = 0.1 + (rand() % 10) / 100.0;  // 0.1-0.2 sec
     }
 }
 
 // Standard single-target fire for Brown Coats
-void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index) {
+void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index, Visualizer *visualizer) {
     if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) return;
     
     EnemyShip *ship = &game->enemy_ships[ship_index];
@@ -1927,7 +1926,9 @@ void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index
         
         // Sound effect (same as other aggressive ships)
         #ifdef ExternalSound
-        // Audio would play here if enabled
+            if (visualizer && visualizer->audio.sfx_fire) {
+                audio_play_sound(&visualizer->audio, visualizer->audio.sfx_fire);
+            }
         #endif
     }
 }

@@ -180,7 +180,7 @@ int comet_buster_get_wave_comet_count(int wave) {
     else {
         // For waves 6+, use exponential growth with a cap
         int count = 11 + (wave - 5) * 3;
-        return (count > 50) ? 50 : count;  // Cap at 50 to prevent too many
+        return (count > 32) ? 32 : count;  // Cap at 32 to prevent too many
     }
 }
 
@@ -476,11 +476,28 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     int edge = rand() % 8;
     double speed = 80.0 + (rand() % 40);  // 80-120 pixels per second
     
+    // Calculate wave-based blue ship reduction
+    // Start at 70%, decrease 2% per wave until reaching a minimum of 40%
+    int blue_ship_chance = 70 - (game->current_wave * 2);
+    if (blue_ship_chance < 40) {
+        blue_ship_chance = 40;
+    }
+    
+    // Calculate wave-based difficulty increase (blue reduction distributed to other ships)
+    // Each wave, 2% taken from blue is distributed proportionally to other ship types
+    int wave_difficulty_bonus = (70 - blue_ship_chance) / 5;  // Distribute to 5 ship types (red, green, brown, sentinel, and buffer)
+    
+    int red_ship_chance = 10 + wave_difficulty_bonus;
+    int green_ship_chance = 10 + wave_difficulty_bonus;
+    int brown_ship_chance = 3 + (wave_difficulty_bonus / 2);
+    int sentinel_ship_chance = 7 + (wave_difficulty_bonus / 2);
+    
     // Randomly decide ship type:
-    // 10% chance of aggressive red ship (attacks player)
-    // 75% chance of patrol blue ship (shoots comets)
-    // 10% chance of hunter green ship (shoots comets fast, chases if close)
-    // 5% chance of sentinel purple ship (defensive formation) - reduced to 0% if red ship active
+    // 10% → 20% (increases with waves) chance of aggressive red ship (attacks player)
+    // 70% → 40% (decreases with waves) chance of patrol blue ship (shoots comets)
+    // 10% → 20% (increases with waves) chance of hunter green ship (shoots comets fast, chases if close)
+    // 3% → 8% (increases with waves) chance of brown coat type 4 ship
+    // 7% → 12% (increases with waves) chance of sentinel purple ship (defensive formation)
     
     // Check if any red ships are currently active
     bool red_ship_active = false;
@@ -492,16 +509,21 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
     }
     
     int type_roll = rand() % 100;
-    if (type_roll < 10) {
+    int threshold = 0;
+    
+    threshold += red_ship_chance;
+    if (type_roll < threshold) {
         // Red (aggressive) - single ship
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 1, edge, speed, -1, 1);
-    } else if (type_roll < 85) {
-        // Blue (patrol) - single ship
+    } else if (type_roll < threshold + blue_ship_chance) {
+        // Blue (patrol) - single ship (decreases as waves increase)
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 0, edge, speed, -1, 1);
-
-    } else if (type_roll < 95) {
+    } else if ((threshold += blue_ship_chance) + green_ship_chance > type_roll) {
         // Green (hunter) - single ship
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 2, edge, speed, -1, 1);
+    } else if ((threshold += green_ship_chance) + brown_ship_chance > type_roll) {
+        // Brown coat (type 4) - single ship
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 4, edge, speed, -1, 1);
     } else if (!red_ship_active && game->enemy_ship_count + 2 < MAX_ENEMY_SHIPS) {
         // Purple (sentinel) - spawn as PAIR (2-3 ships) - only if no red ships active
         // and if there's room for at least 2 more ships
@@ -517,7 +539,6 @@ void comet_buster_spawn_enemy_ship(CometBusterGame *game, int screen_width, int 
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height, 0, edge, speed, -1, 1);
     }
 }
-
 void comet_buster_spawn_enemy_bullet(CometBusterGame *game, double x, double y, double vx, double vy) {
     comet_buster_spawn_enemy_bullet_from_ship(game, x, y, vx, vy, -1);
 }

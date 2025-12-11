@@ -11,8 +11,7 @@
 #include "audio_wad.h"
 #endif 
 
-void init_comet_buster_system(void *vis) {
-    Visualizer *visualizer = (Visualizer *)vis;
+void init_comet_buster_system(Visualizer *visualizer) {
     
     comet_buster_reset_game(&visualizer->comet_buster);    
 }

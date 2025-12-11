@@ -318,13 +318,9 @@ typedef struct {
 } CometBusterGame;
 
 // Initialization and cleanup
-void init_comet_buster_system(void *vis);
 void comet_buster_cleanup(CometBusterGame *game);
 void comet_buster_reset_game(CometBusterGame *game);
 void comet_buster_reset_game_with_splash(CometBusterGame *game, bool show_splash);
-
-// Main update
-void update_comet_buster(void *vis, double dt);
 
 // Update sub-systems
 void comet_buster_update_ship(CometBusterGame *game, double dt, int mouse_x, int mouse_y, int width, int height, bool mouse_active);
@@ -388,7 +384,6 @@ void comet_buster_increase_difficulty(CometBusterGame *game);
 void comet_buster_update_wave_progression(CometBusterGame *game);
 
 // Rendering
-void draw_comet_buster(void *vis, cairo_t *cr);
 void draw_comet_buster_ship(CometBusterGame *game, cairo_t *cr, int width, int height);
 void draw_comet_buster_comets(CometBusterGame *game, cairo_t *cr, int width, int height);
 void draw_comet_buster_bullets(CometBusterGame *game, cairo_t *cr, int width, int height);
@@ -424,9 +419,7 @@ void void_nexus_split_into_fragments(CometBusterGame *game, int num_fragments);
 void comet_buster_damage_void_nexus(CometBusterGame *game, int damage, int fragment_id);
 void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int screen_height);
 
-void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt);
 void comet_buster_brown_coat_fire_burst(CometBusterGame *game, int ship_index);
 bool comet_buster_is_target_nearby(CometBusterGame *game, double ship_x, double ship_y, double range);
-void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index);
 
 #endif // COMETBUSTER_H

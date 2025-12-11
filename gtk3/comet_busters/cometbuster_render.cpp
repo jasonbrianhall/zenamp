@@ -15,8 +15,7 @@
 // RENDERING - VECTOR-BASED ASTEROIDS
 // ============================================================================
 
-void draw_comet_buster(void *vis, cairo_t *cr) {
-    Visualizer *visualizer = (Visualizer *)vis;
+void draw_comet_buster(Visualizer *visualizer, cairo_t *cr) {
     if (!visualizer || !cr) return;
     
     CometBusterGame *game = &visualizer->comet_buster;
