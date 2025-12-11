@@ -58,8 +58,12 @@ void draw_comet_buster(void *vis, cairo_t *cr) {
         if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
             draw_spawn_queen_boss(&game->spawn_queen, cr, width, height);
         } else if (game->boss.active) {
-            draw_comet_buster_boss(&game->boss, cr, width, height);
-        }
+            if (game->current_wave % 15 == 0) {
+               draw_void_nexus_boss(&game->boss, cr, width, height);
+           } else {
+              draw_comet_buster_boss(&game->boss, cr, width, height);
+           }
+       }
     }
     
     draw_comet_buster_enemy_bullets(game, cr, width, height);

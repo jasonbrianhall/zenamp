@@ -1359,16 +1359,21 @@ void update_comet_buster(void *vis, double dt) {
     if (game->boss_active && game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
         comet_buster_update_spawn_queen(game, dt, width, height);
     } else if (game->boss_active && game->boss.active) {
-        comet_buster_update_boss(game, dt, width, height);
-    }    
+        // Route to correct boss based on wave
+        if (game->current_wave == 15) {
+            comet_buster_update_void_nexus(game, dt, width, height);
+        } else {
+            comet_buster_update_boss(game, dt, width, height);
+        }
+    } 
     
     // Spawn boss on waves 5, 10, 15, 20, etc. (every 5 waves starting at wave 5)
     // But only if the boss hasn't already been defeated this wave (game->wave_complete_timer == 0)
-    if ((game->current_wave % 10 == 5) && !game->boss_active && game->comet_count == 0 && !game->boss.active && game->wave_complete_timer == 0) {
+    /*if ((game->current_wave % 15 == 5) && !game->boss_active && game->comet_count == 0 && !game->boss.active && game->wave_complete_timer == 0) {
         fprintf(stdout, "[UPDATE] Conditions met to spawn boss: Wave=%d, BossActive=%d, CometCount=%d\n",
                 game->current_wave, game->boss_active, game->comet_count);
         comet_buster_spawn_boss(game, width, height);
-    }
+    }*/
     
     // Update fuel system
     comet_buster_update_fuel(game, dt);

@@ -988,3 +988,610 @@ void draw_spawn_queen_boss(SpawnQueenBoss *queen, cairo_t *cr, int width, int he
     cairo_move_to(cr, queen->x - 35, queen->y + 75);
     cairo_show_text(cr, phase_text);
 }
+
+void comet_buster_spawn_void_nexus(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game) return;
+    
+    fprintf(stdout, "[VOID NEXUS] Spawning Void Nexus at Wave %d\n", game->current_wave);
+    
+    BossShip *boss = &game->boss;
+    memset(boss, 0, sizeof(BossShip));
+    
+    // Spawn at top center, will move into geometric pattern
+    boss->x = screen_width / 2.0;
+    boss->y = 100.0;
+    boss->vx = 0;
+    boss->vy = 0;
+    boss->angle = 0;
+    
+    // INCREASED HEALTH: Base 75 HP (was 45), scaling +5 per wave (was +3)
+    int health_base = 75 + (game->current_wave - 15) * 5;
+    boss->health = health_base;
+    boss->max_health = health_base;
+    
+    // INCREASED SHIELD: 25 points (was 12), max increased proportionally
+    boss->shield_health = 25;
+    boss->max_shield_health = 25;
+    boss->shield_active = true;  // Changed from false to true - shield starts active
+    
+    // Shooting
+    boss->shoot_cooldown = 0;
+    
+    // Phases - geometric movement patterns
+    boss->phase = 0;  // 0=square, 1=hexagon, 2=infinity
+    boss->phase_timer = 0;
+    boss->phase_duration = 6.0;  // 6 seconds per pattern
+    
+    // Visual
+    boss->rotation = 0;
+    boss->rotation_speed = 90.0;  // degrees per second (fast spinning)
+    boss->damage_flash_timer = 0;
+    
+    // Void Nexus specific
+    boss->fragment_count = 0;  // Start as main body
+    boss->is_fragment = false;
+    boss->burst_angle_offset = 0;
+    boss->fragment_reunite_timer = 0;
+    boss->reunite_speed = 60.0;  // 60 pixels/sec toward center
+    boss->last_damage_time = 0;
+    
+    boss->active = true;
+    game->boss_active = true;
+    
+    fprintf(stdout, "[VOID NEXUS] Boss spawned! Health: %d, Shield: %d, Position: (%.1f, %.1f)\n", 
+            boss->health, boss->shield_health, boss->x, boss->y);
+}
+
+// ============================================================================
+// VOID NEXUS CORE UPDATE LOGIC
+// ============================================================================
+
+void comet_buster_update_void_nexus(CometBusterGame *game, double dt, int width, int height) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    if (!boss->active) {
+        game->boss_active = false;
+        return;
+    }
+    
+    // ========== PHASE MANAGEMENT ==========
+    boss->phase_timer += dt;
+    if (boss->phase_timer >= boss->phase_duration) {
+        boss->phase_timer = 0;
+        boss->phase = (boss->phase + 1) % 3;  // Cycle: 0 (square) -> 1 (hexagon) -> 2 (infinity) -> 0
+        fprintf(stdout, "[VOID NEXUS] Phase changed to %d\n", boss->phase);
+    }
+    
+    // ========== MOVEMENT - GEOMETRIC PATTERNS ==========
+    // Center point for patterns
+    double center_x = width / 2.0;
+    double center_y = height / 2.0;
+    
+    double pattern_time = boss->phase_timer;
+    double pattern_speed = 1.5;  // Adjust how fast pattern moves
+    
+    if (boss->fragment_count == 0) {
+        // Main body movement
+        if (boss->phase == 0) {
+            // Square pattern - corners at distance 120 from center
+            double corner_dist = 120.0;
+            int corner = (int)(pattern_time * pattern_speed) % 4;
+            double target_x = center_x;
+            double target_y = center_y;
+            
+            switch(corner) {
+                case 0: target_x -= corner_dist; target_y -= corner_dist; break;  // Top-left
+                case 1: target_x += corner_dist; target_y -= corner_dist; break;  // Top-right
+                case 2: target_x += corner_dist; target_y += corner_dist; break;  // Bottom-right
+                case 3: target_x -= corner_dist; target_y += corner_dist; break;  // Bottom-left
+            }
+            
+            // Smoothly move toward target
+            double smooth_factor = 0.08;
+            boss->x += (target_x - boss->x) * smooth_factor;
+            boss->y += (target_y - boss->y) * smooth_factor;
+            
+        } else if (boss->phase == 1) {
+            // Hexagon pattern - 6 points at distance 100
+            double hex_dist = 100.0;
+            double hex_angle = (pattern_time * pattern_speed * 60.0) * M_PI / 180.0;  // Rotate around
+            
+            boss->x = center_x + cos(hex_angle) * hex_dist;
+            boss->y = center_y + sin(hex_angle) * hex_dist;
+            
+        } else if (boss->phase == 2) {
+            // Infinity/figure-8 pattern
+            double inf_scale_x = 100.0;
+            double inf_scale_y = 60.0;
+            double inf_time = pattern_time * pattern_speed * 2.0;
+            
+            // Lissajous curve (infinity shape)
+            boss->x = center_x + sin(inf_time) * inf_scale_x;
+            boss->y = center_y + sin(inf_time * 2.0) * 0.5 * inf_scale_y;
+        }
+    }
+    
+    // Keep boss roughly in bounds (with some margin)
+    if (boss->x < 60) boss->x = 60;
+    if (boss->x > width - 60) boss->x = width - 60;
+    if (boss->y < 60) boss->y = 60;
+    if (boss->y > height - 60) boss->y = height - 60;
+    
+    // ========== VISUAL ROTATION ==========
+    boss->rotation += boss->rotation_speed * dt;
+    
+    // ========== DAMAGE FLASH ==========
+    if (boss->damage_flash_timer > 0) {
+        boss->damage_flash_timer -= dt;
+    }
+    
+    boss->last_damage_time += dt;
+    
+    // ========== FIRING PATTERN ==========
+    boss->shoot_cooldown -= dt;
+    
+    // 3-way rotating energy bursts every 0.6 seconds
+    if (boss->shoot_cooldown <= 0) {
+        void_nexus_fire(game);
+        boss->shoot_cooldown = 0.6;
+        boss->burst_angle_offset += 30;  // Rotate pattern each burst
+    }
+    
+    // ========== SPLITTING MECHANIC ==========
+    // When boss health drops below 70%, split into 2 fragments
+    if (boss->fragment_count == 0 && boss->health < boss->max_health * 0.7) {
+        fprintf(stdout, "[VOID NEXUS] Boss health critical! Splitting into fragments!\n");
+        void_nexus_split_into_fragments(game, 2);  // Split into 2
+    }
+    
+    // ========== ENEMY SHIP SPAWNING ==========
+    boss->nexus_ship_spawn_timer += dt;
+    
+    double spawn_interval = 3.0;
+    if (boss->fragment_count > 0) {
+        spawn_interval = 2.5;
+    }
+    if (boss->health < boss->max_health * 0.5) {
+        spawn_interval = 2.0;
+    }
+    
+    if (boss->nexus_ship_spawn_timer >= spawn_interval) {
+        void_nexus_spawn_ship_wave(game, width, height);
+        boss->nexus_ship_spawn_timer = 0;
+    }
+    
+    // ========== FRAGMENT MANAGEMENT ==========
+    if (boss->fragment_count > 0) {
+        // Update all active fragments
+        for (int i = 0; i < boss->fragment_count; i++) {
+            // Fragments slowly drift apart then regroup
+            boss->fragment_reunite_timer += dt;
+            
+            // Every 4 seconds, fragments try to reunite
+            if (boss->fragment_reunite_timer > 4.0) {
+                // Move fragments back toward center
+                double center_dx = center_x - boss->fragment_positions[i][0];
+                double center_dy = center_y - boss->fragment_positions[i][1];
+                double dist = sqrt(center_dx*center_dx + center_dy*center_dy);
+                
+                if (dist > 10.0) {
+                    boss->fragment_positions[i][0] += (center_dx / dist) * boss->reunite_speed * dt;
+                    boss->fragment_positions[i][1] += (center_dy / dist) * boss->reunite_speed * dt;
+                }
+            }
+            
+            // Fragments orbit around center slowly
+            double orbit_angle = (boss->phase_timer + i * M_PI * 2.0 / boss->fragment_count) * 0.3;
+            double orbit_dist = 80.0;
+            double orbit_x = center_x + cos(orbit_angle) * orbit_dist;
+            double orbit_y = center_y + sin(orbit_angle) * orbit_dist;
+            
+            // Lerp toward orbit position (adds natural motion)
+            boss->fragment_positions[i][0] += (orbit_x - boss->fragment_positions[i][0]) * 0.02;
+            boss->fragment_positions[i][1] += (orbit_y - boss->fragment_positions[i][1]) * 0.02;
+            
+            // Fragments fire at slower rate
+            if (boss->shoot_cooldown <= 0) {
+                void_nexus_fragment_fire(game, i);
+            }
+        }
+    }
+    
+    // ========== CHECK IF BOSS IS DEFEATED ==========
+    if (boss->health <= 0) {
+        fprintf(stdout, "[VOID NEXUS] Void Nexus destroyed!\n");
+        boss->active = false;
+        game->boss_active = false;
+    }
+}
+
+// ============================================================================
+// VOID NEXUS FIRING PATTERNS
+// ============================================================================
+
+void void_nexus_fire(CometBusterGame *game) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    double bullet_speed = 200.0;
+    
+    // Calculate angle toward the player ship
+    double dx = game->ship_x - boss->x;
+    double dy = game->ship_y - boss->y;
+    double angle_to_ship = atan2(dy, dx);
+    
+    // Fire 3 bullets in a rotating spread
+    int num_bullets = 3;
+    double angle_spread = 60.0 * M_PI / 180.0;  // 60 degree spread
+    
+    // Offset changes each burst for rotation effect
+    double offset = (boss->burst_angle_offset * M_PI / 180.0);
+    double start_angle = angle_to_ship - angle_spread / 2.0 + offset;
+    
+    for (int i = 0; i < num_bullets; i++) {
+        double angle = start_angle + (angle_spread / (num_bullets - 1)) * i;
+        double vx = cos(angle) * bullet_speed;
+        double vy = sin(angle) * bullet_speed;
+        
+        comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
+    }
+    
+    fprintf(stdout, "[VOID NEXUS] 3-way burst fired!\n");
+}
+
+void void_nexus_fragment_fire(CometBusterGame *game, int fragment_id) {
+    if (!game || !game->boss_active || fragment_id < 0 || fragment_id >= 4) return;
+    
+    BossShip *boss = &game->boss;
+    if (boss->fragment_count <= fragment_id) return;
+    
+    double bullet_speed = 180.0;  // Slightly slower than main body
+    
+    // Get fragment position
+    double frag_x = boss->fragment_positions[fragment_id][0];
+    double frag_y = boss->fragment_positions[fragment_id][1];
+    
+    // Calculate angle toward player
+    double dx = game->ship_x - frag_x;
+    double dy = game->ship_y - frag_y;
+    double angle_to_ship = atan2(dy, dx);
+    
+    // Fragments fire single shots (not spread)
+    double vx = cos(angle_to_ship) * bullet_speed;
+    double vy = sin(angle_to_ship) * bullet_speed;
+    
+    comet_buster_spawn_enemy_bullet(game, frag_x, frag_y, vx, vy);
+}
+
+// ============================================================================
+// VOID NEXUS SPLITTING MECHANISM
+// ============================================================================
+
+void void_nexus_split_into_fragments(CometBusterGame *game, int num_fragments) {
+    if (!game || !game->boss_active || num_fragments < 1 || num_fragments > 4) return;
+    
+    BossShip *boss = &game->boss;
+    
+    fprintf(stdout, "[VOID NEXUS] Splitting into %d fragments!\n", num_fragments);
+    
+    boss->fragment_count = num_fragments;
+    
+    // Distribute health equally among fragments
+    int health_per_fragment = boss->health / num_fragments;
+    
+    double center_x = 400.0;  // Approximate screen center
+    double center_y = 300.0;
+    
+    // Position fragments in a circle around the center
+    for (int i = 0; i < num_fragments; i++) {
+        double angle = (2.0 * M_PI * i) / num_fragments;
+        double dist = 80.0;
+        
+        boss->fragment_positions[i][0] = center_x + cos(angle) * dist;
+        boss->fragment_positions[i][1] = center_y + sin(angle) * dist;
+        boss->fragment_health[i] = health_per_fragment;
+        
+        // Spawn visual effect particles
+        for (int p = 0; p < 15; p++) {
+            double particle_angle = 2.0 * M_PI * (rand() % 100) / 100.0;
+            double particle_speed = 150.0 + (rand() % 100);
+            double vx = cos(particle_angle) * particle_speed;
+            double vy = sin(particle_angle) * particle_speed;
+            
+            // Create cyan/blue particles
+            comet_buster_spawn_explosion(game, boss->fragment_positions[i][0], 
+                                        boss->fragment_positions[i][1], 2, 10);
+        }
+    }
+    
+    // Award bonus for focused fire if destroying fragments quickly
+    game->score += 500 * num_fragments;
+    comet_buster_spawn_floating_text(game, center_x, center_y - 30, "FRAGMENT!", 0.0, 1.0, 1.0);
+    
+    boss->fragment_reunite_timer = 0;
+}
+
+void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game || game->enemy_ship_count >= MAX_ENEMY_SHIPS) return;
+    
+    fprintf(stdout, "[VOID NEXUS] Spawning ship wave!\n");
+    
+    // Void Nexus spawns 8 ships per wave (more aggressive than Spawn Queen's 10)
+    // BUT spawns more frequently
+    int ships_to_spawn = 8;
+    int ships_spawned = 0;
+    
+    // Mix: 50% Red (aggressive), 30% Green (hunters), 20% Purple (sentinels)
+    for (int i = 0; i < ships_to_spawn; i++) {
+        if (game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
+            fprintf(stdout, "[VOID NEXUS] Hit MAX_ENEMY_SHIPS limit, stopping spawn\n");
+            break;
+        }
+        
+        int ship_type = 0;
+        int formation_id = -1;
+        int formation_size = 1;
+        
+        // Distribute types: 0-3 = Red, 4-5 = Green, 6-7 = Purple
+        if (i < 4) {
+            // Red aggressive ships (50%)
+            ship_type = 1;
+        } else if (i < 6) {
+            // Green hunter ships (30%)
+            ship_type = 2;
+        } else {
+            // Purple sentinel ships (20%) - spawn in pairs
+            ship_type = 3;
+            if (i == 6) {
+                formation_id = game->current_wave * 1000 + (int)(game->boss.phase_timer * 100);
+                formation_size = 2;
+            } else if (i == 7) {
+                formation_id = game->current_wave * 1000 + (int)(game->boss.phase_timer * 100);
+                formation_size = 2;
+            }
+        }
+        
+        // Spawn from random edges
+        int edge = (i % 8);
+        double speed = 100.0 + (rand() % 60);  // Vary speeds
+        
+        comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height,
+                                               ship_type, edge, speed,
+                                               formation_id, formation_size);
+        
+        ships_spawned++;
+    }
+    
+    fprintf(stdout, "[VOID NEXUS] Spawned %d ships in wave\n", ships_spawned);
+}
+
+// ============================================================================
+// VOID NEXUS COLLISION DETECTION
+// ============================================================================
+
+bool comet_buster_check_bullet_void_nexus(Bullet *b, BossShip *boss) {
+    if (!b || !b->active || !boss || !boss->active) return false;
+    
+    // Check collision with main body
+    if (boss->fragment_count == 0) {
+        double dx = boss->x - b->x;
+        double dy = boss->y - b->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        double collision_dist = 30.0;  // Main body collision radius
+        
+        return (dist < collision_dist);
+    }
+    
+    // Check collision with fragments
+    for (int i = 0; i < boss->fragment_count; i++) {
+        double dx = boss->fragment_positions[i][0] - b->x;
+        double dy = boss->fragment_positions[i][1] - b->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        double collision_dist = 22.0;  // Fragment collision radius (smaller)
+        
+        if (dist < collision_dist) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool comet_buster_hit_void_nexus_fragment(Bullet *b, BossShip *boss, int *fragment_hit) {
+    if (!b || !b->active || !boss || !boss->active || !fragment_hit) return false;
+    
+    // Check which fragment was hit
+    for (int i = 0; i < boss->fragment_count; i++) {
+        double dx = boss->fragment_positions[i][0] - b->x;
+        double dy = boss->fragment_positions[i][1] - b->y;
+        double dist = sqrt(dx*dx + dy*dy);
+        double collision_dist = 22.0;
+        
+        if (dist < collision_dist) {
+            *fragment_hit = i;
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// ============================================================================
+// VOID NEXUS DAMAGE HANDLING
+// ============================================================================
+
+void comet_buster_damage_void_nexus(CometBusterGame *game, int damage, int fragment_id) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    
+    if (boss->fragment_count == 0) {
+        // Damage main body
+        boss->health -= damage;
+        boss->damage_flash_timer = 0.1;
+        boss->last_damage_time = 0;
+        
+        fprintf(stdout, "[VOID NEXUS] Main body hit! Health: %d/%d\n", 
+                boss->health, boss->max_health);
+    } else if (fragment_id >= 0 && fragment_id < boss->fragment_count) {
+        // Damage specific fragment
+        boss->fragment_health[fragment_id] -= damage;
+        boss->damage_flash_timer = 0.1;
+        
+        fprintf(stdout, "[VOID NEXUS] Fragment %d hit! Health: %d\n", 
+                fragment_id, boss->fragment_health[fragment_id]);
+        
+        // If fragment destroyed, spawn particles and award bonus
+        if (boss->fragment_health[fragment_id] <= 0) {
+            comet_buster_spawn_explosion(game, boss->fragment_positions[fragment_id][0],
+                                        boss->fragment_positions[fragment_id][1], 2, 20);
+            
+            game->score += 250;
+            game->score_multiplier += 0.1;  // Boost multiplier
+            
+            // Remove destroyed fragment by shifting array
+            for (int i = fragment_id; i < boss->fragment_count - 1; i++) {
+                boss->fragment_positions[i][0] = boss->fragment_positions[i+1][0];
+                boss->fragment_positions[i][1] = boss->fragment_positions[i+1][1];
+                boss->fragment_health[i] = boss->fragment_health[i+1];
+            }
+            boss->fragment_count--;
+            
+            // If all fragments destroyed, defeat boss
+            if (boss->fragment_count == 0) {
+                boss->health = 0;
+                fprintf(stdout, "[VOID NEXUS] All fragments destroyed! Boss defeated!\n");
+            }
+        }
+    }
+}
+
+// ============================================================================
+// VOID NEXUS RENDERING
+// ============================================================================
+
+void draw_void_nexus_boss(BossShip *boss, cairo_t *cr, int width, int height) {
+    (void)width;
+    (void)height;
+    
+    if (!boss || !boss->active) return;
+    
+    cairo_save(cr);
+    
+    if (boss->fragment_count == 0) {
+        // Draw main body - crystalline octagon with rotating rings
+        cairo_translate(cr, boss->x, boss->y);
+        cairo_rotate(cr, boss->rotation * M_PI / 180.0);
+        
+        // Outer energy ring (pulsing)
+        double pulse = 0.5 + 0.3 * sin(boss->rotation * M_PI / 180.0 * 0.1);
+        cairo_set_source_rgba(cr, 0.2, 0.8, 1.0, pulse);  // Cyan glow
+        cairo_arc(cr, 0, 0, 40.0 + pulse * 5.0, 0, 2.0 * M_PI);
+        cairo_stroke_preserve(cr);
+        cairo_fill(cr);
+        
+        // Main crystalline body (octagon)
+        cairo_set_source_rgb(cr, 0.3, 0.7, 1.0);  // Bright cyan
+        double oct_radius = 30.0;
+        for (int i = 0; i < 8; i++) {
+            double angle = (i * 2.0 * M_PI / 8.0) + (boss->rotation * M_PI / 180.0);
+            double x = cos(angle) * oct_radius;
+            double y = sin(angle) * oct_radius;
+            
+            if (i == 0) {
+                cairo_move_to(cr, x, y);
+            } else {
+                cairo_line_to(cr, x, y);
+            }
+        }
+        cairo_close_path(cr);
+        cairo_fill_preserve(cr);
+        cairo_stroke(cr);
+        
+        // Core nucleus (bright white)
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_arc(cr, 0, 0, 6.0, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+        
+        // Damage flash
+        if (boss->damage_flash_timer > 0) {
+            cairo_set_source_rgba(cr, 1.0, 0.5, 0.5, 0.6);
+            cairo_arc(cr, 0, 0, 35.0, 0, 2.0 * M_PI);
+            cairo_fill(cr);
+        }
+        
+    } else {
+        // Draw fragments - smaller crystals
+        for (int i = 0; i < boss->fragment_count; i++) {
+            cairo_translate(cr, boss->fragment_positions[i][0], boss->fragment_positions[i][1]);
+            
+            double frag_pulse = 0.3 + 0.2 * sin((boss->rotation + i * 45) * M_PI / 180.0 * 0.1);
+            
+            // Fragment glow
+            cairo_set_source_rgba(cr, 0.0, 1.0, 1.0, frag_pulse);
+            cairo_arc(cr, 0, 0, 25.0 + frag_pulse * 3.0, 0, 2.0 * M_PI);
+            cairo_stroke_preserve(cr);
+            
+            // Fragment body (hexagon)
+            cairo_set_source_rgb(cr, 0.2, 0.9, 1.0);
+            double hex_radius = 20.0;
+            for (int j = 0; j < 6; j++) {
+                double angle = (j * 2.0 * M_PI / 6.0);
+                double x = cos(angle) * hex_radius;
+                double y = sin(angle) * hex_radius;
+                
+                if (j == 0) {
+                    cairo_move_to(cr, x, y);
+                } else {
+                    cairo_line_to(cr, x, y);
+                }
+            }
+            cairo_close_path(cr);
+            cairo_fill_preserve(cr);
+            cairo_stroke(cr);
+            
+            // Fragment core
+            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            cairo_arc(cr, 0, 0, 4.0, 0, 2.0 * M_PI);
+            cairo_fill(cr);
+            
+            // Fragment health indicator
+            cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);
+            cairo_set_font_size(cr, 8);
+            char health_text[8];
+            snprintf(health_text, sizeof(health_text), "%d", boss->fragment_health[i]);
+            cairo_move_to(cr, -5, 3);
+            cairo_show_text(cr, health_text);
+            
+            cairo_translate(cr, -boss->fragment_positions[i][0], -boss->fragment_positions[i][1]);
+        }
+    }
+    
+    cairo_restore(cr);
+    
+    // Draw health bar
+    double bar_width = 100.0;
+    double bar_height = 8.0;
+    double bar_x = boss->x - bar_width / 2.0;
+    double bar_y = boss->y - 55.0;
+    
+    // Background
+    cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_fill(cr);
+    
+    // Health bar (cyan)
+    double health_percent = (double)boss->health / boss->max_health;
+    if (health_percent < 0) health_percent = 0;
+    
+    cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width * health_percent, bar_height);
+    cairo_fill(cr);
+    
+    // Border
+    cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+    cairo_set_line_width(cr, 1.0);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_stroke(cr);
+}

@@ -148,6 +148,17 @@ typedef struct {
     double damage_flash_timer;  // Flash when taking damage
     
     bool active;                // Is the boss alive?
+
+    int fragment_count;           // Number of active fragments (0 = main, 1+ = split)
+    double fragment_positions[4][2];  // X,Y positions of up to 4 fragments
+    int fragment_health[4];       // Health of each fragment
+    bool is_fragment;             // Is this a fragment or main body?
+    int fragment_id;              // Which fragment number (0-3)
+    double fragment_reunite_timer; // Time until fragments try to reunite
+    double reunite_speed;         // How fast they move back together
+    double last_damage_time;      // For tracking damage frequency
+    int burst_angle_offset;       // For rotating firing pattern
+    double nexus_ship_spawn_timer;
 } BossShip;
 
 // Spawn Queen (Mothership) structure - spawns Red and Sentinel ships on waves 10, 20, 30, etc.
@@ -395,5 +406,13 @@ void comet_buster_init_splash_screen(CometBusterGame *game, int width, int heigh
 void comet_buster_exit_splash_screen(CometBusterGame *game);
 void comet_buster_draw_splash_screen(CometBusterGame *game, cairo_t *cr, int width, int height);                                 
 
+void comet_buster_spawn_void_nexus(CometBusterGame *game, int screen_width, int screen_height);
+void comet_buster_update_void_nexus(CometBusterGame *game, double dt, int width, int height);
+void draw_void_nexus_boss(BossShip *boss, cairo_t *cr, int width, int height);
+void void_nexus_fire(CometBusterGame *game);
+void void_nexus_fragment_fire(CometBusterGame *game, int fragment_id);
+void void_nexus_split_into_fragments(CometBusterGame *game, int num_fragments);
+void comet_buster_damage_void_nexus(CometBusterGame *game, int damage, int fragment_id);
+void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int screen_height);
 
 #endif // COMETBUSTER_H

@@ -116,15 +116,22 @@ void comet_buster_spawn_wave(CometBusterGame *game, int screen_width, int screen
     game->spawn_queen.active = false;
     
     // Check if this is a boss wave
-    if (game->current_wave > 0 && game->current_wave % 10 == 0) {
+    if (game->current_wave > 0 && game->current_wave % 15 == 10) {
         // Spawn Queen appears on waves 10, 20, 30, etc.
         comet_buster_spawn_spawn_queen(game, screen_width, screen_height);
         // Don't spawn normal comets - spawn queen controls the difficulty
-    } else if (game->current_wave % 10 == 5) {
+    } else if (game->current_wave % 15 == 5) {
         // Regular boss on waves 5, 15, 25, etc.
         comet_buster_spawn_boss(game, screen_width, screen_height);
         // Spawn some normal comets alongside the boss
         comet_buster_spawn_random_comets(game, 3, screen_width, screen_height);
+    } else if (game->current_wave % 15 == 0) {
+        // Regular boss on waves 5, 15, 25, etc.
+        printf("Should be spawning void\n");
+        comet_buster_spawn_void_nexus(game, screen_width, screen_height);
+        // Spawn some normal comets alongside the boss
+        comet_buster_spawn_random_comets(game, 5, screen_width, screen_height);
+
     } else {
         // Normal waves - just comets
         int wave_count = comet_buster_get_wave_comet_count(game->current_wave);
