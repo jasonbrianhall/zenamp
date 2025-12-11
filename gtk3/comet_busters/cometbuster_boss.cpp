@@ -1580,11 +1580,11 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     boss->vx = 80.0 + (rand() % 40);  // Moves left-right
     boss->vy = 150.0;  // Falls downward
     
-    boss->health = 250;  // Increased from 75
-    boss->max_health = 250;
+    boss->health = 300;  // Increased from 250 to handle spawn attacks
+    boss->max_health = 300;
     boss->angle = 0;
     boss->phase = 0;  // Dormant phase
-    boss->phase_duration = 2.5;
+    boss->phase_duration = 3.0;  // Increased from 2.5 to allow more spawn time
     boss->phase_timer = 0;
     
     // Harbinger-specific
@@ -1598,8 +1598,8 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     boss->beam_angle_offset = 0;
     
     // Shield system - enhanced
-    boss->shield_health = 20;  // Increased from 8
-    boss->max_shield_health = 20;
+    boss->shield_health = 25;  // Increased from 20
+    boss->max_shield_health = 25;  // Increased from 20
     boss->shield_active = true;
     
     // Firing & rotation
@@ -1667,40 +1667,156 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
     boss->shoot_cooldown -= dt;
     
     if (boss->phase == 0) {
-        // DORMANT PHASE: Slow, occasional attacks
+        // DORMANT PHASE: Slow, occasional attacks + COMET SPAWNING
         if (boss->shoot_cooldown <= 0) {
             // Spawn bouncing bombs
-            if (boss->bomb_spawned_this_phase < 3) {
+            if (boss->bomb_spawned_this_phase < 2) {
                 harbinger_spawn_bomb(game, boss->x, boss->y);
                 boss->bomb_spawned_this_phase++;
-                boss->shoot_cooldown = 0.5;
+                boss->shoot_cooldown = 0.6;
+            } else if (boss->bomb_spawned_this_phase < 3) {
+                // NEW: Spawn comet spray instead of more bombs
+                for (int i = 0; i < 4; i++) {
+                    if (game->comet_count >= MAX_COMETS) break;
+                    
+                    int slot = game->comet_count;
+                    Comet *comet = &game->comets[slot];
+                    memset(comet, 0, sizeof(Comet));
+                    
+                    double angle = (i * 2.0 * M_PI / 4) + (rand() % 60 - 30) * (M_PI / 180.0);
+                    double spawn_distance = 80.0 + (rand() % 40);
+                    
+                    comet->x = boss->x + cos(angle) * spawn_distance;
+                    comet->y = boss->y + sin(angle) * spawn_distance;
+                    
+                    double speed = 80.0 + (rand() % 70);
+                    comet->vx = cos(angle) * speed + (rand() % 40 - 20);
+                    comet->vy = sin(angle) * speed + (rand() % 40 - 20);
+                    
+                    int size_roll = rand() % 100;
+                    if (size_roll < 30) {
+                        comet->size = COMET_SMALL;
+                        comet->radius = 10;
+                    } else if (size_roll < 70) {
+                        comet->size = COMET_MEDIUM;
+                        comet->radius = 18;
+                    } else {
+                        comet->size = COMET_LARGE;
+                        comet->radius = 28;
+                    }
+                    
+                    comet->frequency_band = rand() % 3;
+                    comet->rotation = 0;
+                    comet->rotation_speed = 50 + (rand() % 200);
+                    comet->active = true;
+                    comet->health = 1;
+                    comet->base_angle = angle;
+                    
+                    comet_buster_get_frequency_color(comet->frequency_band,
+                                                     &comet->color[0],
+                                                     &comet->color[1],
+                                                     &comet->color[2]);
+                    
+                    game->comet_count++;
+                }
+                boss->bomb_spawned_this_phase++;
+                boss->shoot_cooldown = 1.0;
+                fprintf(stdout, "[HARBINGER] Phase 0: Comet spray! (Total: %d)\n", game->comet_count);
             } else {
-                // Transition to next phase sooner if bombs are done
+                // Transition to next phase sooner if attacks are done
                 boss->phase_timer = boss->phase_duration;
             }
         }
         
     } else if (boss->phase == 1) {
-        // ACTIVE PHASE: Charging laser
+        // ACTIVE PHASE: Charging laser + ENEMY SPAWNING + COMET SPRAY
         boss->laser_angle += boss->laser_rotation_speed * dt;
         boss->laser_charge_timer += dt;
         
-        // Laser fires every 3 seconds
+        // NEW: Random enemy ship spawns during active phase
+        if (boss->bomb_spawned_this_phase < 2 && (rand() % 1000) < 8) {
+            if (game->enemy_ship_count < MAX_ENEMY_SHIPS) {
+                int edge = rand() % 8;
+                double speed = 100.0 + (rand() % 50);
+                
+                int type_roll = rand() % 100;
+                int ship_type = 0;
+                if (type_roll < 40) ship_type = 1;           // 40% Red aggressive
+                else if (type_roll < 60) ship_type = 2;      // 20% Green hunter
+                else if (type_roll < 75) ship_type = 4;      // 15% Brown coat
+                else if (type_roll < 85) ship_type = 3;      // 10% Purple sentinel
+                else ship_type = 0;                           // 15% Blue patrol
+                
+                comet_buster_spawn_enemy_ship_internal(game, width, height, 
+                                                       ship_type, edge, speed, -1, 1);
+                boss->bomb_spawned_this_phase++;
+                fprintf(stdout, "[HARBINGER] Phase 1: Enemy ship type %d spawned!\n", ship_type);
+            }
+        }
+        
+        // Laser fires every 3 seconds + COMET SPRAY
         if (boss->laser_charge_timer >= 3.0) {
             boss->laser_active = true;
+            
             // Fire laser burst in orbital pattern
             for (int i = 0; i < 5; i++) {
-                double angle = boss->laser_angle + (i * 72.0 * M_PI / 180.0);  // 5-point spread
+                double angle = boss->laser_angle + (i * 72.0 * M_PI / 180.0);
                 double vx = cos(angle) * 250.0;
                 double vy = sin(angle) * 250.0;
                 comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
             }
+            
+            // NEW: Also spawn comet spray with laser attack
+            for (int i = 0; i < 6; i++) {
+                if (game->comet_count >= MAX_COMETS) break;
+                
+                int slot = game->comet_count;
+                Comet *comet = &game->comets[slot];
+                memset(comet, 0, sizeof(Comet));
+                
+                double angle = (i * 2.0 * M_PI / 6) + (rand() % 60 - 30) * (M_PI / 180.0);
+                double spawn_distance = 80.0 + (rand() % 40);
+                
+                comet->x = boss->x + cos(angle) * spawn_distance;
+                comet->y = boss->y + sin(angle) * spawn_distance;
+                
+                double speed = 80.0 + (rand() % 70);
+                comet->vx = cos(angle) * speed + (rand() % 40 - 20);
+                comet->vy = sin(angle) * speed + (rand() % 40 - 20);
+                
+                int size_roll = rand() % 100;
+                if (size_roll < 30) {
+                    comet->size = COMET_SMALL;
+                    comet->radius = 10;
+                } else if (size_roll < 70) {
+                    comet->size = COMET_MEDIUM;
+                    comet->radius = 18;
+                } else {
+                    comet->size = COMET_LARGE;
+                    comet->radius = 28;
+                }
+                
+                comet->frequency_band = rand() % 3;
+                comet->rotation = 0;
+                comet->rotation_speed = 50 + (rand() % 200);
+                comet->active = true;
+                comet->health = 1;
+                comet->base_angle = angle;
+                
+                comet_buster_get_frequency_color(comet->frequency_band,
+                                                 &comet->color[0],
+                                                 &comet->color[1],
+                                                 &comet->color[2]);
+                
+                game->comet_count++;
+            }
+            
             boss->laser_charge_timer = 0;
-            fprintf(stdout, "[HARBINGER] Orbital laser fire!\n");
+            fprintf(stdout, "[HARBINGER] Phase 1: Orbital laser + comet spray fired!\n");
         }
         
     } else if (boss->phase == 2) {
-        // FRENZY PHASE: Rapid attacks
+        // FRENZY PHASE: Rapid attacks + COMETS + ENEMY SHIPS
         if (boss->shoot_cooldown <= 0) {
             // Spread shot in multiple directions
             int num_directions = 8;
@@ -1712,14 +1828,80 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
             }
             
             // Spawn bombs more rapidly
-            if (boss->bomb_spawned_this_phase < 5) {
+            if (boss->bomb_spawned_this_phase < 4) {
                 harbinger_spawn_bomb(game, boss->x, boss->y);
                 boss->bomb_spawned_this_phase++;
             }
             
-            boss->shoot_cooldown = 0.4;  // Faster firing in frenzy
-            fprintf(stdout, "[HARBINGER] Frenzy attack! Shots: %d\n", 
-                    boss->bomb_spawned_this_phase);
+            // NEW: Every other attack cycle, spawn comets + enemies
+            if (boss->bomb_spawned_this_phase == 3) {
+                // Comet spray
+                for (int i = 0; i < 5; i++) {
+                    if (game->comet_count >= MAX_COMETS) break;
+                    
+                    int slot = game->comet_count;
+                    Comet *comet = &game->comets[slot];
+                    memset(comet, 0, sizeof(Comet));
+                    
+                    double angle = (i * 2.0 * M_PI / 5) + (rand() % 60 - 30) * (M_PI / 180.0);
+                    double spawn_distance = 80.0 + (rand() % 40);
+                    
+                    comet->x = boss->x + cos(angle) * spawn_distance;
+                    comet->y = boss->y + sin(angle) * spawn_distance;
+                    
+                    double speed = 80.0 + (rand() % 70);
+                    comet->vx = cos(angle) * speed + (rand() % 40 - 20);
+                    comet->vy = sin(angle) * speed + (rand() % 40 - 20);
+                    
+                    int size_roll = rand() % 100;
+                    if (size_roll < 30) {
+                        comet->size = COMET_SMALL;
+                        comet->radius = 10;
+                    } else if (size_roll < 70) {
+                        comet->size = COMET_MEDIUM;
+                        comet->radius = 18;
+                    } else {
+                        comet->size = COMET_LARGE;
+                        comet->radius = 28;
+                    }
+                    
+                    comet->frequency_band = rand() % 3;
+                    comet->rotation = 0;
+                    comet->rotation_speed = 50 + (rand() % 200);
+                    comet->active = true;
+                    comet->health = 1;
+                    comet->base_angle = angle;
+                    
+                    comet_buster_get_frequency_color(comet->frequency_band,
+                                                     &comet->color[0],
+                                                     &comet->color[1],
+                                                     &comet->color[2]);
+                    
+                    game->comet_count++;
+                }
+                
+                // NEW: Spawn enemy ships during frenzy
+                if ((rand() % 100) < 60 && game->enemy_ship_count < MAX_ENEMY_SHIPS) {
+                    int edge = rand() % 8;
+                    double speed = 100.0 + (rand() % 50);
+                    
+                    int type_roll = rand() % 100;
+                    int ship_type = 1;  // Heavily favor aggressive types in frenzy
+                    if (type_roll < 50) ship_type = 1;       // 50% Red aggressive
+                    else if (type_roll < 70) ship_type = 2;  // 20% Green hunter
+                    else if (type_roll < 85) ship_type = 4;  // 15% Brown coat
+                    else ship_type = 3;                       // 15% Purple sentinel
+                    
+                    comet_buster_spawn_enemy_ship_internal(game, width, height,
+                                                           ship_type, edge, speed, -1, 1);
+                    fprintf(stdout, "[HARBINGER] Phase 2: Frenzy enemy spawn! Type %d\n", ship_type);
+                }
+                
+                fprintf(stdout, "[HARBINGER] Phase 2: Comet spray + enemies!\n");
+            }
+            
+            boss->shoot_cooldown = 0.35;  // Faster firing in frenzy
+            fprintf(stdout, "[HARBINGER] Frenzy attack! Bombs: %d\n", boss->bomb_spawned_this_phase);
         }
     }
 }
