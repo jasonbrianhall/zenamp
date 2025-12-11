@@ -706,7 +706,18 @@ void init_minesweeper(Visualizer *vis);
 void minesweeper_draw(Visualizer *vis, cairo_t *cr);
 void minesweeper_update(Visualizer *vis, double dt);
 
+// Comet Buster
+void init_comet_buster_system(Visualizer *vis_ptr);
+void update_comet_buster(Visualizer *vis_ptr, double dt);
+void draw_comet_buster(Visualizer *vis_ptr, cairo_t *cr);
+void comet_buster_cleanup(CometBusterGame *game);
 void comet_buster_on_ship_hit(CometBusterGame *game, Visualizer *visualizer);
-void comet_buster_update_frequency_bands(CometBusterGame *game, void *visualizer);
+void joystick_manager_update(JoystickManager *manager);
+void update_visualizer_joystick(Visualizer *vis);
+bool comet_buster_splash_screen_input_detected(Visualizer *visualizer);
+void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
+void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
+void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index, Visualizer *visualizer);
+void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt, Visualizer *visualizer);
 
 #endif
