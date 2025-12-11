@@ -370,15 +370,18 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
         } else if (ship->ship_type == 3) {
             // Sentinel purple ship
             cairo_set_source_rgb(cr, 0.8, 0.2, 1.0);  // Bright purple
+        } else if (ship->ship_type == 4) {
+            // BROWN COAT ELITE BLUE SHIP - bright cyan, more saturated
+            cairo_set_source_rgb(cr, 0.0, 0.9, 1.0);  // Bright cyan (more saturated than patrol blue)
         } else {
-            // Patrol blue ship
-            cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);  // Blue
+            // Patrol blue ship (type 0)
+            cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);  // Standard blue
         }
         
         cairo_set_line_width(cr, 1.5);
         
-        // Draw ship body as triangle
-        double ship_size = 12;
+        // Draw ship body as triangle (slightly larger for brown coat)
+        double ship_size = (ship->ship_type == 4) ? 14 : 12;  // Brown coats are slightly bigger
         cairo_move_to(cr, ship_size, 0);              // Front point
         cairo_line_to(cr, -ship_size, -ship_size/1.5);  // Back left
         cairo_line_to(cr, -ship_size, ship_size/1.5);   // Back right
@@ -410,6 +413,9 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
             } else if (ship->ship_type == 3) {
                 // Sentinel purple shield: bright purple
                 cairo_set_source_rgba(cr, 0.8, 0.4, 1.0, 0.5);
+            } else if (ship->ship_type == 4) {
+                // BROWN COAT CYAN SHIELD - bright cyan
+                cairo_set_source_rgba(cr, 0.2, 0.9, 1.0, 0.6);  // Brighter and more saturated
             } else {
                 // Blue ship: no shield (shouldn't reach here)
                 cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.5);

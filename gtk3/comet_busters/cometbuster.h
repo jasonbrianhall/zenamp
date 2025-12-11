@@ -91,7 +91,8 @@ typedef struct {
     double shoot_cooldown;      // Time until next shot
     double path_time;           // Time along sine wave path (for wave motion)
     double base_vx, base_vy;    // Original velocity direction (for sine calculation)
-    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green), 3 = sentinel (purple)
+    int ship_type;              // 0 = patrol (blue), 1 = aggressive (red), 2 = hunter (green), 
+                                // 3 = sentinel (purple), 4 = brown coat (elite blue)
     bool active;
     
     // Shield system for enemy ships
@@ -114,6 +115,14 @@ typedef struct {
     double patrol_circle_center_y;
     double patrol_circle_radius;    // Radius of circular path
     double patrol_circle_angle;     // Current angle in circle (radians)
+    
+    // BROWN COAT SPECIFIC FIELDS (NEW)
+    double burst_fire_cooldown;     // Cooldown until next omnidirectional burst
+    double burst_trigger_range;     // Distance at which to trigger burst (200-300 px)
+    int last_burst_direction;       // Last burst angle offset (for visual variety)
+    double proximity_detection_timer; // Timer to check for nearby targets
+    int burst_count_this_wave;      // Track how many bursts fired this encounter
+    
 } EnemyShip;
 
 #define MAX_ENEMY_SHIPS 4
@@ -414,5 +423,10 @@ void void_nexus_fragment_fire(CometBusterGame *game, int fragment_id);
 void void_nexus_split_into_fragments(CometBusterGame *game, int num_fragments);
 void comet_buster_damage_void_nexus(CometBusterGame *game, int damage, int fragment_id);
 void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int screen_height);
+
+void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt);
+void comet_buster_brown_coat_fire_burst(CometBusterGame *game, int ship_index);
+bool comet_buster_is_target_nearby(CometBusterGame *game, double ship_x, double ship_y, double range);
+void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index);
 
 #endif // COMETBUSTER_H

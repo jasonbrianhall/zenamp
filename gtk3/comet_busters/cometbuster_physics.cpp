@@ -538,6 +538,9 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
             ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
             ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
             ship->angle = atan2(ship->vy, ship->vx);
+        } else if (ship->ship_type == 4) {
+            // BROWN COAT ELITE BLUE SHIP
+            comet_buster_update_brown_coat_ship(game, i, dt);
         } else {
             // PATROL BLUE SHIP: More dynamic patrol with occasional evasive maneuvers
             ship->patrol_behavior_timer += dt;
@@ -1814,4 +1817,149 @@ void update_comet_buster(void *vis, double dt) {
             comet_buster_reset_game(game);
         }
     }
+}
+
+void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt) {
+    if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) return;
+    
+    EnemyShip *ship = &game->enemy_ships[ship_index];
+    if (!ship->active || ship->ship_type != 4) return;
+    
+    // Update shield impact timer
+    if (ship->shield_impact_timer > 0) {
+        ship->shield_impact_timer -= dt;
+    }
+    
+    // Brown Coats are aggressive chasers with fast fire rate
+    double dx = game->ship_x - ship->x;
+    double dy = game->ship_y - ship->y;
+    double dist_to_player = sqrt(dx*dx + dy*dy);
+    
+    // Chase player aggressively (larger range than red ships)
+    double chase_range = 400.0;  // Larger detection range
+    
+    if (dist_to_player > 0.1) {
+        // Move toward player with smooth turning
+        double base_speed = sqrt(ship->base_vx*ship->base_vx + ship->base_vy*ship->base_vy);
+        if (base_speed < 1.0) base_speed = 120.0;  // Faster than regular ships
+        
+        double target_vx = (dx / dist_to_player) * base_speed;
+        double target_vy = (dy / dist_to_player) * base_speed;
+        
+        // Very responsive turning for tactical maneuvering
+        double turn_rate = 0.25;  // Faster than all other types
+        ship->vx = ship->vx * (1.0 - turn_rate) + target_vx * turn_rate;
+        ship->vy = ship->vy * (1.0 - turn_rate) + target_vy * turn_rate;
+        
+        // Update angle to face target
+        ship->angle = atan2(ship->vy, ship->vx);
+    }
+    
+    // Proximity detection for burst attack
+    ship->proximity_detection_timer += dt;
+    if (ship->proximity_detection_timer >= 0.3) {  // Check every 0.3 seconds
+        ship->proximity_detection_timer = 0.0;
+        
+        // Check if player OR comet is nearby for burst trigger
+        bool trigger_burst = false;
+        
+        // Check player distance
+        if (dist_to_player < 250.0) {
+            trigger_burst = true;
+        }
+        
+        // Check for nearby comets
+        if (!trigger_burst && game->comet_count > 0) {
+            for (int j = 0; j < game->comet_count; j++) {
+                Comet *comet = &game->comets[j];
+                if (!comet->active) continue;
+                
+                double dx_comet = comet->x - ship->x;
+                double dy_comet = comet->y - ship->y;
+                double dist_to_comet = sqrt(dx_comet*dx_comet + dy_comet*dy_comet);
+                
+                if (dist_to_comet < 280.0) {
+                    trigger_burst = true;
+                    break;
+                }
+            }
+        }
+        
+        // Fire burst if triggered and cooldown ready
+        if (trigger_burst && ship->burst_fire_cooldown <= 0) {
+            comet_buster_brown_coat_fire_burst(game, ship_index);
+            // Burst cooldown: fires every 2-3 seconds
+            ship->burst_fire_cooldown = 2.0 + (rand() % 20) / 10.0;
+        }
+    }
+    
+    // Update burst cooldown
+    if (ship->burst_fire_cooldown > 0) {
+        ship->burst_fire_cooldown -= dt;
+    }
+    
+    // Standard rapid fire (3x faster than other ships)
+    ship->shoot_cooldown -= dt;
+    if (ship->shoot_cooldown <= 0) {
+        comet_buster_brown_coat_standard_fire(game, ship_index);
+        // Fire rate: every 0.1 seconds (3 shots per 0.3 seconds of other ships)
+        ship->shoot_cooldown = 0.1 + (rand() % 10) / 100.0;  // 0.1-0.2 sec
+    }
+}
+
+// Standard single-target fire for Brown Coats
+void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index) {
+    if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) return;
+    
+    EnemyShip *ship = &game->enemy_ships[ship_index];
+    if (!ship->active) return;
+    
+    double dx = game->ship_x - ship->x;
+    double dy = game->ship_y - ship->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    
+    if (dist > 0.01) {
+        double bullet_speed = 150.0;
+        double vx = (dx / dist) * bullet_speed;
+        double vy = (dy / dist) * bullet_speed;
+        
+        comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, ship_index);
+        
+        // Sound effect (same as other aggressive ships)
+        #ifdef ExternalSound
+        // Audio would play here if enabled
+        #endif
+    }
+}
+
+// Omnidirectional burst attack (8 directions)
+void comet_buster_brown_coat_fire_burst(CometBusterGame *game, int ship_index) {
+    if (!game || ship_index < 0 || ship_index >= game->enemy_ship_count) return;
+    
+    EnemyShip *ship = &game->enemy_ships[ship_index];
+    if (!ship->active) return;
+    
+    // Fire 8 bullets in omnidirectional pattern
+    int num_directions = 8;
+    double angle_step = 2.0 * M_PI / num_directions;
+    double bullet_speed = 130.0;  // Slightly slower than standard to distinguish
+    
+    // Rotate pattern each burst for visual variety
+    ship->last_burst_direction = (ship->last_burst_direction + 1) % 4;
+    double pattern_offset = ship->last_burst_direction * (M_PI / 4.0);
+    
+    for (int i = 0; i < num_directions; i++) {
+        double angle = pattern_offset + (i * angle_step);
+        double vx = cos(angle) * bullet_speed;
+        double vy = sin(angle) * bullet_speed;
+        
+        comet_buster_spawn_enemy_bullet_from_ship(game, ship->x, ship->y, vx, vy, ship_index);
+    }
+    
+    ship->burst_count_this_wave++;
+    
+    // Sound effect for burst (more dramatic than standard fire)
+    #ifdef ExternalSound
+    // Burst sound would play here
+    #endif
 }

@@ -446,6 +446,15 @@ void comet_buster_spawn_enemy_ship_internal(CometBusterGame *game, int screen_wi
         // Purple ships (sentinel): 4 shield points (more durable)
         ship->max_shield_health = 4;
         ship->shield_health = 4;
+    } else if (ship_type == 4) {
+        // BROWN COAT ELITE BLUE SHIP
+        ship->max_shield_health = 2;
+        ship->shield_health = 2;
+        ship->burst_fire_cooldown = 1.0;      // Start with quick first burst
+        ship->burst_trigger_range = 250.0;    // Trigger range for burst
+        ship->last_burst_direction = 0;       // Initial pattern rotation
+        ship->proximity_detection_timer = 0.0;// Start checking immediately
+        ship->burst_count_this_wave = 0;      // Track total bursts
     } else {
         // Blue ships (patrol): 3 shield points
         ship->max_shield_health = 3;

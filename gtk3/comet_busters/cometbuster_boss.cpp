@@ -1315,14 +1315,13 @@ void void_nexus_split_into_fragments(CometBusterGame *game, int num_fragments) {
 void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int screen_height) {
     if (!game || game->enemy_ship_count >= MAX_ENEMY_SHIPS) return;
     
-    fprintf(stdout, "[VOID NEXUS] Spawning ship wave!\n");
+    fprintf(stdout, "[VOID NEXUS] Spawning ship wave with BROWN COAT ELITE!\n");
     
-    // Void Nexus spawns 8 ships per wave (more aggressive than Spawn Queen's 10)
-    // BUT spawns more frequently
+    // Void Nexus spawns 8 ships per wave including elite brown coats
+    // Mix: 25% Red (aggressive), 25% Green (hunters), 20% Purple (sentinels), 30% BROWN COAT (elite)
     int ships_to_spawn = 8;
     int ships_spawned = 0;
     
-    // Mix: 50% Red (aggressive), 30% Green (hunters), 20% Purple (sentinels)
     for (int i = 0; i < ships_to_spawn; i++) {
         if (game->enemy_ship_count >= MAX_ENEMY_SHIPS) {
             fprintf(stdout, "[VOID NEXUS] Hit MAX_ENEMY_SHIPS limit, stopping spawn\n");
@@ -1332,29 +1331,30 @@ void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int scr
         int ship_type = 0;
         int formation_id = -1;
         int formation_size = 1;
-        
-        // Distribute types: 0-3 = Red, 4-5 = Green, 6-7 = Purple
-        if (i < 4) {
-            // Red aggressive ships (50%)
-            ship_type = 1;
+        // Distribute types: 
+        // 0-1 = Blue/Red aggressive (25%)
+        // 2-3 = Green hunter (25%)
+        // 4-5 = Purple sentinel (20%)
+        // 6-7 = BROWN COAT ELITE (30%)
+        if (i==0) {
+            ship_type=4;
+        } else if (i < 2) {
+            ship_type = 1;  // Red aggressive
+        } else if (i < 4) {
+            ship_type = 2;  // Green hunter
         } else if (i < 6) {
-            // Green hunter ships (30%)
-            ship_type = 2;
+            ship_type = 3;  // Purple sentinel
+            formation_id = game->current_wave * 1000 + (int)(game->boss.phase_timer * 100);
+            formation_size = 2;
         } else {
-            // Purple sentinel ships (20%) - spawn in pairs
-            ship_type = 3;
-            if (i == 6) {
-                formation_id = game->current_wave * 1000 + (int)(game->boss.phase_timer * 100);
-                formation_size = 2;
-            } else if (i == 7) {
-                formation_id = game->current_wave * 1000 + (int)(game->boss.phase_timer * 100);
-                formation_size = 2;
-            }
+            ship_type = 4;  // BROWN COAT ELITE (first encounter in void nexus)
         }
         
         // Spawn from random edges
         int edge = (i % 8);
-        double speed = 100.0 + (rand() % 60);  // Vary speeds
+        
+        // Brown coats spawn faster and with high initial speed
+        double speed = (ship_type == 4) ? (130.0 + (rand() % 40)) : (100.0 + (rand() % 60));
         
         comet_buster_spawn_enemy_ship_internal(game, screen_width, screen_height,
                                                ship_type, edge, speed,
@@ -1363,7 +1363,8 @@ void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int scr
         ships_spawned++;
     }
     
-    fprintf(stdout, "[VOID NEXUS] Spawned %d ships in wave\n", ships_spawned);
+    fprintf(stdout, "[VOID NEXUS] Spawned %d ships in wave (%d brown coats)\n", ships_spawned,
+            (ships_spawned >= 2) ? 2 : ships_spawned);
 }
 
 // ============================================================================
