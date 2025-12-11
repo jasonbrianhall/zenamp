@@ -1337,7 +1337,7 @@ void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int scr
         // 4-5 = Purple sentinel (20%)
         // 6-7 = BROWN COAT ELITE (30%)
         if (i==0) {
-            ship_type=4;
+            ship_type=0;
         } else if (i < 2) {
             ship_type = 1;  // Red aggressive
         } else if (i < 4) {
@@ -1595,4 +1595,370 @@ void draw_void_nexus_boss(BossShip *boss, cairo_t *cr, int width, int height) {
     cairo_set_line_width(cr, 1.0);
     cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
     cairo_stroke(cr);
+}
+
+void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int screen_height) {
+    if (!game) return;
+    
+    fprintf(stdout, "[HARBINGER] Spawning Harbinger at Wave %d\n", game->current_wave);
+    
+    BossShip *boss = &game->boss;
+    memset(boss, 0, sizeof(BossShip));  // MUST be before setting active!
+    
+    // Basic properties
+    boss->x = screen_width / 2;
+    boss->y = -100.0;
+    boss->vx = 80.0 + (rand() % 40);  // Moves left-right
+    boss->vy = 150.0;  // Falls downward
+    
+    // INCREASED HEALTH: Harbinger is much tougher than Death Star
+    // Death Star has 180 HP, Harbinger gets 250 HP (immune to asteroids so needs high bullet health)
+    boss->health = 250;
+    boss->max_health = 250;
+    boss->angle = 0;
+    boss->phase = 0;  // Dormant phase
+    boss->phase_duration = 2.5;  // Slightly longer phases
+    boss->phase_timer = 0;
+    
+    // Harbinger-specific
+    boss->laser_angle = 0;
+    boss->laser_rotation_speed = 180.0;  // Degrees per second
+    boss->laser_active = false;
+    boss->laser_charge_timer = 0;
+    boss->gravity_well_strength = 0.0;
+    boss->bomb_count = 0;
+    boss->bomb_spawned_this_phase = 0;
+    boss->beam_angle_offset = 0;
+    
+    // ENHANCED SHIELD: Much tougher shield (immune to asteroids makes shield less critical)
+    boss->shield_health = 20;
+    boss->max_shield_health = 20;
+    boss->shield_active = true;
+    
+    // Firing & rotation
+    boss->shoot_cooldown = 1.5;
+    boss->rotation = 0;
+    boss->rotation_speed = 90.0;  // Slower rotation
+    boss->damage_flash_timer = 0;
+    
+    boss->active = true;
+    game->boss_active = true;
+    
+    fprintf(stdout, "[HARBINGER] The Harbinger boss spawned! Health: %d, Shield: %d\n", 
+            boss->health, boss->shield_health);
+}
+
+void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, int height) {
+    if (!game || !game->boss_active) return;
+    
+    BossShip *boss = &game->boss;
+    if (!boss->active) return;
+    
+    // ===== MOVEMENT =====
+    boss->x += boss->vx * dt;
+    if (boss->y < 150.0) {
+        boss->y += boss->vy * dt;
+    } else {
+        boss->vy = 0;  // Stop moving down once in play area
+    }
+    
+    // Bounce off sides
+    if (boss->x < 80 || boss->x > width - 80) {
+        boss->vx = -boss->vx;
+    }
+    
+    // Update rotation
+    boss->rotation += boss->rotation_speed * dt;
+    
+    // Update damage flash
+    if (boss->damage_flash_timer > 0) {
+        boss->damage_flash_timer -= dt;
+    }
+    
+    // ===== PHASE LOGIC =====
+    boss->phase_timer += dt;
+    if (boss->phase_timer >= boss->phase_duration) {
+        boss->phase_timer = 0;
+        boss->phase = (boss->phase + 1) % 3;  // Cycle: 0, 1, 2, 0, 1, 2...
+        boss->bomb_spawned_this_phase = 0;  // Reset bomb counter
+        boss->beam_angle_offset = (rand() % 360) * (M_PI / 180.0);  // Random beam offset
+        
+        fprintf(stdout, "[HARBINGER] Phase changed to %d\n", boss->phase);
+    }
+    
+    // ===== GRAVITY WELL =====
+    // Activate gravity well in phase 2 (Frenzy)
+    if (boss->phase == 2) {
+        boss->gravity_well_strength = 200.0;  // Strong pull
+    } else if (boss->phase == 1) {
+        boss->gravity_well_strength = 80.0;   // Weak pull during charge
+    } else {
+        boss->gravity_well_strength = 0.0;    // No pull in dormant phase
+    }
+    
+    // ===== ATTACK PATTERNS =====
+    boss->shoot_cooldown -= dt;
+    
+    if (boss->phase == 0) {
+        // DORMANT PHASE: Spawn multiple bombs
+        if (boss->shoot_cooldown <= 0) {
+            // Spawn bouncing bombs - MORE aggressive
+            if (boss->bomb_spawned_this_phase < 5) {  // Increased from 3
+                harbinger_spawn_bomb(game, boss->x, boss->y);
+                boss->bomb_spawned_this_phase++;
+                boss->shoot_cooldown = 0.3;  // Faster spawn rate
+            } else {
+                // Transition to next phase sooner if bombs are done
+                boss->phase_timer = boss->phase_duration;
+            }
+        }
+        
+    } else if (boss->phase == 1) {
+        // ACTIVE PHASE: Charging laser + spawn enemy ships
+        boss->laser_angle += boss->laser_rotation_speed * dt;
+        boss->laser_charge_timer += dt;
+        
+        // Laser fires every 2.5 seconds (faster than before)
+        if (boss->laser_charge_timer >= 2.5) {
+            boss->laser_active = true;
+            // Fire laser burst in orbital pattern
+            for (int i = 0; i < 5; i++) {
+                double angle = boss->laser_angle + (i * 72.0 * M_PI / 180.0);  // 5-point spread
+                double vx = cos(angle) * 250.0;
+                double vy = sin(angle) * 250.0;
+                comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
+            }
+            boss->laser_charge_timer = 0;
+            fprintf(stdout, "[HARBINGER] Orbital laser fire!\n");
+        }
+        
+        // Spawn aggressive enemy ships during this phase
+        if ((rand() % 1000) < 40) {  // ~4% chance per frame
+            // Spawn sentinel fleet
+            int edge = rand() % 8;
+            double speed = 120.0 + (rand() % 40);
+            int formation_id = game->current_wave * 100 + (int)(boss->shoot_cooldown * 100);
+            comet_buster_spawn_enemy_ship_internal(game, (int)boss->x, (int)boss->y,
+                                                   3, edge, speed, formation_id, 2);
+            fprintf(stdout, "[HARBINGER] Spawned enemy sentinel during Active phase!\n");
+        }
+        
+    } else if (boss->phase == 2) {
+        // FRENZY PHASE: Rapid attacks + massive comet spawning
+        if (boss->shoot_cooldown <= 0) {
+            // Spread shot in multiple directions (MORE bullets)
+            int num_directions = 12;  // Increased from 8
+            for (int i = 0; i < num_directions; i++) {
+                double angle = (i * 2.0 * M_PI / num_directions) + boss->beam_angle_offset;
+                double vx = cos(angle) * 200.0;
+                double vy = sin(angle) * 200.0;
+                comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
+            }
+            
+            // Spawn bombs MORE rapidly
+            if (boss->bomb_spawned_this_phase < 8) {  // Increased from 5
+                harbinger_spawn_bomb(game, boss->x, boss->y);
+                boss->bomb_spawned_this_phase++;
+            }
+            
+            boss->shoot_cooldown = 0.3;  // Faster firing in frenzy (was 0.4)
+            fprintf(stdout, "[HARBINGER] Frenzy attack! Shots: %d\n", 
+                    boss->bomb_spawned_this_phase);
+        }
+        
+        // Spawn massive comet waves during frenzy
+        if ((rand() % 1000) < 60) {  // ~6% chance per frame
+            for (int i = 0; i < 2; i++) {  // Spawn 2 comets at a time
+                int band = rand() % 3;
+                comet_buster_spawn_comet(game, band, (int)boss->x, (int)boss->y);
+            }
+            fprintf(stdout, "[HARBINGER] Released comets during Frenzy!\n");
+        }
+        
+        // Spawn RED AGGRESSIVE SHIPS during frenzy (the deadly ones)
+        if ((rand() % 1000) < 25) {  // ~2.5% chance per frame
+            int edge = rand() % 8;
+            double speed = 140.0 + (rand() % 60);
+            comet_buster_spawn_enemy_ship_internal(game, (int)boss->x, (int)boss->y,
+                                                   1, edge, speed, -1, 1);  // Type 1 = Red aggressive
+            fprintf(stdout, "[HARBINGER] SUMMONED RED AGGRESSORS!\n");
+        }
+    }
+}
+
+void harbinger_spawn_bomb(CometBusterGame *game, double x, double y) {
+    if (!game || game->comet_count >= MAX_COMETS) return;
+    
+    int slot = game->comet_count;
+    Comet *bomb = &game->comets[slot];
+    memset(bomb, 0, sizeof(Comet));
+    
+    // Spawn bomb slightly offset from boss
+    double angle = (rand() % 360) * (M_PI / 180.0);
+    bomb->x = x + cos(angle) * 60.0;
+    bomb->y = y + sin(angle) * 60.0;
+    
+    // Give velocity away from boss, bounces off walls
+    double speed = 120.0 + (rand() % 60);
+    bomb->vx = cos(angle) * speed;
+    bomb->vy = sin(angle) * speed;
+    
+    bomb->size = COMET_MEDIUM;
+    bomb->radius = 18;
+    bomb->frequency_band = 2;  // Treble - blue colored
+    bomb->rotation = 0;
+    bomb->rotation_speed = 200.0;
+    bomb->active = true;
+    bomb->health = 2;  // Takes 2 hits to destroy
+    bomb->base_angle = angle;
+    
+    // Dark blue color
+    bomb->color[0] = 0.2;
+    bomb->color[1] = 0.4;
+    bomb->color[2] = 0.9;
+    
+    game->comet_count++;
+    fprintf(stdout, "[HARBINGER] Spawned bouncing bomb! (Total: %d)\n", 
+            game->comet_count);
+}
+
+void draw_harbinger_boss(BossShip *boss, cairo_t *cr, int width, int height) {
+    (void)width;
+    (void)height;
+    
+    if (!boss || !boss->active) return;
+    
+    cairo_save(cr);
+    cairo_translate(cr, boss->x, boss->y);
+    cairo_rotate(cr, boss->rotation * M_PI / 180.0);
+    
+    // Main body - dark cosmic entity
+    double core_size = 35.0;
+    
+    // Outer aura (pulsing based on phase)
+    double aura_pulse = 0.3 + 0.4 * sin(boss->rotation * M_PI / 180.0 * 0.05);
+    if (boss->phase == 2) {
+        aura_pulse = 0.7;  // Brighter in frenzy
+    }
+    
+    cairo_set_source_rgba(cr, 0.4 + aura_pulse * 0.3, 0.0, 0.8 + aura_pulse * 0.2, 0.6);
+    cairo_arc(cr, 0, 0, core_size + 15, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    
+    // Core body - dark purple with angular points
+    cairo_set_source_rgb(cr, 0.3, 0.0, 0.7);
+    int points = 6;
+    for (int i = 0; i < points; i++) {
+        double angle = (i * 2.0 * M_PI / points);
+        double x = cos(angle) * core_size;
+        double y = sin(angle) * core_size;
+        
+        if (i == 0) {
+            cairo_move_to(cr, x, y);
+        } else {
+            cairo_line_to(cr, x, y);
+        }
+    }
+    cairo_close_path(cr);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgb(cr, 1.0, 0.3, 1.0);  // Magenta outline
+    cairo_set_line_width(cr, 2.0);
+    cairo_stroke(cr);
+    
+    // Inner core
+    cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);  // Yellow center
+    cairo_arc(cr, 0, 0, 8.0, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    
+    // Draw laser charging indicator
+    if (boss->phase == 1) {
+        // Rotating indicator lines
+        double laser_angle = boss->laser_angle * M_PI / 180.0;
+        cairo_set_source_rgb(cr, 1.0, 0.5, 1.0);  // Light magenta
+        cairo_set_line_width(cr, 2.0);
+        
+        for (int i = 0; i < 4; i++) {
+            double angle = laser_angle + (i * M_PI / 2.0);
+            double x = cos(angle) * 40.0;
+            double y = sin(angle) * 40.0;
+            cairo_move_to(cr, 0, 0);
+            cairo_line_to(cr, x, y);
+            cairo_stroke(cr);
+        }
+    }
+    
+    // Gravity well effect (visual ripples in phase 2)
+    if (boss->phase == 2 && boss->gravity_well_strength > 0) {
+        cairo_set_source_rgba(cr, 0.0, 1.0, 0.8, 0.3);
+        cairo_set_line_width(cr, 1.5);
+        double ripple_size = 20.0 + 10.0 * sin(boss->rotation * M_PI / 180.0 * 0.1);
+        cairo_arc(cr, 0, 0, ripple_size, 0, 2.0 * M_PI);
+        cairo_stroke(cr);
+    }
+    
+    // Damage flash
+    if (boss->damage_flash_timer > 0) {
+        cairo_set_source_rgba(cr, 1.0, 0.2, 0.2, 0.6);
+        cairo_arc(cr, 0, 0, core_size, 0, 2.0 * M_PI);
+        cairo_fill(cr);
+    }
+    
+    cairo_restore(cr);
+    
+    // Draw health bar
+    double bar_width = 120.0;
+    double bar_height = 10.0;
+    double bar_x = boss->x - bar_width / 2.0;
+    double bar_y = boss->y - 60.0;
+    
+    // Background
+    cairo_set_source_rgb(cr, 0.2, 0.0, 0.1);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_fill(cr);
+    
+    // Health bar (gradient purple to magenta)
+    double health_percent = (double)boss->health / boss->max_health;
+    if (health_percent < 0) health_percent = 0;
+    
+    // Color changes as health decreases
+    if (health_percent > 0.5) {
+        cairo_set_source_rgb(cr, 1.0, 0.2, 0.8);  // Magenta
+    } else if (health_percent > 0.25) {
+        cairo_set_source_rgb(cr, 1.0, 0.5, 0.3);  // Orange
+    } else {
+        cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);  // Red
+    }
+    
+    cairo_rectangle(cr, bar_x, bar_y, bar_width * health_percent, bar_height);
+    cairo_fill(cr);
+    
+    // Border
+    cairo_set_source_rgb(cr, 1.0, 0.3, 1.0);
+    cairo_set_line_width(cr, 1.5);
+    cairo_rectangle(cr, bar_x, bar_y, bar_width, bar_height);
+    cairo_stroke(cr);
+    
+    // Phase indicator
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_set_font_size(cr, 12);
+    const char *phase_text = "";
+    switch (boss->phase) {
+        case 0: phase_text = "DORMANT"; break;
+        case 1: phase_text = "ACTIVE"; break;
+        case 2: phase_text = "FRENZY"; break;
+    }
+    cairo_move_to(cr, boss->x - 25, boss->y + 65);
+    cairo_show_text(cr, phase_text);
+}
+
+bool comet_buster_check_bullet_harbinger(Bullet *b, BossShip *boss) {
+    if (!b || !b->active || !boss || !boss->active) {
+        return false;
+    }
+    
+    double dx = boss->x - b->x;
+    double dy = boss->y - b->y;
+    double dist = sqrt(dx*dx + dy*dy);
+    
+    return (dist < 40.0);  // Hitbox radius of 40
 }

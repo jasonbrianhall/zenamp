@@ -57,10 +57,12 @@ void draw_comet_buster(Visualizer *visualizer, cairo_t *cr) {
         if (game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
             draw_spawn_queen_boss(&game->spawn_queen, cr, width, height);
         } else if (game->boss.active) {
-            if (game->current_wave % 15 == 0) {
-               draw_void_nexus_boss(&game->boss, cr, width, height);
-           } else {
-              draw_comet_buster_boss(&game->boss, cr, width, height);
+            if (game->current_wave % 20 == 5) {
+               draw_comet_buster_boss(&game->boss, cr, width, height);      // Death Star (wave 5, 25, 45, etc)
+           } else if (game->current_wave % 20 == 15) {
+              draw_void_nexus_boss(&game->boss, cr, width, height);         // Void Nexus (wave 15, 35, 55, etc)
+           } else if (game->current_wave % 20 == 0) {
+              draw_harbinger_boss(&game->boss, cr, width, height);          // Harbinger (wave 20, 40, 60, etc)
            }
        }
     }
@@ -380,7 +382,7 @@ void draw_comet_buster_enemy_ships(CometBusterGame *game, cairo_t *cr, int width
         cairo_set_line_width(cr, 1.5);
         
         // Draw ship body as triangle (slightly larger for brown coat)
-        double ship_size = (ship->ship_type == 4) ? 14 : 12;  // Brown coats are slightly bigger
+        double ship_size = (ship->ship_type == 4) ? 18 : 12;  // Brown coats are slightly bigger
         cairo_move_to(cr, ship_size, 0);              // Front point
         cairo_line_to(cr, -ship_size, -ship_size/1.5);  // Back left
         cairo_line_to(cr, -ship_size, ship_size/1.5);   // Back right

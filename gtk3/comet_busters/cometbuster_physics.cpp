@@ -1358,14 +1358,16 @@ void update_comet_buster(Visualizer *visualizer, double dt) {
     comet_buster_update_enemy_bullets(game, dt, width, height, visualizer);  // Update enemy bullets
     
     // Update boss if active
-    if (game->boss_active && game->spawn_queen.active && game->spawn_queen.is_spawn_queen) {
+    if (game->boss_active && game->spawn_queen.active && game->spawn_queen.is_spawn_queen && game->current_wave % 20 == 10) {
         comet_buster_update_spawn_queen(game, dt, width, height);
     } else if (game->boss_active && game->boss.active) {
         // Route to correct boss based on wave
-        if (game->current_wave == 15) {
-            comet_buster_update_void_nexus(game, dt, width, height);
-        } else {
-            comet_buster_update_boss(game, dt, width, height);
+        if (game->current_wave % 20 == 5) {
+            comet_buster_update_boss(game, dt, width, height);        // Death Star (wave 5, 25, 45, etc)
+        } else if (game->current_wave % 20 == 15) {
+            comet_buster_update_void_nexus(game, dt, width, height);  // Void Nexus (wave 15, 35, 55, etc)
+        } else if (game->current_wave % 20 == 0) {
+            comet_buster_update_harbinger(game, dt, width, height);   // Harbinger (wave 20, 40, 60, etc)
         }
     } 
     
@@ -1735,7 +1737,25 @@ void update_comet_buster(Visualizer *visualizer, double dt) {
         // Regular Death Star boss collision
         else if (game->boss.active) {
             for (int j = 0; j < game->bullet_count; j++) {
-                if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
+                // SPECIAL CASE: Void Nexus in fragment mode needs special collision handling
+                if (game->current_wave % 20 == 15 && game->boss.fragment_count > 0) {
+                    // Void Nexus is in fragment form - check which fragment was hit
+                    int fragment_hit = -1;
+                    if (comet_buster_hit_void_nexus_fragment(&game->bullets[j], &game->boss, &fragment_hit)) {
+                        game->bullets[j].active = false;  // Consume bullet
+                        
+                        // Apply damage to the specific fragment
+                        comet_buster_damage_void_nexus(game, 1, fragment_hit);
+                        game->consecutive_hits++;
+                        
+#ifdef ExternalSound
+                        if (visualizer && visualizer->audio.sfx_hit) {
+                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
+                        }
+#endif
+                        break;
+                    }
+                } else if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
                     game->bullets[j].active = false;  // Consume bullet
                     
                     // Shield reduces damage but doesn't block it
@@ -1918,7 +1938,7 @@ void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index
     double dist = sqrt(dx*dx + dy*dy);
     
     if (dist > 0.01) {
-        double bullet_speed = 150.0;
+        double bullet_speed = 200.0;
         double vx = (dx / dist) * bullet_speed;
         double vy = (dy / dist) * bullet_speed;
         
@@ -1943,7 +1963,7 @@ void comet_buster_brown_coat_fire_burst(CometBusterGame *game, int ship_index) {
     // Fire 8 bullets in omnidirectional pattern
     int num_directions = 8;
     double angle_step = 2.0 * M_PI / num_directions;
-    double bullet_speed = 130.0;  // Slightly slower than standard to distinguish
+    double bullet_speed = 250.0;  // Faster
     
     // Rotate pattern each burst for visual variety
     ship->last_burst_direction = (ship->last_burst_direction + 1) % 4;

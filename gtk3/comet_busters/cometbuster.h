@@ -168,6 +168,15 @@ typedef struct {
     double last_damage_time;      // For tracking damage frequency
     int burst_angle_offset;       // For rotating firing pattern
     double nexus_ship_spawn_timer;
+    
+    double laser_angle;             // Current angle of orbital laser
+    double laser_rotation_speed;    // How fast laser rotates
+    double gravity_well_strength;   // Force to pull bullets toward boss
+    bool laser_active;              // Is laser currently firing?
+    double laser_charge_timer;      // Charge time before laser fires
+    int bomb_count;                 // Number of active bouncing bombs
+    int bomb_spawned_this_phase;    // Track bombs created in current phase
+    double beam_angle_offset;       // For variety in beam attacks
 } BossShip;
 
 // Spawn Queen (Mothership) structure - spawns Red and Sentinel ships on waves 10, 20, 30, etc.
@@ -421,5 +430,10 @@ void void_nexus_spawn_ship_wave(CometBusterGame *game, int screen_width, int scr
 
 void comet_buster_brown_coat_fire_burst(CometBusterGame *game, int ship_index);
 bool comet_buster_is_target_nearby(CometBusterGame *game, double ship_x, double ship_y, double range);
+void harbinger_spawn_bomb(CometBusterGame *game, double x, double y);
+void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int screen_height);
+void draw_harbinger_boss(BossShip *boss, cairo_t *cr, int width, int height);
+void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, int height);
+bool comet_buster_hit_void_nexus_fragment(Bullet *b, BossShip *boss, int *fragment_hit);
 
 #endif // COMETBUSTER_H
