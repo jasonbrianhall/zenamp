@@ -1386,6 +1386,16 @@ void update_comet_buster(Visualizer *visualizer, double dt) {
     // BUT: Don't progress if boss is active (boss must be defeated first)
     if (game->wave_complete_timer <= 0 && !game->boss_active) {
         comet_buster_update_wave_progression(game);
+        
+        // NEW: Play wave complete sound when timer just started
+        if (game->wave_complete_timer > 0) {
+#ifdef ExternalSound
+            if (visualizer && visualizer->audio.sfx_wave_complete) {
+                audio_play_sound(&visualizer->audio, visualizer->audio.sfx_wave_complete);
+                fprintf(stdout, "[AUDIO] Playing wave complete sound\n");
+            }
+#endif
+        }
     }
     
     // Handle wave complete timer (delay before next wave spawns)
