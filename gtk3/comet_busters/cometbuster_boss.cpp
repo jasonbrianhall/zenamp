@@ -1059,7 +1059,7 @@ void comet_buster_update_void_nexus(CometBusterGame *game, double dt, int width,
     boss->phase_timer += dt;
     if (boss->phase_timer >= boss->phase_duration) {
         boss->phase_timer = 0;
-        boss->phase = (boss->phase + 1) % 3;  // Cycle: 0 (square) -> 1 (hexagon) -> 2 (infinity) -> 0
+        boss->phase = (boss->phase + 1) % 3;  // Cycle: 0 (square) -> 1 (hexagon) -> 2 (omnidirectional) -> 0
         fprintf(stdout, "[VOID NEXUS] Phase changed to %d\n", boss->phase);
     }
     
@@ -1071,45 +1071,40 @@ void comet_buster_update_void_nexus(CometBusterGame *game, double dt, int width,
     double pattern_time = boss->phase_timer;
     double pattern_speed = 1.5;  // Adjust how fast pattern moves
     
-    if (boss->fragment_count == 0) {
-        // Main body movement
-        if (boss->phase == 0) {
-            // Square pattern - corners at distance 120 from center
-            double corner_dist = 120.0;
-            int corner = (int)(pattern_time * pattern_speed) % 4;
-            double target_x = center_x;
-            double target_y = center_y;
-            
-            switch(corner) {
-                case 0: target_x -= corner_dist; target_y -= corner_dist; break;  // Top-left
-                case 1: target_x += corner_dist; target_y -= corner_dist; break;  // Top-right
-                case 2: target_x += corner_dist; target_y += corner_dist; break;  // Bottom-right
-                case 3: target_x -= corner_dist; target_y += corner_dist; break;  // Bottom-left
-            }
-            
-            // Smoothly move toward target
-            double smooth_factor = 0.08;
-            boss->x += (target_x - boss->x) * smooth_factor;
-            boss->y += (target_y - boss->y) * smooth_factor;
-            
-        } else if (boss->phase == 1) {
-            // Hexagon pattern - 6 points at distance 100
-            double hex_dist = 100.0;
-            double hex_angle = (pattern_time * pattern_speed * 60.0) * M_PI / 180.0;  // Rotate around
-            
-            boss->x = center_x + cos(hex_angle) * hex_dist;
-            boss->y = center_y + sin(hex_angle) * hex_dist;
-            
-        } else if (boss->phase == 2) {
-            // Infinity/figure-8 pattern
-            double inf_scale_x = 100.0;
-            double inf_scale_y = 60.0;
-            double inf_time = pattern_time * pattern_speed * 2.0;
-            
-            // Lissajous curve (infinity shape)
-            boss->x = center_x + sin(inf_time) * inf_scale_x;
-            boss->y = center_y + sin(inf_time * 2.0) * 0.5 * inf_scale_y;
+    // Main body movement (always, no fragments)
+    if (boss->phase == 0) {
+        // Square pattern - corners at distance 120 from center
+        double corner_dist = 120.0;
+        int corner = (int)(pattern_time * pattern_speed) % 4;
+        double target_x = center_x;
+        double target_y = center_y;
+        
+        switch(corner) {
+            case 0: target_x -= corner_dist; target_y -= corner_dist; break;  // Top-left
+            case 1: target_x += corner_dist; target_y -= corner_dist; break;  // Top-right
+            case 2: target_x += corner_dist; target_y += corner_dist; break;  // Bottom-right
+            case 3: target_x -= corner_dist; target_y += corner_dist; break;  // Bottom-left
         }
+        
+        // Smoothly move toward target
+        double smooth_factor = 0.08;
+        boss->x += (target_x - boss->x) * smooth_factor;
+        boss->y += (target_y - boss->y) * smooth_factor;
+        
+    } else if (boss->phase == 1) {
+        // Hexagon pattern - 6 points at distance 100
+        double hex_dist = 100.0;
+        double hex_angle = (pattern_time * pattern_speed * 60.0) * M_PI / 180.0;  // Rotate around
+        
+        boss->x = center_x + cos(hex_angle) * hex_dist;
+        boss->y = center_y + sin(hex_angle) * hex_dist;
+        
+    } else if (boss->phase == 2) {
+        // Phase 2: Center position (giant ball just sits in middle)
+        // Smooth movement to center
+        double smooth_factor = 0.04;
+        boss->x += (center_x - boss->x) * smooth_factor;
+        boss->y += (center_y - boss->y) * smooth_factor;
     }
     
     // Keep boss roughly in bounds (with some margin)
@@ -1131,71 +1126,45 @@ void comet_buster_update_void_nexus(CometBusterGame *game, double dt, int width,
     // ========== FIRING PATTERN ==========
     boss->shoot_cooldown -= dt;
     
-    // 3-way rotating energy bursts every 0.6 seconds
-    if (boss->shoot_cooldown <= 0) {
-        void_nexus_fire(game);
-        boss->shoot_cooldown = 0.6;
-        boss->burst_angle_offset += 30;  // Rotate pattern each burst
-    }
-    
-    // ========== SPLITTING MECHANIC ==========
-    // When boss health drops below 70%, split into 2 fragments
-    if (boss->fragment_count == 0 && boss->health < boss->max_health * 0.7) {
-        fprintf(stdout, "[VOID NEXUS] Boss health critical! Splitting into fragments!\n");
-        void_nexus_split_into_fragments(game, 2);  // Split into 2
+    if (boss->phase == 0 || boss->phase == 1) {
+        // Phases 0 & 1: 3-way rotating energy bursts every 0.6 seconds
+        if (boss->shoot_cooldown <= 0) {
+            void_nexus_fire(game);
+            boss->shoot_cooldown = 0.6;
+            boss->burst_angle_offset += 30;  // Rotate pattern each burst
+        }
+    } else if (boss->phase == 2) {
+        // Phase 2: OMNIDIRECTIONAL BULLET SPRAY - more intense
+        if (boss->shoot_cooldown <= 0) {
+            // Fire bullets in all 8 directions + diagonal
+            int num_directions = 8;
+            for (int i = 0; i < num_directions; i++) {
+                double angle = (i * 2.0 * M_PI / num_directions) + (boss->burst_angle_offset * M_PI / 180.0);
+                double bullet_speed = 220.0;  // Fast bullets
+                double vx = cos(angle) * bullet_speed;
+                double vy = sin(angle) * bullet_speed;
+                comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
+            }
+            
+            boss->shoot_cooldown = 0.4;  // Rapid fire
+            boss->burst_angle_offset += 15;  // Rotate pattern for visual variety
+        }
     }
     
     // ========== ENEMY SHIP SPAWNING ==========
     boss->nexus_ship_spawn_timer += dt;
     
     double spawn_interval = 3.0;
-    if (boss->fragment_count > 0) {
-        spawn_interval = 2.5;
+    if (boss->phase == 2) {
+        spawn_interval = 2.0;  // More ships during omnidirectional phase
     }
     if (boss->health < boss->max_health * 0.5) {
-        spawn_interval = 2.0;
+        spawn_interval = 1.5;  // Even more ships at low health
     }
     
     if (boss->nexus_ship_spawn_timer >= spawn_interval) {
         void_nexus_spawn_ship_wave(game, width, height);
         boss->nexus_ship_spawn_timer = 0;
-    }
-    
-    // ========== FRAGMENT MANAGEMENT ==========
-    if (boss->fragment_count > 0) {
-        // Update all active fragments
-        for (int i = 0; i < boss->fragment_count; i++) {
-            // Fragments slowly drift apart then regroup
-            boss->fragment_reunite_timer += dt;
-            
-            // Every 4 seconds, fragments try to reunite
-            if (boss->fragment_reunite_timer > 4.0) {
-                // Move fragments back toward center
-                double center_dx = center_x - boss->fragment_positions[i][0];
-                double center_dy = center_y - boss->fragment_positions[i][1];
-                double dist = sqrt(center_dx*center_dx + center_dy*center_dy);
-                
-                if (dist > 10.0) {
-                    boss->fragment_positions[i][0] += (center_dx / dist) * boss->reunite_speed * dt;
-                    boss->fragment_positions[i][1] += (center_dy / dist) * boss->reunite_speed * dt;
-                }
-            }
-            
-            // Fragments orbit around center slowly
-            double orbit_angle = (boss->phase_timer + i * M_PI * 2.0 / boss->fragment_count) * 0.3;
-            double orbit_dist = 80.0;
-            double orbit_x = center_x + cos(orbit_angle) * orbit_dist;
-            double orbit_y = center_y + sin(orbit_angle) * orbit_dist;
-            
-            // Lerp toward orbit position (adds natural motion)
-            boss->fragment_positions[i][0] += (orbit_x - boss->fragment_positions[i][0]) * 0.02;
-            boss->fragment_positions[i][1] += (orbit_y - boss->fragment_positions[i][1]) * 0.02;
-            
-            // Fragments fire at slower rate
-            if (boss->shoot_cooldown <= 0) {
-                void_nexus_fragment_fire(game, i);
-            }
-        }
     }
     
     // ========== CHECK IF BOSS IS DEFEATED ==========
@@ -1603,7 +1572,7 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     fprintf(stdout, "[HARBINGER] Spawning Harbinger at Wave %d\n", game->current_wave);
     
     BossShip *boss = &game->boss;
-    memset(boss, 0, sizeof(BossShip));  // MUST be before setting active!
+    memset(boss, 0, sizeof(BossShip));  // ✓ MEMSET FIRST
     
     // Basic properties
     boss->x = screen_width / 2;
@@ -1611,13 +1580,11 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     boss->vx = 80.0 + (rand() % 40);  // Moves left-right
     boss->vy = 150.0;  // Falls downward
     
-    // INCREASED HEALTH: Harbinger is much tougher than Death Star
-    // Death Star has 180 HP, Harbinger gets 250 HP (immune to asteroids so needs high bullet health)
-    boss->health = 250;
+    boss->health = 250;  // Increased from 75
     boss->max_health = 250;
     boss->angle = 0;
     boss->phase = 0;  // Dormant phase
-    boss->phase_duration = 2.5;  // Slightly longer phases
+    boss->phase_duration = 2.5;
     boss->phase_timer = 0;
     
     // Harbinger-specific
@@ -1630,8 +1597,8 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     boss->bomb_spawned_this_phase = 0;
     boss->beam_angle_offset = 0;
     
-    // ENHANCED SHIELD: Much tougher shield (immune to asteroids makes shield less critical)
-    boss->shield_health = 20;
+    // Shield system - enhanced
+    boss->shield_health = 20;  // Increased from 8
     boss->max_shield_health = 20;
     boss->shield_active = true;
     
@@ -1641,7 +1608,7 @@ void comet_buster_spawn_harbinger(CometBusterGame *game, int screen_width, int s
     boss->rotation_speed = 90.0;  // Slower rotation
     boss->damage_flash_timer = 0;
     
-    boss->active = true;
+    boss->active = true;  // ✓ ACTIVE SET LAST (after memset)
     game->boss_active = true;
     
     fprintf(stdout, "[HARBINGER] The Harbinger boss spawned! Health: %d, Shield: %d\n", 
@@ -1700,13 +1667,13 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
     boss->shoot_cooldown -= dt;
     
     if (boss->phase == 0) {
-        // DORMANT PHASE: Spawn multiple bombs
+        // DORMANT PHASE: Slow, occasional attacks
         if (boss->shoot_cooldown <= 0) {
-            // Spawn bouncing bombs - MORE aggressive
-            if (boss->bomb_spawned_this_phase < 5) {  // Increased from 3
+            // Spawn bouncing bombs
+            if (boss->bomb_spawned_this_phase < 3) {
                 harbinger_spawn_bomb(game, boss->x, boss->y);
                 boss->bomb_spawned_this_phase++;
-                boss->shoot_cooldown = 0.3;  // Faster spawn rate
+                boss->shoot_cooldown = 0.5;
             } else {
                 // Transition to next phase sooner if bombs are done
                 boss->phase_timer = boss->phase_duration;
@@ -1714,12 +1681,12 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
         }
         
     } else if (boss->phase == 1) {
-        // ACTIVE PHASE: Charging laser + spawn enemy ships
+        // ACTIVE PHASE: Charging laser
         boss->laser_angle += boss->laser_rotation_speed * dt;
         boss->laser_charge_timer += dt;
         
-        // Laser fires every 2.5 seconds (faster than before)
-        if (boss->laser_charge_timer >= 2.5) {
+        // Laser fires every 3 seconds
+        if (boss->laser_charge_timer >= 3.0) {
             boss->laser_active = true;
             // Fire laser burst in orbital pattern
             for (int i = 0; i < 5; i++) {
@@ -1732,22 +1699,11 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
             fprintf(stdout, "[HARBINGER] Orbital laser fire!\n");
         }
         
-        // Spawn aggressive enemy ships during this phase
-        if ((rand() % 1000) < 40) {  // ~4% chance per frame
-            // Spawn sentinel fleet
-            int edge = rand() % 8;
-            double speed = 120.0 + (rand() % 40);
-            int formation_id = game->current_wave * 100 + (int)(boss->shoot_cooldown * 100);
-            comet_buster_spawn_enemy_ship_internal(game, (int)boss->x, (int)boss->y,
-                                                   3, edge, speed, formation_id, 2);
-            fprintf(stdout, "[HARBINGER] Spawned enemy sentinel during Active phase!\n");
-        }
-        
     } else if (boss->phase == 2) {
-        // FRENZY PHASE: Rapid attacks + massive comet spawning
+        // FRENZY PHASE: Rapid attacks
         if (boss->shoot_cooldown <= 0) {
-            // Spread shot in multiple directions (MORE bullets)
-            int num_directions = 12;  // Increased from 8
+            // Spread shot in multiple directions
+            int num_directions = 8;
             for (int i = 0; i < num_directions; i++) {
                 double angle = (i * 2.0 * M_PI / num_directions) + boss->beam_angle_offset;
                 double vx = cos(angle) * 200.0;
@@ -1755,33 +1711,15 @@ void comet_buster_update_harbinger(CometBusterGame *game, double dt, int width, 
                 comet_buster_spawn_enemy_bullet(game, boss->x, boss->y, vx, vy);
             }
             
-            // Spawn bombs MORE rapidly
-            if (boss->bomb_spawned_this_phase < 8) {  // Increased from 5
+            // Spawn bombs more rapidly
+            if (boss->bomb_spawned_this_phase < 5) {
                 harbinger_spawn_bomb(game, boss->x, boss->y);
                 boss->bomb_spawned_this_phase++;
             }
             
-            boss->shoot_cooldown = 0.3;  // Faster firing in frenzy (was 0.4)
+            boss->shoot_cooldown = 0.4;  // Faster firing in frenzy
             fprintf(stdout, "[HARBINGER] Frenzy attack! Shots: %d\n", 
                     boss->bomb_spawned_this_phase);
-        }
-        
-        // Spawn massive comet waves during frenzy
-        if ((rand() % 1000) < 60) {  // ~6% chance per frame
-            for (int i = 0; i < 2; i++) {  // Spawn 2 comets at a time
-                int band = rand() % 3;
-                comet_buster_spawn_comet(game, band, (int)boss->x, (int)boss->y);
-            }
-            fprintf(stdout, "[HARBINGER] Released comets during Frenzy!\n");
-        }
-        
-        // Spawn RED AGGRESSIVE SHIPS during frenzy (the deadly ones)
-        if ((rand() % 1000) < 25) {  // ~2.5% chance per frame
-            int edge = rand() % 8;
-            double speed = 140.0 + (rand() % 60);
-            comet_buster_spawn_enemy_ship_internal(game, (int)boss->x, (int)boss->y,
-                                                   1, edge, speed, -1, 1);  // Type 1 = Red aggressive
-            fprintf(stdout, "[HARBINGER] SUMMONED RED AGGRESSORS!\n");
         }
     }
 }

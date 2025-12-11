@@ -1737,25 +1737,7 @@ void update_comet_buster(Visualizer *visualizer, double dt) {
         // Regular Death Star boss collision
         else if (game->boss.active) {
             for (int j = 0; j < game->bullet_count; j++) {
-                // SPECIAL CASE: Void Nexus in fragment mode needs special collision handling
-                if (game->current_wave % 20 == 15 && game->boss.fragment_count > 0) {
-                    // Void Nexus is in fragment form - check which fragment was hit
-                    int fragment_hit = -1;
-                    if (comet_buster_hit_void_nexus_fragment(&game->bullets[j], &game->boss, &fragment_hit)) {
-                        game->bullets[j].active = false;  // Consume bullet
-                        
-                        // Apply damage to the specific fragment
-                        comet_buster_damage_void_nexus(game, 1, fragment_hit);
-                        game->consecutive_hits++;
-                        
-#ifdef ExternalSound
-                        if (visualizer && visualizer->audio.sfx_hit) {
-                            audio_play_sound(&visualizer->audio, visualizer->audio.sfx_hit);
-                        }
-#endif
-                        break;
-                    }
-                } else if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
+                if (comet_buster_check_bullet_boss(&game->bullets[j], &game->boss)) {
                     game->bullets[j].active = false;  // Consume bullet
                     
                     // Shield reduces damage but doesn't block it
