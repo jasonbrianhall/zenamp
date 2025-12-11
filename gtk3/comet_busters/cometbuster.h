@@ -7,11 +7,11 @@
 #include <cairo.h>
 
 // Static memory allocation constants
-#define MAX_COMETS 32
+#define MAX_COMETS 128
 #define MAX_BULLETS 128
 #define MAX_PARTICLES 512
 #define MAX_FLOATING_TEXT 32
-#define MAX_HIGH_SCORES 10
+#define MAX_HIGH_SCORES 25
 
 typedef enum {
     COMET_SMALL = 0,

@@ -180,7 +180,7 @@ int comet_buster_get_wave_comet_count(int wave) {
     else {
         // For waves 6+, use exponential growth with a cap
         int count = 11 + (wave - 5) * 3;
-        return (count > 25) ? 25 : count;  // Cap at 25 to prevent too many
+        return (count > 50) ? 50 : count;  // Cap at 50 to prevent too many
     }
 }
 
