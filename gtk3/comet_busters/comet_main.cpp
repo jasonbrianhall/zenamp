@@ -7,6 +7,7 @@
 #include "cometbuster.h"
 #include "visualization.h"
 #include "audio_wad.h"
+#include "comet_help.cpp"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -763,8 +764,6 @@ void update_status_text(CometGUI *gui);
 gboolean game_update_timer(gpointer data);
 void on_new_game(GtkWidget *widget, gpointer data);
 void on_toggle_pause(GtkWidget *widget, gpointer data);
-void on_about(GtkWidget *widget, gpointer data);
-void on_game_controls(GtkWidget *widget, gpointer data);
 void on_toggle_fullscreen(GtkWidget *widget, gpointer data);
 void on_volume_dialog_open(GtkWidget *widget, gpointer data);
 void on_music_volume_changed(GtkRange *range, gpointer data);
@@ -1486,67 +1485,6 @@ void on_debug_skip_to_boss_phase(GtkWidget *widget, gpointer data) {
 #endif // DEBUG
 
 
-void on_about(GtkWidget *widget, gpointer data) {
-    GtkWidget *dialog = gtk_message_dialog_new(
-        NULL,
-        GTK_DIALOG_DESTROY_WITH_PARENT,
-        GTK_MESSAGE_INFO,
-        GTK_BUTTONS_OK,
-        "CometBuster v1.0.0\n\n"
-        "A classic arcade-style space shooter\n"
-        "Defend against incoming comets!\n\n"
-        "Controls:\n"
-        "A/D - Move Left/Right\n"
-        "W/S - Move Up/Down\n"
-        "Z/X - Rotate\n"
-        "SPACE - Fire\n"
-        "CTRL - Boost\n"
-        "V - Volume Settings\n"
-        "F11 - Fullscreen"
-    );
-    
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
-}
-
-void on_game_controls(GtkWidget *widget, gpointer data) {
-    GtkWidget *dialog = gtk_message_dialog_new(
-        NULL,
-        GTK_DIALOG_DESTROY_WITH_PARENT,
-        GTK_MESSAGE_INFO,
-        GTK_BUTTONS_OK,
-        "Game Controls:\n\n"
-        "Keyboard:"
-        "A/D    - Turn Left/Right\n"
-        "W/S    - Move Up/Down\n"
-        "CTRL   - Fire Weapons\n"
-        "Z      - Omni-direcitonal Fire Weapons\n"
-        "X      - Boost Speed\n"
-        "V      - Open Volume Settings\n"
-        "F11    - Toggle Fullscreen\n"
-        "ESC/P  - Pause/Resume Game\n"
-        "\n"
-        "Mouse:\n"
-        "Left Button   - Shoot\n"
-        "Right Button  - Boost\n"
-        "Middle Button - Omnidirectional Fire\n"
-        "Cursor        - Ship will follow cursor\n"
-        ""
-        "Joystick:"
-        "Up/Down       - Move Forward/Backward\n"
-        "Left/Right    - Turn that direction\n"
-        "Middle Button - Omnidirectional Fire\n"
-        "B             - Fire\n"
-        "X             - Boost\n"
-        "RT            - Omnidirectional Fire\n"
-
-
-    );
-    
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
-}
-
 void on_toggle_fullscreen(GtkWidget *widget, gpointer data) {
     CometGUI *gui = (CometGUI*)data;
     if (!gui) return;
@@ -2087,10 +2025,6 @@ int main(int argc, char *argv[]) {
     GtkWidget *help_menu = gtk_menu_new();
     GtkWidget *help_item = gtk_menu_item_new_with_label("Help");
     
-    GtkWidget *game_controls_item = gtk_menu_item_new_with_label("Game Controls");
-    g_signal_connect(game_controls_item, "activate", G_CALLBACK(on_game_controls), &gui);
-    gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), game_controls_item);
-    
     GtkWidget *fullscreen_item = gtk_menu_item_new_with_label("Toggle Fullscreen (F11)");
     g_signal_connect(fullscreen_item, "activate", G_CALLBACK(on_toggle_fullscreen), &gui);
     gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), fullscreen_item);
@@ -2099,7 +2033,11 @@ int main(int argc, char *argv[]) {
     gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), help_separator);
     
     GtkWidget *about_item = gtk_menu_item_new_with_label("About CometBuster");
-    g_signal_connect(about_item, "activate", G_CALLBACK(on_about), &gui);
+    // Create help data structure for the callback
+    CometHelpUserData *help_data = g_new(CometHelpUserData, 1);
+    help_data->window = gui.window;
+    help_data->game_paused = &gui.game_paused;
+    g_signal_connect(about_item, "activate", G_CALLBACK(on_menu_about_comet), help_data);
     gtk_menu_shell_append(GTK_MENU_SHELL(help_menu), about_item);
     
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(help_item), help_menu);
