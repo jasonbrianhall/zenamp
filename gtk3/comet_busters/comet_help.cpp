@@ -419,15 +419,15 @@ void on_menu_about_comet(GtkMenuItem *menuitem, gpointer user_data) {
     
     GtkWidget *repo_label = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(repo_label), 
-        "<span weight='bold'>Repository:</span>");
+        "<span weight='bold'>Website:</span>");
     gtk_widget_set_halign(repo_label, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(contrib_box), repo_label, FALSE, FALSE, 0);
     
-    GtkWidget *repo_button = gtk_button_new_with_label("🔗 github.com/jasonbrianhall/zenamp");
+    GtkWidget *repo_button = gtk_button_new_with_label("🔗 https://jasonbrianhall.github.io");
     gtk_widget_set_halign(repo_button, GTK_ALIGN_START);
     g_signal_connect(repo_button, "clicked", 
                     G_CALLBACK(on_link_clicked), 
-                    (gpointer)"https://github.com/jasonbrianhall/zenamp");
+                    (gpointer)"https://jasonbrianhall.github.io/");
     gtk_box_pack_start(GTK_BOX(contrib_box), repo_button, FALSE, FALSE, 0);
     
     GtkWidget *contrib_sep4 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
