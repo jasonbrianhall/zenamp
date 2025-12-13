@@ -178,8 +178,7 @@ void on_menu_about_comet(GtkMenuItem *menuitem, gpointer user_data) {
         "Z - Omnidirectional fire\n"
         "ESC/P - Pause/Resume\n"
         "F11 - Toggle fullscreen\n"
-        "V - Volume settings\n\n"
-        "Also, full joystick support");
+        "V - Volume settings"
     gtk_label_set_justify(GTK_LABEL(kb_label), GTK_JUSTIFY_LEFT);
     gtk_label_set_line_wrap(GTK_LABEL(kb_label), TRUE);
     gtk_widget_set_margin_start(kb_label, 15);
