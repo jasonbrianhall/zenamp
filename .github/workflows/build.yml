@@ -1,4 +1,4 @@
-name: Build CometBusters
+name: Build Zenamp
 
 on:
   push:
@@ -90,7 +90,7 @@ jobs:
           echo "No icon.png found, creating placeholder icon.ico"
           # Create a simple colored square as fallback
           convert -size 256x256 xc:'#1a73e8' -fill white -gravity center \
-                  -pointsize 32 -annotate +0+0 'CometBusters' icon.ico
+                  -pointsize 32 -annotate +0+0 'Zenamp' icon.ico
         fi
 
     - name: Create Windows Resource File
@@ -118,12 +118,12 @@ jobs:
                 BLOCK "040904b0"
                 BEGIN
                     VALUE "CompanyName", "Jason Brian Hall"
-                    VALUE "FileDescription", "CometBusters - Retro-Modern Music Player"
+                    VALUE "FileDescription", "Zenamp - Retro-Modern Music Player"
                     VALUE "FileVersion", "1.0.${{ github.run_number }}.0"
-                    VALUE "InternalName", "cometbuster"
+                    VALUE "InternalName", "zenamp"
                     VALUE "LegalCopyright", "Copyright (c) 2025 Jason Brian Hall"
-                    VALUE "OriginalFilename", "cometbuster.exe"
-                    VALUE "ProductName", "CometBusters"
+                    VALUE "OriginalFilename", "zenamp.exe"
+                    VALUE "ProductName", "Zenamp"
                     VALUE "ProductVersion", "1.0.${{ github.run_number }}.0"
                 END
             END
@@ -148,7 +148,7 @@ jobs:
         cp ~/rpmbuild/RPMS/x86_64/*.rpm build/rpm/
         
         # Verify the build
-        if [ -f "build/linux/cometbuster" ]; then
+        if [ -f "build/linux/zenamp" ]; then
           echo "Linux build successful"
           ls -la build/linux/
         else
@@ -167,7 +167,7 @@ jobs:
         make windows EXTRA_OBJS=icon.o VERSION=1.0.${{ github.run_number }}
         
         # Verify the build
-        if [ -f "build/windows/cometbuster.exe" ]; then
+        if [ -f "build/windows/zenamp.exe" ]; then
           echo "Windows build successful"
           ls -la build/windows/
         else
@@ -183,53 +183,54 @@ jobs:
         cp ../README.md build/windows/ 2>/dev/null || true
         cp icon.ico build/windows/ 2>/dev/null || true
         
-        # Copy game data (WAD file) if it exists
-        if [ -f "cometbuster.wad" ]; then
-          cp cometbuster.wad build/windows/
-          echo "Copied: cometbuster.wad"
-        fi
-        
         # Copy PNG assets for MSIX
         cp icon.png build/windows/ 2>/dev/null || true
         cp poster.png build/windows/ 2>/dev/null || true
         
-        # For Windows build, collect required DLLs dynamically
+        # For Windows build, collect required DLLs
         cd build/windows
         
-        # Get list of DLLs the executable actually imports (smart method)
-        if [ -f "cometbuster.exe" ]; then
-          echo "Scanning cometbuster.exe for required DLLs..."
-          REQUIRED_DLLS=$(x86_64-w64-mingw32-objdump -p cometbuster.exe | grep "DLL Name:" | awk '{print $3}' | sort -u)
-        fi
-        
+        # Find and copy essential DLLs
         DLL_SOURCE="/usr/x86_64-w64-mingw32/sys-root/mingw/bin"
-        COPIED_COUNT=0
-        MISSING_COUNT=0
         
-        # Copy DLLs that the executable actually needs
-        for dll in $REQUIRED_DLLS; do
+        # Core runtime DLLs
+        for dll in \
+          libgcc_s_seh-1.dll \
+          libstdc++-6.dll \
+          libwinpthread-1.dll \
+          SDL2.dll \
+          SDL2_mixer.dll \
+          libvorbis-0.dll \
+          libvorbisfile-3.dll \
+          libogg-0.dll \
+          libFLAC-12.dll \
+          libgtk-3-0.dll \
+          libgdk-3-0.dll \
+          libglib-2.0-0.dll \
+          libgobject-2.0-0.dll \
+          libgio-2.0-0.dll \
+          libcairo-2.dll \
+          libpango-1.0-0.dll \
+          libpangocairo-1.0-0.dll \
+          libgdk_pixbuf-2.0-0.dll \
+          libatk-1.0-0.dll \
+          libharfbuzz-0.dll \
+          libfontconfig-1.dll \
+          libfreetype-6.dll \
+          libexpat-1.dll \
+          libbz2-1.dll \
+          libpng16-16.dll \
+          zlib1.dll \
+          libiconv-2.dll \
+          libintl-8.dll \
+          libffi-8.dll \
+          libpcre2-8-0.dll; do
           if [ -f "$DLL_SOURCE/$dll" ]; then
             cp "$DLL_SOURCE/$dll" .
-            echo "✓ Copied: $dll"
-            ((COPIED_COUNT++))
+            echo "Copied: $dll"
           else
-            echo "✗ Missing: $dll (will check recursively)"
-            ((MISSING_COUNT++))
+            echo "Missing: $dll"
           fi
-        done
-        
-        # Recursively find missing DLL dependencies
-        echo ""
-        echo "Resolving transitive dependencies..."
-        for dll in $(ls *.dll 2>/dev/null | head -20); do
-          DEPS=$(x86_64-w64-mingw32-objdump -p "$DLL_SOURCE/$dll" 2>/dev/null | grep "DLL Name:" | awk '{print $3}' | sort -u)
-          for dep in $DEPS; do
-            if [ -f "$DLL_SOURCE/$dep" ] && [ ! -f "$dep" ]; then
-              cp "$DLL_SOURCE/$dep" .
-              echo "✓ Copied dependency: $dep"
-              ((COPIED_COUNT++))
-            fi
-          done
         done
         
         # Create GTK runtime directories
@@ -244,35 +245,31 @@ jobs:
           cp -r /usr/x86_64-w64-mingw32/sys-root/mingw/share/glib-2.0/schemas/* share/glib-2.0/schemas/ 2>/dev/null || true
         fi
         
-        echo ""
-        echo "=== DLL Collection Summary ==="
-        echo "DLLs copied: $COPIED_COUNT"
-        echo "DLLs missing: $MISSING_COUNT"
-        echo ""
+        # List all files for verification
         echo "=== Windows build contents ==="
         find . -type f | sort
         
         # Create portable ZIP
         cd ../..
-        zip -r "CometBusters-Portable.zip" build/windows/*
+        zip -r "Zenamp-Portable.zip" build/windows/*
 
     - name: Test Linux Build
       working-directory: gtk3
       run: |
         # Test if the binary can at least show version/help
         cd build/linux
-        ./cometbuster --help || echo "Help not available, but binary runs"
+        ./zenamp --help || echo "Help not available, but binary runs"
         echo "Linux binary test completed"
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: cometbuster-builds
+        name: zenamp-builds
         path: |
           gtk3/build/linux/**/*
           gtk3/build/windows/**/*
           gtk3/build/rpm/**/*
-          gtk3/CometBusters-Portable.zip
+          gtk3/Zenamp-Portable.zip
         retention-days: 7
 
   build-msi-windows:
@@ -287,7 +284,7 @@ jobs:
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: cometbuster-builds
+        name: zenamp-builds
         path: artifacts
 
     - name: Setup WiX Toolset
@@ -355,7 +352,7 @@ jobs:
         <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
           
           <Product Id="*" 
-                   Name="CometBusters" 
+                   Name="Zenamp" 
                    Language="1033" 
                    Version="${{ needs.build-linux.outputs.version }}" 
                    Manufacturer="Jason Brian Hall" 
@@ -364,13 +361,13 @@ jobs:
             <Package InstallerVersion="500" 
                      Compressed="yes" 
                      InstallScope="perMachine" 
-                     Description="CometBusters - Retro-Modern Music Player"
+                     Description="Zenamp - Retro-Modern Music Player"
                      Comments="Built with GitHub Actions"
                      Manufacturer="Jason Brian Hall" />
             
             <!-- Major upgrade configuration -->
             <MajorUpgrade 
-              DowngradeErrorMessage="A newer version of CometBusters is already installed. Please uninstall it first." 
+              DowngradeErrorMessage="A newer version of Zenamp is already installed. Please uninstall it first." 
               Schedule="afterInstallInitialize" />
             
             <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
@@ -379,7 +376,7 @@ jobs:
             <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
             
             <!-- Custom properties -->
-            <Property Id="ARPPRODUCTICON" Value="cometbusterIcon" />
+            <Property Id="ARPPRODUCTICON" Value="zenampIcon" />
             <Property Id="ARPURLINFOABOUT" Value="https://github.com/jasonbrianhall/midi_msdos" />
             <Property Id="ARPNOREPAIR" Value="yes" />
             <Property Id="ARPNOMODIFY" Value="yes" />
@@ -389,7 +386,7 @@ jobs:
             <Property Id="ASSOCIATE_FILES" Value="1" />
             
             <!-- Installation scope choice -->
-            <Property Id="ApplicationFolderName" Value="CometBusters" />
+            <Property Id="ApplicationFolderName" Value="Zenamp" />
             <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
             <WixVariable Id="WixUISupportPerUser" Value="1" />
             <WixVariable Id="WixUISupportPerMachine" Value="1" />
@@ -404,8 +401,8 @@ jobs:
                            Guid="B58E73D9-4A96-49B7-C36E-2E7D0E5B9A45"
                            Win64="no">
                     <File Id="MainEXE" 
-                          Name="cometbuster.exe" 
-                          Source="cometbuster.exe" 
+                          Name="zenamp.exe" 
+                          Source="zenamp.exe" 
                           KeyPath="yes" />
                     
                     <!-- Application files -->
@@ -417,7 +414,7 @@ jobs:
         $($dllEntries -join "`r`n")
                     
                     <!-- Registry entries -->
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\CometBusters">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Zenamp">
                       <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
                       <RegistryValue Type="string" Name="Version" Value="${{ needs.build-linux.outputs.version }}" />
                       <RegistryValue Type="string" Name="Publisher" Value="Jason Brian Hall" />
@@ -429,111 +426,111 @@ jobs:
                     <Condition>ASSOCIATE_FILES</Condition>
                     
                     <!-- Program registration -->
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\Applications\cometbuster.exe">
-                      <RegistryValue Type="string" Name="FriendlyAppName" Value="CometBusters" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
-                      <RegistryValue Type="string" Key="shell\play\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
-                      <RegistryValue Type="string" Key="shell\play" Value="Play with CometBusters" />
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\Applications\zenamp.exe">
+                      <RegistryValue Type="string" Name="FriendlyAppName" Value="Zenamp" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="shell\play\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="shell\play" Value="Play with Zenamp" />
                     </RegistryKey>
                     
                     <!-- WAV Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.wav\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersWAV" Value="" />
+                      <RegistryValue Type="string" Name="ZenampWAV" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersWAV">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampWAV">
                       <RegistryValue Type="string" Value="WAV Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- MP3 Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.mp3\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersMP3" Value="" />
+                      <RegistryValue Type="string" Name="ZenampMP3" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersMP3">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampMP3">
                       <RegistryValue Type="string" Value="MP3 Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- OGG Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.ogg\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersOGG" Value="" />
+                      <RegistryValue Type="string" Name="ZenampOGG" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersOGG">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampOGG">
                       <RegistryValue Type="string" Value="OGG Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- FLAC Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.flac\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersFLAC" Value="" />
+                      <RegistryValue Type="string" Name="ZenampFLAC" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersFLAC">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampFLAC">
                       <RegistryValue Type="string" Value="FLAC Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- MIDI Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.mid\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersMIDI" Value="" />
+                      <RegistryValue Type="string" Name="ZenampMIDI" Value="" />
                     </RegistryKey>
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.midi\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersMIDI" Value="" />
+                      <RegistryValue Type="string" Name="ZenampMIDI" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersMIDI">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampMIDI">
                       <RegistryValue Type="string" Value="MIDI Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- AIFF Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.aiff\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersAIFF" Value="" />
+                      <RegistryValue Type="string" Name="ZenampAIFF" Value="" />
                     </RegistryKey>
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.aif\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersAIFF" Value="" />
+                      <RegistryValue Type="string" Name="ZenampAIFF" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersAIFF">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampAIFF">
                       <RegistryValue Type="string" Value="AIFF Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- OPUS Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.opus\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersOPUS" Value="" />
+                      <RegistryValue Type="string" Name="ZenampOPUS" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersOPUS">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampOPUS">
                       <RegistryValue Type="string" Value="OPUS Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- M4A Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.m4a\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersM4A" Value="" />
+                      <RegistryValue Type="string" Name="ZenampM4A" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersM4A">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampM4A">
                       <RegistryValue Type="string" Value="M4A Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
                     <!-- WMA Files -->
                     <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.wma\OpenWithProgids">
-                      <RegistryValue Type="string" Name="CometBustersWMA" Value="" />
+                      <RegistryValue Type="string" Name="ZenampWMA" Value="" />
                     </RegistryKey>
-                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CometBustersWMA">
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampWMA">
                       <RegistryValue Type="string" Value="WMA Audio File" />
-                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]cometbuster.exe,0" />
-                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]cometbuster.exe&quot; &quot;%1&quot;" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
                     
-                    <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                    <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                  Type="integer" Name="FileAssociations" Value="1" KeyPath="yes"/>
                   </Component>
                   
@@ -543,7 +540,7 @@ jobs:
                       <Component Id="GdkPixbufDir" Guid="A9A4C725-E83A-4D68-B9D3-752E4A9E6E40">
                         <CreateFolder />
                         <RemoveFolder Id="RemoveGdkPixbuf" On="uninstall" />
-                        <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                        <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                      Type="integer" Name="GdkPixbuf" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
@@ -551,7 +548,7 @@ jobs:
                       <Component Id="Gtk3Dir" Guid="C2E5D951-A6B2-4E79-C7E4-864A3A9E7A51">
                         <CreateFolder />
                         <RemoveFolder Id="RemoveGtk3" On="uninstall" />
-                        <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                        <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                      Type="integer" Name="Gtk3" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
@@ -563,7 +560,7 @@ jobs:
                         <Component Id="GtkSchemas" Guid="D8A6E372-C7A3-4A83-D2A5-975A4A9E8A62">
                           <CreateFolder />
                           <RemoveFolder Id="RemoveSchemas" On="uninstall" />
-                          <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                          <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                        Type="integer" Name="Schemas" Value="1" KeyPath="yes"/>
                         </Component>
                       </Directory>
@@ -572,7 +569,7 @@ jobs:
                       <Component Id="IconsDir" Guid="E7A8A483-D4E4-4A94-E3A6-086A5A9E9A73">
                         <CreateFolder />
                         <RemoveFolder Id="RemoveIcons" On="uninstall" />
-                        <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                        <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                      Type="integer" Name="Icons" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
@@ -580,7 +577,7 @@ jobs:
                       <Component Id="ThemesDir" Guid="A9B9A594-E5A5-4AA5-A4B7-197B6A9E0B84">
                         <CreateFolder />
                         <RemoveFolder Id="RemoveThemes" On="uninstall" />
-                        <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Components" 
+                        <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                      Type="integer" Name="Themes" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
@@ -590,21 +587,21 @@ jobs:
               
               <!-- Start Menu shortcuts -->
               <Directory Id="ProgramMenuFolder">
-                <Directory Id="ApplicationProgramsFolder" Name="CometBusters">
+                <Directory Id="ApplicationProgramsFolder" Name="Zenamp">
                   <Component Id="ApplicationShortcuts" Guid="A0C3E560-A7B2-4C64-AD83-A42E9AE63E80">
                     <Shortcut Id="ApplicationStartMenu" 
-                             Name="CometBusters" 
-                             Target="[INSTALLFOLDER]cometbuster.exe" 
+                             Name="Zenamp" 
+                             Target="[INSTALLFOLDER]zenamp.exe" 
                              WorkingDirectory="INSTALLFOLDER"
-                             Description="Launch CometBusters"
-                             Icon="cometbusterIcon"/>
+                             Description="Launch Zenamp"
+                             Icon="zenampIcon"/>
                     <Shortcut Id="UninstallShortcut"
-                             Name="Uninstall CometBusters"
+                             Name="Uninstall Zenamp"
                              Target="[SystemFolder]msiexec.exe"
                              Arguments="/x [ProductCode]"
-                             Description="Uninstall CometBusters" />
+                             Description="Uninstall Zenamp" />
                     <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
-                    <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Shortcuts" 
+                    <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Shortcuts" 
                                  Name="StartMenu" Type="integer" Value="1" KeyPath="yes"/>
                   </Component>
                 </Directory>
@@ -615,12 +612,12 @@ jobs:
                 <Component Id="DesktopShortcut" Guid="B1D4A671-AAC8-4D75-BE94-E53A7A9E1C91">
                   <Condition>DESKTOP_SHORTCUT</Condition>
                   <Shortcut Id="DesktopShortcut" 
-                           Name="CometBusters" 
-                           Target="[INSTALLFOLDER]cometbuster.exe"
+                           Name="Zenamp" 
+                           Target="[INSTALLFOLDER]zenamp.exe"
                            WorkingDirectory="INSTALLFOLDER"
-                           Description="Launch CometBusters"
-                           Icon="cometbusterIcon"/>
-                  <RegistryValue Root="HKCU" Key="Software\GTKcometbuster\Shortcuts" 
+                           Description="Launch Zenamp"
+                           Icon="zenampIcon"/>
+                  <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Shortcuts" 
                                Name="Desktop" Type="integer" Value="1" KeyPath="yes"/>
                 </Component>
               </Directory>
@@ -628,8 +625,8 @@ jobs:
             
             <!-- Feature definitions -->
             <Feature Id="ProductFeature" 
-                     Title="CometBusters" 
-                     Description="The main CometBusters application and required runtime files."
+                     Title="Zenamp" 
+                     Description="The main Zenamp application and required runtime files."
                      Level="1" 
                      ConfigurableDirectory="INSTALLFOLDER"
                      AllowAdvertise="no">
@@ -651,13 +648,13 @@ jobs:
             
             <Feature Id="FileAssociationFeature" 
                      Title="File Associations" 
-                     Description="Associate audio files with CometBusters (WAV, MP3, OGG, FLAC, MIDI, AIFF, OPUS, M4A, WMA)."
+                     Description="Associate audio files with Zenamp (WAV, MP3, OGG, FLAC, MIDI, AIFF, OPUS, M4A, WMA)."
                      Level="1">
               <ComponentRef Id="FileAssociations" />
             </Feature>
             
             <!-- Application icon -->
-            <Icon Id="cometbusterIcon" SourceFile="icon.ico"/>
+            <Icon Id="zenampIcon" SourceFile="icon.ico"/>
             
             <!-- Custom actions for cleanup -->
             <CustomAction Id="CleanupRegistryOnUninstall" 
@@ -667,19 +664,19 @@ jobs:
               <![CDATA[
                 On Error Resume Next
                 Set shell = CreateObject("WScript.Shell")
-                shell.RegDelete "HKLM\SOFTWARE\CometBusters\"
-                shell.RegDelete "HKCU\Software\GTKcometbuster\"
+                shell.RegDelete "HKLM\SOFTWARE\Zenamp\"
+                shell.RegDelete "HKCU\Software\GTKzenamp\"
                 ' Clean up file associations
-                shell.RegDelete "HKLM\SOFTWARE\Classes\Applications\cometbuster.exe\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersWAV\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersMP3\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersOGG\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersFLAC\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersMIDI\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersAIFF\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersOPUS\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersM4A\"
-                shell.RegDelete "HKLM\SOFTWARE\Classes\CometBustersWMA\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\Applications\zenamp.exe\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampWAV\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampMP3\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampOGG\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampFLAC\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampMIDI\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampAIFF\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampOPUS\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampM4A\"
+                shell.RegDelete "HKLM\SOFTWARE\Classes\ZenampWMA\"
               ]]>
             </CustomAction>
             
@@ -717,16 +714,16 @@ jobs:
           exit 1
         }
         
-        & light.exe -ext WixUIExtension installer.wixobj -o "CometBusters.msi"
+        & light.exe -ext WixUIExtension installer.wixobj -o "Zenamp.msi"
         if ($LASTEXITCODE -ne 0) {
           Write-Error "Light linking failed with exit code $LASTEXITCODE"
           exit 1
         }
         
         # Verify MSI was created
-        if (Test-Path "CometBusters.msi") {
-          Write-Host "MSI installer created successfully: CometBusters.msi"
-          $msiSize = (Get-Item "CometBusters.msi").Length
+        if (Test-Path "Zenamp.msi") {
+          Write-Host "MSI installer created successfully: Zenamp.msi"
+          $msiSize = (Get-Item "Zenamp.msi").Length
           Write-Host "MSI file size: $msiSize bytes"
         } else {
           Write-Error "MSI file was not created!"
@@ -736,14 +733,14 @@ jobs:
     - name: Upload MSI Installer
       uses: actions/upload-artifact@v4
       with:
-        name: CometBusters.msi
-        path: artifacts/build/windows/CometBusters.msi
+        name: Zenamp.msi
+        path: artifacts/build/windows/Zenamp.msi
 
     - name: Upload Portable ZIP
       uses: actions/upload-artifact@v4
       with:
-        name: CometBusters-Portable.zip
-        path: artifacts/CometBusters-Portable.zip
+        name: Zenamp-Portable.zip
+        path: artifacts/Zenamp-Portable.zip
 
   build-msix-windows:
     needs: build-linux
@@ -758,7 +755,7 @@ jobs:
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
       with:
-        name: cometbuster-builds
+        name: zenamp-builds
         path: artifacts
 
     - name: Create Microsoft Store Assets
@@ -829,15 +826,15 @@ jobs:
         <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
                  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
                  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
-          <Identity Name="JasonBrianHall.CometBusters"
+          <Identity Name="JasonBrianHall.Zenamp"
                     Version="${{ needs.build-linux.outputs.version }}.0"
                     Publisher="CN=7A3CF65F-504C-42F2-BABD-6A0512A0A017"
                     ProcessorArchitecture="x86" />
           
           <Properties>
-            <DisplayName>CometBusters</DisplayName>
+            <DisplayName>Zenamp</DisplayName>
             <PublisherDisplayName>Jason Brian Hall</PublisherDisplayName>
-            <Description>CometBusters - Multi-format audio player with retro MIDI synthesis and OPL3 sound</Description>
+            <Description>Zenamp - Multi-format audio player with retro MIDI synthesis and OPL3 sound</Description>
             <Logo>Assets\StoreLogo.scale-100.png</Logo>
           </Properties>
           
@@ -861,21 +858,21 @@ jobs:
           </Capabilities>
           
           <Applications>
-            <Application Id="CometBusters" Executable="Files\cometbuster.exe" EntryPoint="Windows.FullTrustApplication">
-              <uap:VisualElements DisplayName="CometBusters"
+            <Application Id="Zenamp" Executable="Files\zenamp.exe" EntryPoint="Windows.FullTrustApplication">
+              <uap:VisualElements DisplayName="Zenamp"
                                   Description="Multi-format audio player with retro MIDI synthesis"
                                   Square150x150Logo="Assets\Square150x150Logo.scale-100.png"
                                   Square44x44Logo="Assets\Square44x44Logo.scale-100.png"
                                   BackgroundColor="#1a73e8">
                 <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.scale-100.png"
-                                ShortName="CometBusters">
+                                ShortName="Zenamp">
                 </uap:DefaultTile>
                 <uap:SplashScreen Image="Assets\Square150x150Logo.scale-100.png" />
               </uap:VisualElements>
               
               <Extensions>
                 <uap:Extension Category="windows.fileTypeAssociation">
-                  <uap:FileTypeAssociation Name="cometbuster-audio">
+                  <uap:FileTypeAssociation Name="zenamp-audio">
                     <uap:DisplayName>Audio Files</uap:DisplayName>
                     <uap:Logo>Assets\Square44x44Logo.targetsize-24_altform-unplated.png</uap:Logo>
                     <uap:SupportedFileTypes>
@@ -926,7 +923,7 @@ jobs:
         Write-Host "Using MakeAppx at: $makeAppxPath"
         
         # Create the MSIX package (unsigned for Store submission)
-        & "$makeAppxPath" pack /d "msix-package" /p "CometBusters.msix" /o
+        & "$makeAppxPath" pack /d "msix-package" /p "Zenamp.msix" /o
         
         if ($LASTEXITCODE -ne 0) {
           Write-Error "MSIX package creation failed with exit code $LASTEXITCODE"
@@ -934,9 +931,9 @@ jobs:
         }
         
         # Verify MSIX was created
-        if (Test-Path "CometBusters.msix") {
-          Write-Host "MSIX package created successfully: CometBusters.msix"
-          $msixSize = (Get-Item "CometBusters.msix").Length
+        if (Test-Path "Zenamp.msix") {
+          Write-Host "MSIX package created successfully: Zenamp.msix"
+          $msixSize = (Get-Item "Zenamp.msix").Length
           Write-Host "MSIX file size: $msixSize bytes"
           Write-Host "Package is unsigned and ready for Microsoft Store submission"
         } else {
@@ -947,8 +944,8 @@ jobs:
     - name: Upload MSIX Package
       uses: actions/upload-artifact@v4
       with:
-        name: CometBusters.msix
-        path: CometBusters.msix
+        name: Zenamp.msix
+        path: Zenamp.msix
 
   create-release:
     needs: [build-linux, build-msi-windows, build-msix-windows]
@@ -961,25 +958,25 @@ jobs:
     - name: Download MSI Artifact
       uses: actions/download-artifact@v4
       with:
-        name: CometBusters.msi
+        name: Zenamp.msi
         path: release
 
     - name: Download MSIX Artifact
       uses: actions/download-artifact@v4
       with:
-        name: CometBusters.msix
+        name: Zenamp.msix
         path: release
 
     - name: Download Portable Artifact
       uses: actions/download-artifact@v4
       with:
-        name: CometBusters-Portable.zip
+        name: Zenamp-Portable.zip
         path: release
 
     - name: Download Build Artifacts for RPM
       uses: actions/download-artifact@v4
       with:
-        name: cometbuster-builds
+        name: zenamp-builds
         path: artifacts
 
     - name: Copy RPM to Release
@@ -992,9 +989,9 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          release/CometBusters.msi
-          release/CometBusters.msix
-          release/CometBusters-Portable.zip
+          release/Zenamp.msi
+          release/Zenamp.msix
+          release/Zenamp-Portable.zip
           release/*.rpm
         tag_name: ${{ github.ref == 'refs/heads/master' && format('v{0}', github.run_number) || github.ref == 'refs/heads/main' && format('v{0}', github.run_number) || format('dev-v{0}', github.run_number) }}
         name: ${{ (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') && format('Release v{0}', github.run_number) || format('Dev Build v{0}', github.run_number) }}
@@ -1009,9 +1006,9 @@ jobs:
           **Build:** #${{ github.run_number }}  
           
           ### Downloads
-          - **CometBusters.msi** - Windows installer with uninstall support and file associations
-          - **CometBusters.msix** - Unsigned package ready for Microsoft Store submission
-          - **CometBusters-Portable.zip** - Portable version (no installation required)
+          - **Zenamp.msi** - Windows installer with uninstall support and file associations
+          - **Zenamp.msix** - Unsigned package ready for Microsoft Store submission
+          - **Zenamp-Portable.zip** - Portable version (no installation required)
           
           ### What's Inside
           - Multi-format playback: WAV, MP3, OGG, FLAC, MIDI, AIFF, OPUS, M4A, WMA, CD+G (.zip files with music and graphics)
@@ -1030,19 +1027,19 @@ jobs:
           **For enterprise and automated deployments:**
           ```cmd
           # Silent install with all features (MSI)
-          msiexec /i CometBusters.msi /quiet /norestart ASSOCIATE_FILES=1 DESKTOP_SHORTCUT=1
+          msiexec /i Zenamp.msi /quiet /norestart ASSOCIATE_FILES=1 DESKTOP_SHORTCUT=1
           
           # Silent install without file associations (MSI)
-          msiexec /i CometBusters.msi /quiet /norestart ASSOCIATE_FILES=0 DESKTOP_SHORTCUT=0
+          msiexec /i Zenamp.msi /quiet /norestart ASSOCIATE_FILES=0 DESKTOP_SHORTCUT=0
           
           # Silent uninstall (MSI)
-          msiexec /x CometBusters.msi /quiet /norestart
+          msiexec /x Zenamp.msi /quiet /norestart
           ```
           
           **Command-line Properties (MSI only):**
           - `ASSOCIATE_FILES=1` - Enable file associations (default: 1)
           - `DESKTOP_SHORTCUT=1` - Create desktop shortcut (default: 1)
-          - `INSTALLFOLDER="C:\Program Files\CometBusters"` - Custom install path
+          - `INSTALLFOLDER="C:\Program Files\Zenamp"` - Custom install path
           
           ### Package Comparison
           | Feature | MSI | MSIX | Portable |
@@ -1081,7 +1078,7 @@ jobs:
           - **WMA** - Windows Media Audio files
           - **M3U** - Audio playlist files
 
-          Right-click any supported audio file or playlist and select "Open with CometBusters" or "Play with CometBusters"!
+          Right-click any supported audio file or playlist and select "Open with Zenamp" or "Play with Zenamp"!
           
           ---
           *Built with GitHub Actions*
