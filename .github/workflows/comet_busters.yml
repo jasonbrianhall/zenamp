@@ -19,7 +19,7 @@ env:
   APP_EXE: "cometbuster.exe"
 
 jobs:
-  build-linux:
+  comet-build-linux:
     runs-on: ubuntu-latest
     container: 
       image: fedora:43
@@ -172,11 +172,11 @@ jobs:
         name: cometbuster-linux-builds
         path: gtk3/comet_busters/build/linux/
 
-  build-msi-windows:
+  comet-build-msi-windows:
     runs-on: windows-latest
-    needs: build-linux
+    needs: comet-build-linux
     outputs:
-      version: ${{ needs.build-linux.outputs.version }}
+      version: ${{ needs.comet-build-linux.outputs.version }}
 
     steps:
     - uses: actions/checkout@v4
@@ -340,11 +340,11 @@ jobs:
         name: CometBusters-Portable.zip
         path: gtk3/comet_busters/CometBusters-Portable.zip
 
-  build-msix-windows:
+  comet-build-msix-windows:
     runs-on: windows-latest
-    needs: build-linux
+    needs: comet-build-linux
     outputs:
-      version: ${{ needs.build-linux.outputs.version }}
+      version: ${{ needs.comet-build-linux.outputs.version }}
 
     steps:
     - uses: actions/checkout@v4
@@ -501,7 +501,7 @@ jobs:
         $stubContent | Out-File "msix-package\README.txt" -Encoding UTF8
 
   create-release:
-    needs: [build-linux, build-msi-windows, build-msix-windows]
+    needs: [comet-build-linux, build-msi-windows, build-msix-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
