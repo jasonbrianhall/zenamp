@@ -501,7 +501,7 @@ jobs:
         $stubContent | Out-File "msix-package\README.txt" -Encoding UTF8
 
   create-release:
-    needs: [comet-build-linux, build-msi-windows, build-msix-windows]
+    needs: [comet-build-linux, comet-build-msi-windows, comet-build-msix-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
