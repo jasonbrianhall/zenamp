@@ -1,5 +1,5 @@
 /**
- * Joystick Manager Implementation - SDL2 VERSION
+ * Joystick Manager Implementation - SDL2 VERSION - Comet Busters
  * Cross-platform joystick support using SDL2
  */
 
