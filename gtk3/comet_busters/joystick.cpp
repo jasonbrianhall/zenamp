@@ -1,6 +1,6 @@
 /**
  * Joystick Manager Implementation - SDL2 VERSION - Comet Busters
- * Cross-platform joystick support using SDL2 
+ * Cross-platform joystick support using SDL2  
  */
 
 #include "visualization.h"
