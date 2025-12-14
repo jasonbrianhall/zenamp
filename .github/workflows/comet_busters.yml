@@ -771,7 +771,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: cometbuster-builds
-        path: artifacts
+        path: .
 
     - name: Create Microsoft Store Assets
       run: |
@@ -787,7 +787,7 @@ jobs:
         $posterPath = "gtk3/comet_busters/build/windows/poster.png"
         
         if (-not (Test-Path $iconPath)) {
-          Write-Error "icon.png not found in artifacts"
+          Write-Error "icon.png not found in gtk3\comet_busters\build\windows"
           exit 1
         }
         
@@ -992,12 +992,12 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: cometbuster-builds
-        path: artifacts
+        path: .
 
     - name: Copy RPM to Release
       run: |
         # Find and copy the RPM file
-        find gtk3/comet_busters/build/build/rpm -name "*.rpm" -exec cp {} release/ \;
+        find gtk3/comet_busters/build/rpm -name "*.rpm" -exec cp {} release/ \;
         ls -la release/
 
     - name: Create GitHub Release
