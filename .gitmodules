@@ -1,6 +1,8 @@
 [submodule "gtk3/comet_busters"]
 	path = gtk3/comet_busters
 	url = https://github.com/jasonbrianhall/cometbusters
+	branch = main
 [submodule "gtk3/beatchess"]
 	path = gtk3/beatchess
 	url = https://github.com/jasonbrianhall/beatchess.git
+	branch = main
