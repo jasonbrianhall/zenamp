@@ -1,6 +1,3 @@
 [submodule "gtk3/comet_busters"]
 	path = gtk3/comet_busters
 	url = https://github.com/jasonbrianhall/cometbusters
-[submodule "gtk3/beatchess"]
-	path = gtk3/beatchess
-	url = https://github.com/jasonbrianhall/beatchess
