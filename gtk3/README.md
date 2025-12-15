@@ -205,6 +205,9 @@ sudo apt install mingw-w64-x86-64-dev
 git clone --recursive https://github.com/jasonbrianhall/zenamp.git
 cd zenamp
 git submodule update --init --recursive
+# Now force-update all submodules
+git submodule foreach --recursive git fetch --all
+git submodule foreach --recursive git reset --hard origin/main
 cd gtk3
 make
 ./build/linux/zenamp
