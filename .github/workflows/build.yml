@@ -47,7 +47,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Fetch all history
-        submodules: true
+        submodules: recursive
 
     - name: Install Dependencies
       run: |
@@ -287,7 +287,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: true
+        submodules: recursive
 
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
@@ -760,7 +760,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Fetch all history
-        submodules: true
+        submodules: recursive
     - name: Download Build Artifacts
       uses: actions/download-artifact@v4
       with:
