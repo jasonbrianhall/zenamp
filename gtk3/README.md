@@ -201,16 +201,18 @@ sudo apt install mingw-w64-x86-64-dev
 ## 🔨 Building and Installing
 
 ### Quick Start (Linux)
-```bash
-git clone https://github.com/jasonbrianhall/midi_player.git
-cd midi_player/gtk3
+```
+git clone --recursive https://github.com/jasonbrianhall/zenamp.git
+cd zenamp
+git submodule update --init --recursive
+cd gtk3
 make
 ./build/linux/zenamp
 ```
 
 ### Quick Start (Windows)
 
-Builds are automatically created using GitHub Actions at https://github.com/jasonbrianhall/midi_player/releases
+Builds are automatically created using GitHub Actions at https://github.com/jasonbrianhall/zenamp/releases
 
 Available packages:
 - **MSI** - Standard Windows installer
@@ -576,7 +578,7 @@ Feature suggestions are welcomed! See the Reporting Issues section below for how
 MIT License – use it, modify it, distribute it. Just keep the attribution.
 
 **Author:** Jason Hall  
-**Repository:** [https://github.com/jasonbrianhall/midi_player](https://github.com/jasonbrianhall/midi_player)
+**Repository:** [https://github.com/jasonbrianhall/zenamp](https://github.com/jasonbrianhall/zenamp)
 
 ## 🙏 Acknowledgments
 
