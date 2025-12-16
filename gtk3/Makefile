@@ -124,7 +124,7 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp main.cpp midiplayer.cpp \
 	drawbd.cpp drawrabbithare.cpp audio_cache.cpp maze3d.cpp drawradialbars.cpp \
 	icon.cpp bouncingcircle.cpp mandelbrot.cpp pong.cpp minesweeper.cpp cometbuster_spawn.cpp \
 	cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp \
-	cometbuster_boss.cpp cometbuster_render.cpp \
+	cometbuster_boss.cpp cometbuster_render.cpp beatchess_draw.cpp \
 	cometbuster_util.cpp
 
 # Platform-specific source files
