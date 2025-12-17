@@ -577,6 +577,9 @@ void chess_make_move(ChessGameState *game, ChessMove move);
 int chess_evaluate_position(ChessGameState *game);
 int chess_get_all_moves(ChessGameState *game, ChessColor color, ChessMove *moves);
 int chess_minimax(ChessGameState *game, int depth, int alpha, int beta, bool maximizing);
+void draw_chess_flip_button(BeatChessVisualization *chess, cairo_t *cr, int width, int height);
+void draw_chess_undo_button(BeatChessVisualization *chess, cairo_t *cr, int width, int height);
+void draw_piece(cairo_t *cr, PieceType type, ChessColor color, double x, double y, double size, double dance_offset);
 
 // Thinking state management
 void chess_init_thinking_state(ChessThinkingState *ts);
