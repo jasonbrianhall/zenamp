@@ -589,7 +589,7 @@ void chess_stop_thinking(ChessThinkingState *ts);
 void* chess_think_continuously(void* arg);
 
 // Chess Visualization functions
-void init_beat_chess_system(void *vis);
+void init_beat_chess_system(Visualizer *vis);
 void update_beat_chess(void *vis, double dt);
 void draw_beat_chess(void *vis, cairo_t *cr);
 bool beat_chess_detect_beat(void *vis);
