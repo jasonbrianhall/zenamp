@@ -395,10 +395,10 @@ bool ends_with_zip(const char *filename);
 
 // Bubble system function declarations
 void init_bubble_system(Visualizer *vis);
-void spawn_bubble(Visualizer *vis, double intensity);
+void spawn_bubble(Visualizer *vis, double intensity, int button);
 void create_pop_effect(Visualizer *vis, Bubble *bubble);
 void update_bubbles(Visualizer *vis, double dt);
-void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y);
+void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y, int button);
 
 // Matrix
 void init_matrix_system(Visualizer *vis);

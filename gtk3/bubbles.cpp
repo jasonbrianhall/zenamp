@@ -20,13 +20,14 @@ void init_bubble_system(Visualizer *vis) {
     }
 }
 
-void spawn_bubble(Visualizer *vis, double intensity) {
+void spawn_bubble(Visualizer *vis, double intensity, int button) {
     spawn_bubble_at(vis, intensity, 
                    50 + (double)rand() / RAND_MAX * (vis->width - 100),
-                   50 + (double)rand() / RAND_MAX * (vis->height - 100));
+                   50 + (double)rand() / RAND_MAX * (vis->height - 100),
+                   button);
 }
 
-void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y) {
+void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y, int button) {
     if (vis->bubble_count >= MAX_BUBBLES) return;
     
     // Find inactive bubble slot
@@ -46,8 +47,11 @@ void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y) {
     bubble->x = x;
     bubble->y = y;
     
-    // Size based on audio intensity
-    bubble->max_radius = 15 + intensity * 40;
+    // Random size multiplier (0.3x to 2.0x)
+    bubble->size_multiplier = 0.3 + (double)rand() / RAND_MAX * 1.7;
+    
+    // Size based on audio intensity and random multiplier
+    bubble->max_radius = (15 + intensity * 40) * bubble->size_multiplier;
     bubble->radius = 2.0;
     
     // Random gentle movement
@@ -59,6 +63,32 @@ void spawn_bubble_at(Visualizer *vis, double intensity, double x, double y) {
     bubble->life = 1.0;
     bubble->birth_time = vis->time_offset;
     bubble->intensity = intensity;
+    bubble->button_source = button;
+    
+    // Generate random hue offset for button-driven bubbles
+    if (button == 0) {
+        // Audio-driven: no hue offset, use dominant frequency instead
+        bubble->hue_offset = 0.0;
+        
+        // Find which frequency band is strongest
+        double max_freq = 0.0;
+        int max_idx = 0;
+        for (int i = 0; i < VIS_FREQUENCY_BARS; i++) {
+            if (vis->frequency_bands[i] > max_freq) {
+                max_freq = vis->frequency_bands[i];
+                max_idx = i;
+            }
+        }
+        // Normalize to 0-1 range (bass=0.0, treble=1.0)
+        bubble->dominant_freq = (double)max_idx / (double)VIS_FREQUENCY_BARS;
+    } else {
+        // Button-driven: random hue offset (-1.0 to 1.0) for color variation
+        bubble->hue_offset = -1.0 + (double)rand() / RAND_MAX * 2.0;
+        
+        // Button-driven bubbles use a random frequency for subtle variation
+        bubble->dominant_freq = (double)rand() / RAND_MAX;
+    }
+    
     bubble->active = TRUE;
     
     vis->bubble_count++;
@@ -95,17 +125,17 @@ void update_bubbles(Visualizer *vis, double dt) {
     
     // Spawn bubbles at mouse clicks
     if (vis->mouse_left_pressed) {
-        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y);
+        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y, 1);  // Left button = 1
         vis->mouse_left_pressed = FALSE;
     }
     
     if (vis->mouse_middle_pressed) {
-        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y);
+        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y, 2);  // Middle button = 2
         vis->mouse_middle_pressed = FALSE;
     }
     
     if (vis->mouse_right_pressed) {
-        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y);
+        spawn_bubble_at(vis, 0.7, vis->mouse_x, vis->mouse_y, 3);  // Right button = 3
         vis->mouse_right_pressed = FALSE;
     }
     
@@ -120,13 +150,13 @@ void update_bubbles(Visualizer *vis, double dt) {
     // Spawn bubble on significant audio events
     if (current_peak > 0.3 && current_peak > vis->last_peak_level * 1.2 && 
         vis->bubble_spawn_timer > 0.1) {
-        spawn_bubble(vis, current_peak);
+        spawn_bubble(vis, current_peak, 0);  // Button 0 = audio-driven
         vis->bubble_spawn_timer = 0.0;
     }
     
     // Also spawn bubbles periodically if there's consistent audio
     if (vis->volume_level > 0.2 && vis->bubble_spawn_timer > 0.5) {
-        spawn_bubble(vis, vis->volume_level * 0.7);
+        spawn_bubble(vis, vis->volume_level * 0.7, 0);  // Button 0 = audio-driven
         vis->bubble_spawn_timer = 0.0;
     }
     
@@ -241,21 +271,65 @@ void draw_bubbles(Visualizer *vis, cairo_t *cr) {
         Bubble *bubble = &vis->bubbles[i];
         
         // Calculate bubble appearance
-        double age_factor = 1.0 - bubble->life;
         double pulse = sin(vis->time_offset * 4.0 + bubble->birth_time) * 0.1 + 1.0;
         double draw_radius = bubble->radius * pulse;
         
-        // Audio-reactive color intensity
+        // Audio-reactive color intensity for beat response
         double audio_intensity = 0.0;
         for (int j = 0; j < VIS_FREQUENCY_BARS; j++) {
             audio_intensity += vis->frequency_bands[j];
         }
         audio_intensity /= VIS_FREQUENCY_BARS;
         
-        // Purple color variations
-        double r = 0.4 + bubble->intensity * 0.4 + audio_intensity * 0.2;
-        double g = 0.1 + audio_intensity * 0.3;
-        double b = 0.7 + bubble->intensity * 0.3;
+        // Beat-reactive brightness boost
+        double beat_boost = audio_intensity * 0.5;
+        
+        // Color based on button source
+        double r, g, b;
+        
+        if (bubble->button_source == 1) {
+            // LEFT BUTTON = Red/Orange to Purple range (hue_offset varies it)
+            // Negative offset = pure red, Positive offset = purple/magenta
+            double hue = 0.5 + bubble->hue_offset * 0.5; // -1 to 1 maps to 0 to 1
+            
+            r = 0.9 + beat_boost + bubble->hue_offset * 0.1;
+            g = 0.1 + (1.0 - fabs(bubble->hue_offset)) * 0.4 + audio_intensity * 0.2;
+            b = 0.1 + fmax(0.0, bubble->hue_offset) * 0.8 + audio_intensity * 0.1;
+            
+        } else if (bubble->button_source == 2) {
+            // MIDDLE BUTTON = Blue/Cyan to Purple range
+            // Negative offset = cyan/turquoise, Positive offset = purple/blue
+            r = 0.1 + fmax(0.0, bubble->hue_offset) * 0.5 + audio_intensity * 0.1;
+            g = 0.4 + (1.0 - fabs(bubble->hue_offset)) * 0.3 + audio_intensity * 0.2;
+            b = 0.95 + beat_boost + bubble->hue_offset * 0.05;
+            
+        } else if (bubble->button_source == 3) {
+            // RIGHT BUTTON = Green/Lime to Cyan range
+            // Negative offset = pure lime green, Positive offset = cyan/turquoise
+            r = 0.2 + fmax(0.0, bubble->hue_offset) * 0.4 + audio_intensity * 0.1;
+            g = 0.9 + beat_boost - fmax(0.0, bubble->hue_offset) * 0.3;
+            b = 0.1 + fmax(0.0, bubble->hue_offset) * 0.6 + audio_intensity * 0.2;
+            
+        } else {
+            // AUDIO-DRIVEN = Color based on dominant frequency
+            // Create a spectrum: bass(red) -> mid(green) -> treble(blue)
+            double freq = bubble->dominant_freq;
+            
+            if (freq < 0.5) {
+                // Bass to Mid: Red to Yellow transition
+                double t = freq * 2.0;  // 0-1 over bass-mid range
+                r = 0.8 + beat_boost;
+                g = 0.1 + t * 0.6 + audio_intensity * 0.2;
+                b = 0.1 + audio_intensity * 0.1;
+            } else {
+                // Mid to Treble: Yellow to Blue transition
+                double t = (freq - 0.5) * 2.0;  // 0-1 over mid-treble range
+                r = 0.8 * (1.0 - t) + audio_intensity * 0.1;
+                g = 0.7 - t * 0.6 + audio_intensity * 0.2;
+                b = 0.1 + t * 0.8 + beat_boost;
+            }
+        }
+        
         double alpha = bubble->life * 0.8;
         
         // Draw bubble with gradient
