@@ -20,7 +20,7 @@ std::string get_temp_directory_queue() {
     return tmp ? tmp : "/tmp";
 #endif
 }
-
+ 
 // Global variable to track drag source row
 static GtkTreeRowReference *drag_source_ref = NULL;
 static int pending_delete_index = -1;
