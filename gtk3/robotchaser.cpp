@@ -1020,7 +1020,7 @@ void robot_chaser_reset_level(Visualizer *vis) {
 void robot_chaser_init_game_state(Visualizer *vis) {
     vis->robot_chaser_game_state = GAME_PLAYING;
     vis->robot_chaser_death_timer = 0.0;
-    vis->robot_chaser_lives = 30;  // Up UP Down Down Left Right Left Right B A Start
+    vis->robot_chaser_lives = 5;  // Up UP Down Down Left Right Left Right B A Start
     vis->robot_chaser_score = 0;
 }
 
