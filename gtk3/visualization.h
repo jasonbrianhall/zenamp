@@ -109,6 +109,7 @@ typedef struct {
     double mouse_influence_strength;
     gboolean mouse_interactions_enabled;
     double mouse_press_time;
+    int scroll_direction;  // -1 for scroll down, 1 for scroll up, 0 for no scroll
     
     // CDG
     CDGDisplay *cdg_display;
@@ -697,6 +698,7 @@ gboolean on_visualizer_leave(GtkWidget *widget, GdkEventCrossing *event, gpointe
 gboolean on_visualizer_enter(GtkWidget *widget, GdkEventCrossing *event, gpointer user_data);
 gboolean on_visualizer_button_release(GtkWidget *widget, GdkEventButton *event, gpointer user_data);
 gboolean on_visualizer_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data);
+gboolean on_visualizer_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer user_data);
 
 // Pong
 void pong_init(void *vis);
@@ -720,5 +722,6 @@ void comet_buster_update_splash_screen(CometBusterGame *game, double dt, int wid
 void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
 void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index, Visualizer *visualizer);
 void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt, Visualizer *visualizer);
+void comet_buster_update_ufos(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
 
 #endif

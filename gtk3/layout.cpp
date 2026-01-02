@@ -284,6 +284,8 @@ static void create_visualization_section(AudioPlayer *player) {
                     G_CALLBACK(on_visualizer_button_release), player);
     g_signal_connect(player->visualizer->drawing_area, "motion-notify-event",
                     G_CALLBACK(on_visualizer_motion), player);
+    g_signal_connect(player->visualizer->drawing_area, "scroll-event",
+                    G_CALLBACK(on_visualizer_scroll), player);
     g_signal_connect(player->visualizer->drawing_area, "enter-notify-event",
                     G_CALLBACK(on_visualizer_enter), player);
     g_signal_connect(player->visualizer->drawing_area, "leave-notify-event",
@@ -1027,5 +1029,45 @@ gboolean on_visualizer_leave(GtkWidget *widget, GdkEventCrossing *event, gpointe
     vis->mouse_middle_pressed = FALSE;
     vis->mouse_velocity_x = 0;
     vis->mouse_velocity_y = 0;
+    return FALSE;
+}
+
+gboolean on_visualizer_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    Visualizer *vis = player->visualizer;
+    
+    // Update mouse position from scroll event
+    vis->mouse_x = (int)event->x;
+    vis->mouse_y = (int)event->y;
+    
+    // Determine scroll direction
+    // GDK_SCROLL_UP or GDK_SCROLL_SMOOTH with positive direction
+    switch (event->direction) {
+        case GDK_SCROLL_UP:
+            vis->scroll_direction = 1;
+            break;
+        case GDK_SCROLL_DOWN:
+            vis->scroll_direction = -1;
+            break;
+        case GDK_SCROLL_LEFT:
+            // Could be used for different purposes
+            vis->scroll_direction = 0;
+            break;
+        case GDK_SCROLL_RIGHT:
+            // Could be used for different purposes
+            vis->scroll_direction = 0;
+            break;
+        case GDK_SCROLL_SMOOTH:
+            // Handle smooth scrolling (trackpad, etc.)
+            if (event->delta_y > 0) {
+                vis->scroll_direction = -1;
+            } else if (event->delta_y < 0) {
+                vis->scroll_direction = 1;
+            } else {
+                vis->scroll_direction = 0;
+            }
+            break;
+    }
+    
     return FALSE;
 }

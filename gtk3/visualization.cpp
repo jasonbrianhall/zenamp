@@ -39,6 +39,13 @@ Visualizer* visualizer_new(void) {
     vis->drawing_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(vis->drawing_area, 400, 200);
     
+    // Enable mouse and scroll events
+    gtk_widget_set_events(vis->drawing_area, 
+                         GDK_BUTTON_PRESS_MASK | 
+                         GDK_BUTTON_RELEASE_MASK | 
+                         GDK_POINTER_MOTION_MASK | 
+                         GDK_SCROLL_MASK);
+    
     // Make drawing area DPI aware
     g_signal_connect(vis->drawing_area, "realize", G_CALLBACK(on_visualizer_realize), vis);
     
@@ -102,6 +109,9 @@ Visualizer* visualizer_new(void) {
     memset(vis->track_info_artist, 0, sizeof(vis->track_info_artist));
     memset(vis->track_info_album, 0, sizeof(vis->track_info_album));
     vis->track_info_duration = 0;
+    
+    // Initialize mouse input variables
+    vis->scroll_direction = 0;
 
     init_bouncing_circle_system(vis);
     
@@ -699,6 +709,10 @@ gboolean visualizer_timer_callback(gpointer user_data) {
         }
         
         update_track_info_overlay(vis, dt);
+        
+        // Reset scroll direction at the end of each frame
+        // This prevents continuous scrolling and ensures each scroll event is detected for exactly one frame
+        vis->scroll_direction = 0;
     }
     
     return TRUE; // Continue timer - NEVER stop the timer for interactive games
