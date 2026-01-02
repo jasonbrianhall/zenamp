@@ -327,6 +327,10 @@ typedef struct {
     int robot_chaser_mouse_control_mode;
     bool robot_chaser_mouse_enabled;
     bool robot_chaser_mouse_left_pressed_prev; 
+    int robot_chaser_mouse_last_x;
+    int robot_chaser_mouse_last_y;
+    double robot_chaser_mouse_inactivity_timer;
+
    
     // Radial Wave
     RadialWaveSystem radial_wave;

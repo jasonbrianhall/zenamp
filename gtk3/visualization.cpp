@@ -800,7 +800,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Ripples (i)");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Robot Chaser");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Robot Chaser (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Sudoku");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Symmetry Cascade");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "The All Seeing Eye");

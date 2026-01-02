@@ -61,6 +61,9 @@ void init_robot_chaser_system(Visualizer *vis) {
     vis->robot_chaser_mouse_control_mode = 0;
     vis->robot_chaser_has_mouse_target = FALSE;
     vis->robot_chaser_mouse_left_pressed_prev = FALSE;
+    vis->robot_chaser_mouse_last_x = 0;
+    vis->robot_chaser_mouse_last_y = 0;
+    vis->robot_chaser_mouse_inactivity_timer = 0.0;
     // ==============================
 }
 
@@ -853,10 +856,13 @@ ChaserDirection robot_chaser_get_direction_to_target(int from_x, int from_y, int
     int dx = to_x - from_x;
     int dy = to_y - from_y;
     
-    // Choose direction based on largest distance component
+    // Calculate which direction moves closer to target
+    // Prefer the axis with larger difference
     if (abs(dx) > abs(dy)) {
+        // Horizontal distance is larger
         return (dx > 0) ? CHASER_RIGHT : CHASER_LEFT;
     } else {
+        // Vertical distance is larger
         return (dy > 0) ? CHASER_DOWN : CHASER_UP;
     }
 }
@@ -925,9 +931,21 @@ gboolean robot_chaser_is_level_complete(Visualizer *vis) {
 }
 
 void robot_chaser_reset_level(Visualizer *vis) {
-    // Reset player
-    vis->robot_chaser_player.grid_x = 12;
-    vis->robot_chaser_player.grid_y = 11;
+    // Reset player - use level-specific spawn points
+    int spawn_positions[ROBOT_CHASER_NUM_LEVELS][2] = {
+        {12, 11},  // Level 1 - original position
+        {12, 7},   // Level 2 - center corridor (where 0 marker is)
+        {12, 7},   // Level 3 - center
+        {12, 7},   // Level 4 - center
+        {12, 7}    // Level 5 - center
+    };
+    
+    int level = vis->robot_chaser_current_level;
+    if (level < 0) level = 0;
+    if (level >= ROBOT_CHASER_NUM_LEVELS) level = ROBOT_CHASER_NUM_LEVELS - 1;
+    
+    vis->robot_chaser_player.grid_x = spawn_positions[level][0];
+    vis->robot_chaser_player.grid_y = spawn_positions[level][1];
     vis->robot_chaser_player.x = vis->robot_chaser_player.grid_x;
     vis->robot_chaser_player.y = vis->robot_chaser_player.grid_y;
     vis->robot_chaser_player.direction = CHASER_RIGHT;
@@ -935,12 +953,34 @@ void robot_chaser_reset_level(Visualizer *vis) {
     vis->robot_chaser_player.moving = TRUE;
     vis->robot_chaser_player.beat_pulse = 0.0;
     
-    // Reset robots to starting positions - using safer positions
-    int robot_positions[4][2] = {{11, 3}, {12, 3}, {13, 3}, {12, 5}};
+    // Reset mouse inactivity timer
+    vis->robot_chaser_mouse_last_x = vis->mouse_x;
+    vis->robot_chaser_mouse_last_y = vis->mouse_y;
+    vis->robot_chaser_mouse_inactivity_timer = 0.0;
+    
+    // Reset robots to starting positions - level-specific safe positions
+    // Level 1 start positions
+    int robot_positions[ROBOT_CHASER_NUM_LEVELS][4][2] = {
+        // Level 1
+        {{11, 3}, {12, 3}, {13, 3}, {12, 5}},
+        // Level 2 - corridors (must be in open areas)
+        {{2, 1}, {4, 1}, {22, 1}, {2, 13}},
+        // Level 3 - cross
+        {{11, 3}, {12, 3}, {13, 3}, {12, 5}},
+        // Level 4
+        {{11, 3}, {12, 3}, {13, 3}, {12, 5}},
+        // Level 5
+        {{11, 3}, {12, 3}, {13, 3}, {12, 5}}
+    };
+    
+    level = vis->robot_chaser_current_level;
+    if (level < 0) level = 0;
+    if (level >= ROBOT_CHASER_NUM_LEVELS) level = ROBOT_CHASER_NUM_LEVELS - 1;
+    
     for (int i = 0; i < vis->robot_chaser_robot_count; i++) {
         ChaserRobot *robot = &vis->robot_chaser_robots[i];
-        robot->grid_x = robot_positions[i][0];
-        robot->grid_y = robot_positions[i][1];
+        robot->grid_x = robot_positions[level][i][0];
+        robot->grid_y = robot_positions[level][i][1];
         robot->x = robot->grid_x;
         robot->y = robot->grid_y;
         robot->direction = (ChaserDirection)(rand() % 4);
@@ -1280,14 +1320,34 @@ void update_robot_chaser_visualization(Visualizer *vis, double dt) {
             vis->robot_chaser_mouse_left_pressed_prev = mouse_is_pressed;
             // ==================================
             
+            // ===== MOUSE INACTIVITY TIMER =====
+            if (vis->mouse_x != vis->robot_chaser_mouse_last_x || 
+                vis->mouse_y != vis->robot_chaser_mouse_last_y) {
+                // Mouse moved - reset inactivity timer
+                vis->robot_chaser_mouse_inactivity_timer = 0.0;
+                vis->robot_chaser_mouse_last_x = vis->mouse_x;
+                vis->robot_chaser_mouse_last_y = vis->mouse_y;
+            } else {
+                // Mouse hasn't moved - increment timer
+                vis->robot_chaser_mouse_inactivity_timer += dt;
+            }
+            // ===================================
+            
             // ===== MOUSE CONTROL =====
             if (vis->robot_chaser_mouse_enabled && vis->mouse_x > 0) {
+                // If mouse inactive for 4+ seconds, use AI movement instead
+                gboolean mouse_inactive = (vis->robot_chaser_mouse_inactivity_timer >= 4.0);
+                
                 if (mouse_clicked && (vis->robot_chaser_mouse_control_mode == 1 || 
                                       vis->robot_chaser_mouse_control_mode == 2)) {
                     robot_chaser_handle_click_to_move(vis, vis->mouse_x, vis->mouse_y);
                 }
                 
-                if (vis->robot_chaser_mouse_control_mode == 0) {
+                if (mouse_inactive) {
+                    // Fall back to AI movement
+                    ChaserDirection ai_direction = robot_chaser_choose_player_direction(vis);
+                    vis->robot_chaser_player.next_direction = ai_direction;
+                } else if (vis->robot_chaser_mouse_control_mode == 0) {
                     robot_chaser_handle_mouse_aim(vis);
                 } else if (vis->robot_chaser_mouse_control_mode == 1) {
                     robot_chaser_update_click_to_move(vis);
