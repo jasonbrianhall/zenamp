@@ -785,13 +785,30 @@ ChaserDirection robot_chaser_choose_smart_direction_v2(Visualizer *vis, ChaserRo
                 
             case 2: // Cyan robot - patrol corners
                 {
-                    // Prefer turns at intersections
+                    // Prefer turns at intersections - evaluate all options
                     if (possible_count > 2) {
+                        // Try to chase player when close
+                        ChaserDirection best_direction = possible_directions[0];
+                        double best_distance = -1;
+                        
                         for (int i = 0; i < possible_count; i++) {
-                            if (possible_directions[i] != robot->direction) {
-                                return possible_directions[i];
+                            int test_x = robot->grid_x;
+                            int test_y = robot->grid_y;
+                            
+                            switch (possible_directions[i]) {
+                                case CHASER_UP: test_y--; break;
+                                case CHASER_DOWN: test_y++; break;
+                                case CHASER_LEFT: test_x--; break;
+                                case CHASER_RIGHT: test_x++; break;
+                            }
+                            
+                            double distance = sqrt(pow(test_x - player->grid_x, 2) + pow(test_y - player->grid_y, 2));
+                            if (distance < best_distance || best_distance < 0) {
+                                best_distance = distance;
+                                best_direction = possible_directions[i];
                             }
                         }
+                        return best_direction;
                     }
                     break;
                 }
