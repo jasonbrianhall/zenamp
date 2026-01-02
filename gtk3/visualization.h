@@ -321,6 +321,13 @@ typedef struct {
     int robot_chaser_lives;
     int robot_chaser_current_level;
 
+    int robot_chaser_mouse_target_grid_x;
+    int robot_chaser_mouse_target_grid_y;
+    bool robot_chaser_has_mouse_target;
+    int robot_chaser_mouse_control_mode;
+    bool robot_chaser_mouse_enabled;
+    bool robot_chaser_mouse_left_pressed_prev; 
+   
     // Radial Wave
     RadialWaveSystem radial_wave;
     double radial_beat_volume_history[10];
@@ -530,6 +537,10 @@ ChaserDirection robot_chaser_choose_player_direction(Visualizer *vis);
 void robot_chaser_init_game_state(Visualizer *vis);
 void draw_robot_chaser_visualization_enhanced(Visualizer *vis, cairo_t *cr);
 void robot_chaser_handle_wraparound(Visualizer *vis, double *x, double *y, int *grid_x, int *grid_y);
+void robot_chaser_draw_mouse_ui(Visualizer *vis, cairo_t *cr);
+void robot_chaser_handle_mouse_aim(Visualizer *vis);
+void robot_chaser_update_click_to_move(Visualizer *vis);
+void robot_chaser_handle_click_to_move(Visualizer *vis, int screen_x, int screen_y);
 
 // Radial Wave
 void init_radial_wave_system(void *vis);

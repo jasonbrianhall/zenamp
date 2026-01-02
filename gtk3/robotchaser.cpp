@@ -55,7 +55,15 @@ void init_robot_chaser_system(Visualizer *vis) {
     robot_chaser_init_maze(vis);
     robot_chaser_calculate_layout(vis);
     robot_chaser_init_game_state(vis);
+    
+    // ===== MOUSE CONTROL INIT =====
+    vis->robot_chaser_mouse_enabled = TRUE;
+    vis->robot_chaser_mouse_control_mode = 0;
+    vis->robot_chaser_has_mouse_target = FALSE;
+    vis->robot_chaser_mouse_left_pressed_prev = FALSE;
+    // ==============================
 }
+
 
 void robot_chaser_calculate_layout(Visualizer *vis) {
     double padding = 20.0;
@@ -1247,20 +1255,46 @@ void update_robot_chaser_visualization(Visualizer *vis, double dt) {
     
     // Handle game state
     switch (vis->robot_chaser_game_state) {
-        case GAME_PLAYING:
+        case GAME_PLAYING: {
+            // ===== MOUSE CLICK DETECTION =====
+            bool mouse_was_pressed = vis->robot_chaser_mouse_left_pressed_prev;
+            bool mouse_is_pressed = vis->mouse_left_pressed;
+            bool mouse_clicked = (mouse_was_pressed && !mouse_is_pressed);
+            vis->robot_chaser_mouse_left_pressed_prev = mouse_is_pressed;
+            // ==================================
+            
+            // ===== MOUSE CONTROL =====
+            if (vis->robot_chaser_mouse_enabled && vis->mouse_x > 0) {
+                if (mouse_clicked && (vis->robot_chaser_mouse_control_mode == 1 || 
+                                      vis->robot_chaser_mouse_control_mode == 2)) {
+                    robot_chaser_handle_click_to_move(vis, vis->mouse_x, vis->mouse_y);
+                }
+                
+                if (vis->robot_chaser_mouse_control_mode == 0) {
+                    robot_chaser_handle_mouse_aim(vis);
+                } else if (vis->robot_chaser_mouse_control_mode == 1) {
+                    robot_chaser_update_click_to_move(vis);
+                } else {
+                    if (vis->robot_chaser_has_mouse_target) {
+                        robot_chaser_update_click_to_move(vis);
+                    } else {
+                        robot_chaser_handle_mouse_aim(vis);
+                    }
+                }
+            }
+            // ========================
             robot_chaser_update_player(vis, dt);
             robot_chaser_update_robots(vis, dt);
             robot_chaser_update_pellets(vis, dt);
             break;
+        }
             
         case GAME_PLAYER_DIED:
             vis->robot_chaser_death_timer -= dt;
             if (vis->robot_chaser_death_timer <= 0) {
                 if (vis->robot_chaser_lives > 0) {
-                    // Still have lives - respawn on CURRENT level (don't reset level number)
                     robot_chaser_reset_level(vis);
                 } else {
-                    // Out of lives - full game over
                     vis->robot_chaser_game_state = GAME_GAME_OVER;
                     vis->robot_chaser_death_timer = 5.0;
                 }
@@ -1270,18 +1304,14 @@ void update_robot_chaser_visualization(Visualizer *vis, double dt) {
         case GAME_LEVEL_COMPLETE:
             vis->robot_chaser_death_timer -= dt;
             if (vis->robot_chaser_death_timer <= 0) {
-                // Advance to next level
                 vis->robot_chaser_current_level++;
                 
-                // If completed all levels, loop back to first level
                 if (vis->robot_chaser_current_level >= ROBOT_CHASER_NUM_LEVELS) {
                     vis->robot_chaser_current_level = 0;
                 }
                 
-                // Level complete bonus
                 vis->robot_chaser_score += 1000;
                 
-                // Reload maze for new level
                 robot_chaser_init_maze(vis);
                 robot_chaser_reset_level(vis);
             }
@@ -1290,11 +1320,10 @@ void update_robot_chaser_visualization(Visualizer *vis, double dt) {
         case GAME_GAME_OVER:
             vis->robot_chaser_death_timer -= dt;
             if (vis->robot_chaser_death_timer <= 0) {
-                // Full restart - back to level 1, reset everything
                 vis->robot_chaser_lives = 3;
                 vis->robot_chaser_score = 0;
-                vis->robot_chaser_current_level = 0;  // Reset to first level ONLY on full game over
-                robot_chaser_init_maze(vis);  // Reload level 1 maze
+                vis->robot_chaser_current_level = 0;
+                robot_chaser_init_maze(vis);
                 robot_chaser_reset_level(vis);
             }
             break;
@@ -1303,7 +1332,6 @@ void update_robot_chaser_visualization(Visualizer *vis, double dt) {
     vis->robot_chaser_beat_timer += dt;
 }
 
-// Enhanced drawing function with game state display
 void draw_robot_chaser_visualization_enhanced(Visualizer *vis, cairo_t *cr) {
     if (vis->width <= 0 || vis->height <= 0) return;
     
@@ -1409,9 +1437,11 @@ void draw_robot_chaser_visualization_enhanced(Visualizer *vis, cairo_t *cr) {
         cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, vis->robot_chaser_player.beat_pulse * 0.08);
         cairo_paint(cr);
     }
+    
+    // Draw mouse UI elements
+    robot_chaser_draw_mouse_ui(vis, cr);
 }
 
-// Helper function to get level name/description
 const char* robot_chaser_get_level_name(int level) {
     switch (level) {
         case 0: return "Classic Maze";
@@ -1650,5 +1680,190 @@ void robot_chaser_handle_wraparound(Visualizer *vis, double *x, double *y, int *
     else if (*y >= ROBOT_CHASER_MAZE_HEIGHT) {
         *y = 0;
         *grid_y = 0;
+    }
+}
+
+// ============================================================================
+// ROBOT CHASER MOUSE CONTROL FUNCTIONS
+// ============================================================================
+
+gboolean robot_chaser_screen_to_grid(Visualizer *vis, int screen_x, int screen_y,
+                                      int *grid_x, int *grid_y) {
+    double maze_left = vis->robot_chaser_offset_x;
+    double maze_top = vis->robot_chaser_offset_y;
+    double maze_right = maze_left + (ROBOT_CHASER_MAZE_WIDTH * vis->robot_chaser_cell_size);
+    double maze_bottom = maze_top + (ROBOT_CHASER_MAZE_HEIGHT * vis->robot_chaser_cell_size);
+    
+    if (screen_x < maze_left || screen_x > maze_right ||
+        screen_y < maze_top || screen_y > maze_bottom) {
+        return FALSE;
+    }
+    
+    *grid_x = (int)((screen_x - maze_left) / vis->robot_chaser_cell_size);
+    *grid_y = (int)((screen_y - maze_top) / vis->robot_chaser_cell_size);
+    
+    if (*grid_x < 0) *grid_x = 0;
+    if (*grid_y < 0) *grid_y = 0;
+    if (*grid_x >= ROBOT_CHASER_MAZE_WIDTH) *grid_x = ROBOT_CHASER_MAZE_WIDTH - 1;
+    if (*grid_y >= ROBOT_CHASER_MAZE_HEIGHT) *grid_y = ROBOT_CHASER_MAZE_HEIGHT - 1;
+    
+    return TRUE;
+}
+
+void robot_chaser_grid_to_screen(Visualizer *vis, int grid_x, int grid_y,
+                                  double *screen_x, double *screen_y) {
+    *screen_x = vis->robot_chaser_offset_x + (grid_x + 0.5) * vis->robot_chaser_cell_size;
+    *screen_y = vis->robot_chaser_offset_y + (grid_y + 0.5) * vis->robot_chaser_cell_size;
+}
+
+ChaserDirection robot_chaser_angle_to_direction(double angle) {
+    if (angle > -M_PI/4 && angle <= M_PI/4) {
+        return CHASER_RIGHT;
+    } else if (angle > M_PI/4 && angle <= 3*M_PI/4) {
+        return CHASER_DOWN;
+    } else if (angle > -3*M_PI/4 && angle <= -M_PI/4) {
+        return CHASER_UP;
+    } else {
+        return CHASER_LEFT;
+    }
+}
+
+void robot_chaser_handle_mouse_aim(Visualizer *vis) {
+    if (!vis->mouse_x || !vis->robot_chaser_mouse_enabled) {
+        return;
+    }
+    
+    double player_screen_x, player_screen_y;
+    robot_chaser_grid_to_screen(vis, 
+                                 vis->robot_chaser_player.grid_x,
+                                 vis->robot_chaser_player.grid_y,
+                                 &player_screen_x, &player_screen_y);
+    
+    double dx = vis->mouse_x - player_screen_x;
+    double dy = vis->mouse_y - player_screen_y;
+    double distance = sqrt(dx*dx + dy*dy);
+    
+    if (distance < 15.0) {
+        return;
+    }
+    
+    double angle = atan2(dy, dx);
+    vis->robot_chaser_player.next_direction = robot_chaser_angle_to_direction(angle);
+}
+
+void robot_chaser_handle_click_to_move(Visualizer *vis, int screen_x, int screen_y) {
+    int grid_x, grid_y;
+    
+    if (!robot_chaser_screen_to_grid(vis, screen_x, screen_y, &grid_x, &grid_y)) {
+        return;
+    }
+    
+    if (vis->robot_chaser_maze[grid_y][grid_x] == CHASER_WALL) {
+        return;
+    }
+    
+    vis->robot_chaser_mouse_target_grid_x = grid_x;
+    vis->robot_chaser_mouse_target_grid_y = grid_y;
+    vis->robot_chaser_has_mouse_target = TRUE;
+}
+
+void robot_chaser_update_click_to_move(Visualizer *vis) {
+    if (!vis->robot_chaser_has_mouse_target) {
+        return;
+    }
+    
+    int target_x = vis->robot_chaser_mouse_target_grid_x;
+    int target_y = vis->robot_chaser_mouse_target_grid_y;
+    
+    int curr_x = (int)(vis->robot_chaser_player.x + 0.5);
+    int curr_y = (int)(vis->robot_chaser_player.y + 0.5);
+    
+    if (curr_x == target_x && curr_y == target_y) {
+        vis->robot_chaser_has_mouse_target = FALSE;
+        return;
+    }
+    
+    ChaserDirection best_dir = CHASER_RIGHT;
+    int best_distance = abs(target_x - curr_x) + abs(target_y - curr_y);
+    
+    if (curr_x + 1 < ROBOT_CHASER_MAZE_WIDTH && 
+        robot_chaser_can_move(vis, curr_x + 1, curr_y)) {
+        int dist = abs(target_x - (curr_x + 1)) + abs(target_y - curr_y);
+        if (dist < best_distance) {
+            best_distance = dist;
+            best_dir = CHASER_RIGHT;
+        }
+    }
+    
+    if (curr_x - 1 >= 0 && robot_chaser_can_move(vis, curr_x - 1, curr_y)) {
+        int dist = abs(target_x - (curr_x - 1)) + abs(target_y - curr_y);
+        if (dist < best_distance) {
+            best_distance = dist;
+            best_dir = CHASER_LEFT;
+        }
+    }
+    
+    if (curr_y + 1 < ROBOT_CHASER_MAZE_HEIGHT && 
+        robot_chaser_can_move(vis, curr_x, curr_y + 1)) {
+        int dist = abs(target_x - curr_x) + abs(target_y - (curr_y + 1));
+        if (dist < best_distance) {
+            best_distance = dist;
+            best_dir = CHASER_DOWN;
+        }
+    }
+    
+    if (curr_y - 1 >= 0 && robot_chaser_can_move(vis, curr_x, curr_y - 1)) {
+        int dist = abs(target_x - curr_x) + abs(target_y - (curr_y - 1));
+        if (dist < best_distance) {
+            best_distance = dist;
+            best_dir = CHASER_UP;
+        }
+    }
+    
+    vis->robot_chaser_player.next_direction = best_dir;
+}
+
+void robot_chaser_draw_mouse_ui(Visualizer *vis, cairo_t *cr) {
+    if (!vis->robot_chaser_mouse_enabled) {
+        return;
+    }
+    
+    double player_x, player_y;
+    robot_chaser_grid_to_screen(vis,
+                                 vis->robot_chaser_player.grid_x,
+                                 vis->robot_chaser_player.grid_y,
+                                 &player_x, &player_y);
+    
+    if (vis->robot_chaser_mouse_control_mode != 1) {
+        cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, 0.3);
+        cairo_set_line_width(cr, 2.0);
+        cairo_move_to(cr, player_x, player_y);
+        cairo_line_to(cr, (double)vis->mouse_x, (double)vis->mouse_y);
+        cairo_stroke(cr);
+        
+        double radius = vis->robot_chaser_cell_size * 0.3;
+        cairo_set_source_rgba(cr, 1.0, 1.0, 0.0, 0.2);
+        cairo_arc(cr, (double)vis->mouse_x, (double)vis->mouse_y, radius, 0, 2*M_PI);
+        cairo_fill(cr);
+    }
+    
+    if (vis->robot_chaser_has_mouse_target && vis->robot_chaser_mouse_control_mode != 0) {
+        double target_x, target_y;
+        robot_chaser_grid_to_screen(vis,
+                                     vis->robot_chaser_mouse_target_grid_x,
+                                     vis->robot_chaser_mouse_target_grid_y,
+                                     &target_x, &target_y);
+        
+        double radius = vis->robot_chaser_cell_size * 0.4;
+        double pulse = 0.5 + 0.5 * sin(vis->time_offset * 5.0);
+        
+        cairo_set_source_rgba(cr, 0.0, 1.0, 0.0, 0.3 * pulse);
+        cairo_arc(cr, target_x, target_y, radius, 0, 2*M_PI);
+        cairo_fill(cr);
+        
+        cairo_set_source_rgba(cr, 0.0, 1.0, 0.0, 0.6);
+        cairo_set_line_width(cr, 1.5);
+        cairo_arc(cr, target_x, target_y, radius, 0, 2*M_PI);
+        cairo_stroke(cr);
     }
 }
