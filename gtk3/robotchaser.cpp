@@ -1010,6 +1010,23 @@ void robot_chaser_update_player(Visualizer *vis, double dt) {
     
     ChaserPlayer *player = &vis->robot_chaser_player;
     
+    // Apply mouse aim direction if set
+    if (player->next_direction != player->direction) {
+        int test_x = player->grid_x;
+        int test_y = player->grid_y;
+        
+        switch (player->next_direction) {
+            case CHASER_UP: test_y--; break;
+            case CHASER_DOWN: test_y++; break;
+            case CHASER_LEFT: test_x--; break;
+            case CHASER_RIGHT: test_x++; break;
+        }
+        
+        if (robot_chaser_can_move(vis, test_x, test_y)) {
+            player->direction = player->next_direction;
+        }
+    }
+    
     if (player->beat_pulse > 0) {
         player->beat_pulse -= dt * 3.0;
         if (player->beat_pulse < 0) player->beat_pulse = 0;
@@ -1729,7 +1746,7 @@ ChaserDirection robot_chaser_angle_to_direction(double angle) {
 }
 
 void robot_chaser_handle_mouse_aim(Visualizer *vis) {
-    if (!vis->mouse_x || !vis->robot_chaser_mouse_enabled) {
+    if (!vis->robot_chaser_mouse_enabled) {
         return;
     }
     
@@ -1743,7 +1760,7 @@ void robot_chaser_handle_mouse_aim(Visualizer *vis) {
     double dy = vis->mouse_y - player_screen_y;
     double distance = sqrt(dx*dx + dy*dy);
     
-    if (distance < 15.0) {
+    if (distance < 3.0) {
         return;
     }
     
