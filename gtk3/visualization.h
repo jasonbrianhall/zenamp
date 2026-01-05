@@ -747,8 +747,8 @@ void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, 
 void comet_buster_update_ufos(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
 
 // Rainbow
-void update_rainbow_system(RainbowSystem *rainbow, double dt, double audio_level, double mouse_x, double mouse_y, gboolean mouse_active);
-void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow, int width, int height);
-void init_rainbow_system(RainbowSystem *rainbow);
+void draw_rainbow_system(Visualizer *vis_ptr, cairo_t *cr);
+void init_rainbow_system(Visualizer *vis_ptr);
+void update_rainbow_system(Visualizer *vis, double dt);
 
 #endif

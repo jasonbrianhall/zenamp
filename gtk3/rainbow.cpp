@@ -1,9 +1,11 @@
 #include "rainbow.h"
+#include "visualization.h"
 #include <stdlib.h>
 #include <string.h>
 
 // Initialize the rainbow system
-void init_rainbow_system(RainbowSystem *rainbow) {
+void init_rainbow_system(Visualizer *vis) {
+    RainbowSystem *rainbow = &vis->rainbow_system;
     memset(rainbow, 0, sizeof(RainbowSystem));
     rainbow->particle_count = 0;
     rainbow->wave_count = 0;
@@ -155,8 +157,12 @@ void spawn_rainbow_wave(RainbowSystem *rainbow, double x, double y, double hue) 
 }
 
 // Update the rainbow system
-void update_rainbow_system(RainbowSystem *rainbow, double dt, double audio_level,
-                          double mouse_x, double mouse_y, gboolean mouse_active) {
+void update_rainbow_system(Visualizer *vis, double dt) {
+    RainbowSystem *rainbow = &vis->rainbow_system;
+    double audio_level = vis->volume_level;
+    double mouse_x = vis->mouse_x;
+    double mouse_y = vis->mouse_y;
+    gboolean mouse_active = vis->mouse_left_pressed;
     rainbow->time_elapsed += dt;
     rainbow->global_hue_offset = fmod(rainbow->time_elapsed * 0.1, 1.0);
     rainbow->last_audio_level = audio_level;
@@ -284,57 +290,63 @@ void update_rainbow_system(RainbowSystem *rainbow, double dt, double audio_level
     }
 }
 
-// Draw a single particle
-void draw_rainbow_particle(cairo_t *cr, RainbowParticle *p, double alpha) {
-    cairo_save(cr);
-    cairo_translate(cr, p->x, p->y);
-    cairo_rotate(cr, p->rotation);
+// Draw all particles
+void draw_rainbow_particle(Visualizer *vis_ptr, cairo_t *cr) {
+    RainbowSystem *rainbow = &vis_ptr->rainbow_system;
     
-    double r, g, b;
-    hsv_to_rgb_rainbow(p->hue, 1.0, 1.0, &r, &g, &b);
-    
-    alpha *= p->life;
-    cairo_set_source_rgba(cr, r, g, b, alpha);
-    
-    switch (p->shape) {
-        case 0: { // Circle
-            cairo_arc(cr, 0, 0, p->size, 0, 2*M_PI);
-            cairo_fill(cr);
-            break;
-        }
-        case 1: { // Square
-            double half = p->size;
-            cairo_rectangle(cr, -half, -half, half*2, half*2);
-            cairo_fill(cr);
-            break;
-        }
-        case 2: { // Star
-            for (int i = 0; i < 5; i++) {
-                double angle = i * 2 * M_PI / 5.0;
-                double x = cos(angle) * p->size;
-                double y = sin(angle) * p->size;
-                if (i == 0) {
-                    cairo_move_to(cr, x, y);
-                } else {
-                    cairo_line_to(cr, x, y);
-                }
+    for (int i = 0; i < MAX_RAINBOW_PARTICLES; i++) {
+        RainbowParticle *p = &rainbow->particles[i];
+        if (!p->active) continue;
+        
+        cairo_save(cr);
+        cairo_translate(cr, p->x, p->y);
+        cairo_rotate(cr, p->rotation);
+        
+        double r, g, b;
+        hsv_to_rgb_rainbow(p->hue, 1.0, 1.0, &r, &g, &b);
+        
+        double alpha = p->life;
+        cairo_set_source_rgba(cr, r, g, b, alpha);
+        
+        switch (p->shape) {
+            case 0: { // Circle
+                cairo_arc(cr, 0, 0, p->size, 0, 2*M_PI);
+                cairo_fill(cr);
+                break;
             }
-            cairo_close_path(cr);
-            cairo_fill(cr);
-            break;
+            case 1: { // Square
+                double half = p->size;
+                cairo_rectangle(cr, -half, -half, half*2, half*2);
+                cairo_fill(cr);
+                break;
+            }
+            case 2: { // Star
+                for (int j = 0; j < 5; j++) {
+                    double angle = j * 2 * M_PI / 5.0;
+                    double x = cos(angle) * p->size;
+                    double y = sin(angle) * p->size;
+                    if (j == 0) {
+                        cairo_move_to(cr, x, y);
+                    } else {
+                        cairo_line_to(cr, x, y);
+                    }
+                }
+                cairo_close_path(cr);
+                cairo_fill(cr);
+                break;
+            }
         }
+        
+        cairo_restore(cr);
     }
-    
-    cairo_restore(cr);
 }
 
 // Draw the rainbow system
-void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow, 
-                        int width, int height) {
-    // Store screen dimensions for random spawning
-    rainbow->screen_width = width;
-    rainbow->screen_height = height;
+void draw_rainbow_system(Visualizer *vis, cairo_t *cr) {
+    RainbowSystem *rainbow = &vis->rainbow_system;
     
+    int width=vis->width;
+    int height=vis->height;
     // Set vortex to center
     rainbow->vortex.base_x = width / 2.0;
     rainbow->vortex.base_y = height / 2.0;
@@ -372,11 +384,7 @@ void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow,
     }
     
     // Draw particles
-    for (int i = 0; i < MAX_RAINBOW_PARTICLES; i++) {
-        RainbowParticle *p = &rainbow->particles[i];
-        if (!p->active) continue;
-        draw_rainbow_particle(cr, p, 1.0);
-    }
+    draw_rainbow_particle(vis, cr);
     
     // Draw vortex effect if active
     if (rainbow->vortex.active && rainbow->vortex.magnitude > 0.1) {

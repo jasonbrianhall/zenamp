@@ -103,7 +103,7 @@ Visualizer* visualizer_new(void) {
     pong_init(vis);
     init_comet_buster_system(vis);
 
-    init_rainbow_system(&vis->rainbow_system);
+    init_rainbow_system(vis);
     vis->rainbow_system.vortex.base_x = 400 / 2.0;
     vis->rainbow_system.vortex.base_y = 300 / 2.0;
 
@@ -523,7 +523,7 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
           minesweeper_draw(vis, cr);
           break;    
        case VIS_RAINBOW:
-          draw_rainbow_system(cr, &vis->rainbow_system, vis->width, vis->height);
+          draw_rainbow_system(vis, cr);
           break;       
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
@@ -705,10 +705,7 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 minesweeper_update(vis, dt);
                 break;
             case VIS_RAINBOW:
-                update_rainbow_system(&vis->rainbow_system, dt, 
-                         vis->volume_level,
-                         vis->mouse_x, vis->mouse_y,
-                         vis->mouse_left_pressed);
+                update_rainbow_system(vis, dt); 
                 break;
             case VIS_KARAOKE:
             case VIS_KARAOKE_EXCITING:

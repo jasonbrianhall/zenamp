@@ -63,9 +63,6 @@ typedef struct {
 } RainbowSystem;
 
 // Function declarations
-void init_rainbow_system(RainbowSystem *rainbow);
-void update_rainbow_system(RainbowSystem *rainbow, double dt, double audio_level,
-                          double mouse_x, double mouse_y, gboolean mouse_active);
 void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow, 
                         int width, int height);
 void spawn_rainbow_particle(RainbowSystem *rainbow, double x, double y, 
