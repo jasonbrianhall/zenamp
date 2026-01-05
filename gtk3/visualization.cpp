@@ -102,6 +102,11 @@ Visualizer* visualizer_new(void) {
     init_minesweeper(vis);
     pong_init(vis);
     init_comet_buster_system(vis);
+
+    init_rainbow_system(&vis->rainbow_system);
+    vis->rainbow_system.vortex.base_x = 400 / 2.0;
+    vis->rainbow_system.vortex.base_y = 300 / 2.0;
+
     
     vis->track_info_display_time = 0.0;
     vis->track_info_fade_alpha = 1.0;
@@ -517,6 +522,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_MINESWEEPER:
           minesweeper_draw(vis, cr);
           break;    
+       case VIS_RAINBOW:
+          draw_rainbow_system(cr, &vis->rainbow_system, vis->width, vis->height);
+          break;       
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -696,7 +704,12 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_MINESWEEPER:
                 minesweeper_update(vis, dt);
                 break;
-
+            case VIS_RAINBOW:
+                update_rainbow_system(&vis->rainbow_system, dt, 
+                         vis->volume_level,
+                         vis->mouse_x, vis->mouse_y,
+                         vis->mouse_left_pressed);
+                break;
             case VIS_KARAOKE:
             case VIS_KARAOKE_EXCITING:
                 if (vis->cdg_display) {
@@ -800,6 +813,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Rainbow (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Ripples (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Robot Chaser (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Sudoku");

@@ -5,7 +5,6 @@
 #include <cairo.h>
 #include <math.h>
 #include <string.h>
-#include "sudoku.h"
 #include "generatepuzzle.h"
 #include "bouncyball.h"
 #include "kaleidoscope.h"
@@ -26,13 +25,16 @@
 #include "hanoi.h"
 #include "beatchess.h"
 #include "beatcheckers.h"
-#include "maze3d.h"
 #include "drawradialbars.h"
 #include "bouncingcircle.h"
-#include "mandelbrot.h"
-#include "pong.h"
-#include "minesweeper.h"
 #include "cometbuster.h"
+#include "mandelbrot.h"
+#include "maze3d.h"
+#include "minesweeper.h"
+#include "rainbow.h"
+#include "pong.h"
+#include "sudoku.h"
+
 
 #define VIS_SAMPLES 512
 #define VIS_FREQUENCY_BARS 32
@@ -67,6 +69,7 @@ typedef enum {
     VIS_PONG,
     VIS_RADIAL_BARS,
     VIS_RADIAL_WAVE,
+    VIS_RAINBOW,
     VIS_RIPPLES,
     VIS_ROBOT_CHASER,
     VIS_SUDOKU_SOLVER,
@@ -373,7 +376,11 @@ typedef struct {
     // Minesweeper
     MinesweeperGame minesweeper_game; 
     
+    // Comet Busters
     CometBusterGame comet_buster;
+
+    // Rainbow
+    RainbowSystem rainbow_system;
 
 } Visualizer;
 
@@ -738,5 +745,10 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
 void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index, Visualizer *visualizer);
 void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt, Visualizer *visualizer);
 void comet_buster_update_ufos(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
+
+// Rainbow
+void update_rainbow_system(RainbowSystem *rainbow, double dt, double audio_level, double mouse_x, double mouse_y, gboolean mouse_active);
+void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow, int width, int height);
+void init_rainbow_system(RainbowSystem *rainbow);
 
 #endif
