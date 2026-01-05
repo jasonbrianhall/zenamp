@@ -60,11 +60,11 @@ typedef struct {
     gboolean spawn_waves_randomly;    // Spawn waves at random locations?
     double screen_width;        // Screen width for random spawning
     double screen_height;       // Screen height for random spawning
+    gboolean last_left_click;   // Track previous frame's left click state
+    gboolean last_right_click;  // Track previous frame's right click state
 } RainbowSystem;
 
 // Function declarations
-void draw_rainbow_system(cairo_t *cr, RainbowSystem *rainbow, 
-                        int width, int height);
 void spawn_rainbow_particle(RainbowSystem *rainbow, double x, double y, 
                            double vx, double vy, double hue, int shape);
 void spawn_rainbow_particle_random_location(RainbowSystem *rainbow, double width, double height,
@@ -72,8 +72,6 @@ void spawn_rainbow_particle_random_location(RainbowSystem *rainbow, double width
 void spawn_rainbow_wave(RainbowSystem *rainbow, double x, double y, double hue);
 void spawn_rainbow_wave_random_location(RainbowSystem *rainbow, double width, double height,
                                        double hue);
-void rainbow_on_mouse_click(RainbowSystem *rainbow, double x, double y);
-void rainbow_on_scroll(RainbowSystem *rainbow, double x, double y, int direction);
 void cleanup_rainbow_system(RainbowSystem *rainbow);
 
 #endif // RAINBOW_H

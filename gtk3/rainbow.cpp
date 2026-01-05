@@ -17,8 +17,10 @@ void init_rainbow_system(Visualizer *vis) {
     rainbow->mouse_interactive = TRUE;
     rainbow->interaction_intensity = 1.0;
     rainbow->particle_shape_mode = 0; // All shapes
-    rainbow->random_spawn_locations = TRUE;  // NEW: Enable random spawning!
-    rainbow->spawn_waves_randomly = TRUE;    // NEW: Random wave locations!
+    rainbow->random_spawn_locations = TRUE;  // Enable random spawning
+    rainbow->spawn_waves_randomly = TRUE;    // Random wave locations
+    rainbow->last_left_click = FALSE;
+    rainbow->last_right_click = FALSE;
     
     rainbow->vortex.x = 0;
     rainbow->vortex.y = 0;
@@ -160,9 +162,11 @@ void spawn_rainbow_wave(RainbowSystem *rainbow, double x, double y, double hue) 
 void update_rainbow_system(Visualizer *vis, double dt) {
     RainbowSystem *rainbow = &vis->rainbow_system;
     double audio_level = vis->volume_level;
-    double mouse_x = vis->mouse_x;
-    double mouse_y = vis->mouse_y;
-    gboolean mouse_active = vis->mouse_left_pressed;
+    int mouse_x = vis->mouse_x;
+    int mouse_y = vis->mouse_y;
+    gboolean mouse_left = vis->mouse_left_pressed;
+    gboolean mouse_right = vis->mouse_right_pressed;
+    
     rainbow->time_elapsed += dt;
     rainbow->global_hue_offset = fmod(rainbow->time_elapsed * 0.1, 1.0);
     rainbow->last_audio_level = audio_level;
@@ -245,9 +249,35 @@ void update_rainbow_system(Visualizer *vis, double dt) {
         }
     }
     
-    // Mouse interaction
-    if (rainbow->mouse_interactive && mouse_active) {
-        for (int i = 0; i < 12; i++) {  // Increased from 5 to 12 particles
+    // Left mouse button: spawn particles (on press, not continuously)
+    if (rainbow->mouse_interactive && mouse_left && !rainbow->last_left_click) {
+        // Spawn wave at click location
+        spawn_rainbow_wave(rainbow, mouse_x, mouse_y, rainbow->global_hue_offset);
+        
+        // Spawn particles around click
+        for (int i = 0; i < 20; i++) {
+            double angle = i * 2.0 * M_PI / 20.0;
+            double speed = 200.0;
+            double hue = fmod(rainbow->global_hue_offset + i * 0.05, 1.0);
+            
+            spawn_rainbow_particle(rainbow, mouse_x, mouse_y,
+                                  cos(angle) * speed,
+                                  sin(angle) * speed,
+                                  hue, rand() % 3);
+        }
+    }
+    
+    // Right mouse button: create vortex (on press)
+    if (rainbow->mouse_interactive && mouse_right && !rainbow->last_right_click) {
+        rainbow->vortex.x = mouse_x;
+        rainbow->vortex.y = mouse_y;
+        rainbow->vortex.magnitude = 1.0;
+        rainbow->vortex.active = TRUE;
+    }
+    
+    // Continuous mouse-based particle spawning while left button is held
+    if (rainbow->mouse_interactive && mouse_left) {
+        for (int i = 0; i < 12; i++) {  // Spawn particles while held
             double angle = i * 2.0 * M_PI / 12.0;
             double speed = 150.0;
             double hue = fmod(rainbow->global_hue_offset + i * 0.2, 1.0);
@@ -260,6 +290,10 @@ void update_rainbow_system(Visualizer *vis, double dt) {
                                   rand() % 3);
         }
     }
+    
+    // Track click states for next frame
+    rainbow->last_left_click = mouse_left;
+    rainbow->last_right_click = mouse_right;
     
     // Vortex decay
     if (rainbow->vortex.active) {
@@ -345,8 +379,8 @@ void draw_rainbow_particle(Visualizer *vis_ptr, cairo_t *cr) {
 void draw_rainbow_system(Visualizer *vis, cairo_t *cr) {
     RainbowSystem *rainbow = &vis->rainbow_system;
     
-    int width=vis->width;
-    int height=vis->height;
+    int width = vis->width;
+    int height = vis->height;
     // Set vortex to center
     rainbow->vortex.base_x = width / 2.0;
     rainbow->vortex.base_y = height / 2.0;
@@ -400,34 +434,6 @@ void draw_rainbow_system(Visualizer *vis, cairo_t *cr) {
         cairo_move_to(cr, 10, height - 10);
         cairo_show_text(cr, "Click to spawn rainbow particles");
     }
-}
-
-// Handle mouse click
-void rainbow_on_mouse_click(RainbowSystem *rainbow, double x, double y) {
-    if (!rainbow->mouse_interactive) return;
-    
-    // Spawn wave at click location
-    spawn_rainbow_wave(rainbow, x, y, rainbow->global_hue_offset);
-    
-    // Spawn particles around click (increased from 8 to 20)
-    for (int i = 0; i < 20; i++) {
-        double angle = i * 2.0 * M_PI / 20.0;
-        double speed = 200.0;
-        double hue = fmod(rainbow->global_hue_offset + i * 0.05, 1.0);
-        
-        spawn_rainbow_particle(rainbow, x, y,
-                              cos(angle) * speed,
-                              sin(angle) * speed,
-                              hue, rand() % 3);
-    }
-}
-
-// Handle scroll to create vortex
-void rainbow_on_scroll(RainbowSystem *rainbow, double x, double y, int direction) {
-    rainbow->vortex.x = x;
-    rainbow->vortex.y = y;
-    rainbow->vortex.magnitude = (direction > 0) ? 1.0 : -1.0;
-    rainbow->vortex.active = TRUE;
 }
 
 // Cleanup
