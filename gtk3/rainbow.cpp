@@ -27,6 +27,7 @@ void init_rainbow_system(Visualizer *vis) {
     rainbow->vortex.magnitude = 0;
     rainbow->vortex.frequency = 2.0;
     rainbow->vortex.active = FALSE;
+    rainbow->vortex.effect_time = 0.0;
 }
 
 // Convert HSV to RGB
@@ -167,6 +168,10 @@ void update_rainbow_system(Visualizer *vis, double dt) {
     gboolean mouse_left = vis->mouse_left_pressed;
     gboolean mouse_right = vis->mouse_right_pressed;
     
+    // Update screen dimensions for random spawning
+    rainbow->screen_width = vis->width;
+    rainbow->screen_height = vis->height;
+    
     rainbow->time_elapsed += dt;
     rainbow->global_hue_offset = fmod(rainbow->time_elapsed * 0.1, 1.0);
     rainbow->last_audio_level = audio_level;
@@ -249,12 +254,19 @@ void update_rainbow_system(Visualizer *vis, double dt) {
         }
     }
     
-    // Left mouse button: spawn particles (on press, not continuously)
+    // Left mouse button: spawn particles from click location (on press, not continuously)
     if (rainbow->mouse_interactive && mouse_left && !rainbow->last_left_click) {
-        // Spawn wave at click location
-        spawn_rainbow_wave(rainbow, mouse_x, mouse_y, rainbow->global_hue_offset);
+        // Spawn wave at random location
+        if (rainbow->spawn_waves_randomly && rainbow->screen_width > 0) {
+            spawn_rainbow_wave_random_location(rainbow,
+                                              rainbow->screen_width,
+                                              rainbow->screen_height,
+                                              rainbow->global_hue_offset);
+        } else {
+            spawn_rainbow_wave(rainbow, mouse_x, mouse_y, rainbow->global_hue_offset);
+        }
         
-        // Spawn particles around click
+        // Spawn particles from click location in circular pattern
         for (int i = 0; i < 20; i++) {
             double angle = i * 2.0 * M_PI / 20.0;
             double speed = 200.0;
@@ -267,17 +279,32 @@ void update_rainbow_system(Visualizer *vis, double dt) {
         }
     }
     
-    // Right mouse button: create vortex (on press)
+    // Right mouse button: draw actual rainbow with gold particles (on press)
     if (rainbow->mouse_interactive && mouse_right && !rainbow->last_right_click) {
         rainbow->vortex.x = mouse_x;
         rainbow->vortex.y = mouse_y;
-        rainbow->vortex.magnitude = 1.0;
+        rainbow->vortex.effect_time = 3.0;  // 3 second rainbow duration
         rainbow->vortex.active = TRUE;
+        
+        // Spawn gold particles at the end of the rainbow (pot of gold!)
+        double gold_end_x = mouse_x + 150.0 * cos(M_PI / 4.0);  // Rainbow end at 45 degrees
+        double gold_end_y = mouse_y + 150.0 * sin(M_PI / 4.0);
+        
+        for (int i = 0; i < 30; i++) {
+            double angle = (rand() % 360) * M_PI / 180.0;
+            double speed = 100.0 + (rand() % 100) * 0.5;
+            
+            spawn_rainbow_particle(rainbow, gold_end_x, gold_end_y,
+                                  cos(angle) * speed,
+                                  sin(angle) * speed,
+                                  0.14,  // Gold hue (yellow-orange)
+                                  rand() % 3);
+        }
     }
     
-    // Continuous mouse-based particle spawning while left button is held
+    // Continuous mouse-based particle spawning from pointer while left button is held
     if (rainbow->mouse_interactive && mouse_left) {
-        for (int i = 0; i < 12; i++) {  // Spawn particles while held
+        for (int i = 0; i < 12; i++) {
             double angle = i * 2.0 * M_PI / 12.0;
             double speed = 150.0;
             double hue = fmod(rainbow->global_hue_offset + i * 0.2, 1.0);
@@ -295,31 +322,11 @@ void update_rainbow_system(Visualizer *vis, double dt) {
     rainbow->last_left_click = mouse_left;
     rainbow->last_right_click = mouse_right;
     
-    // Vortex decay
+    // Visual circle effect decay
     if (rainbow->vortex.active) {
-        rainbow->vortex.magnitude *= 0.95;
-        if (rainbow->vortex.magnitude < 0.01) {
+        rainbow->vortex.effect_time -= dt;
+        if (rainbow->vortex.effect_time <= 0) {
             rainbow->vortex.active = FALSE;
-        }
-    }
-    
-    // Update vortex influence on particles
-    if (rainbow->vortex.active && rainbow->vortex.magnitude > 0.1) {
-        for (int i = 0; i < MAX_RAINBOW_PARTICLES; i++) {
-            RainbowParticle *p = &rainbow->particles[i];
-            if (!p->active) continue;
-            
-            double dx = p->x - rainbow->vortex.x;
-            double dy = p->y - rainbow->vortex.y;
-            double dist = sqrt(dx*dx + dy*dy);
-            
-            if (dist < 300.0) {
-                // Circular motion around vortex
-                double force = rainbow->vortex.magnitude * (1.0 - dist / 300.0);
-                double angle = atan2(dy, dx);
-                p->vx += cos(angle + M_PI/2) * force * 100 * dt;
-                p->vy += sin(angle + M_PI/2) * force * 100 * dt;
-            }
         }
     }
 }
@@ -420,11 +427,25 @@ void draw_rainbow_system(Visualizer *vis, cairo_t *cr) {
     // Draw particles
     draw_rainbow_particle(vis, cr);
     
-    // Draw vortex effect if active
-    if (rainbow->vortex.active && rainbow->vortex.magnitude > 0.1) {
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.3 * rainbow->vortex.magnitude);
-        cairo_arc(cr, rainbow->vortex.x, rainbow->vortex.y, 50, 0, 2*M_PI);
-        cairo_fill(cr);
+    // Draw rainbow effect if active (actual rainbow arc)
+    if (rainbow->vortex.active) {
+        double alpha = rainbow->vortex.effect_time / 3.0;  // Fade out over time
+        cairo_set_line_width(cr, 15.0);
+        
+        // Draw rainbow as concentric arcs with spectrum colors
+        double start_radius = 60.0;
+        int num_bands = 7;  // ROYGBIV
+        
+        for (int i = 0; i < num_bands; i++) {
+            double hue = (double)i / (double)num_bands;  // Spectrum from red to violet
+            double r, g, b;
+            hsv_to_rgb_rainbow(hue, 1.0, 1.0, &r, &g, &b);
+            
+            double radius = start_radius + i * 12.0;
+            cairo_set_source_rgba(cr, r, g, b, alpha * 0.8);
+            cairo_arc(cr, rainbow->vortex.x, rainbow->vortex.y, radius, M_PI, 0);  // Upper semicircle
+            cairo_stroke(cr);
+        }
     }
     
     // Draw instruction text (for interactive mode)

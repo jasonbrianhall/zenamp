@@ -37,6 +37,7 @@ typedef struct {
     double magnitude;           // Wave magnitude
     double frequency;           // Wave frequency
     gboolean active;
+    double effect_time;         // Time for visual effect
 } RainbowVortex;
 
 typedef struct {
