@@ -5,8 +5,8 @@
 #include <glib.h>
 #include <math.h>
 
-#define MAX_RAINBOW_PARTICLES 2000
-#define MAX_RAINBOW_WAVES 20
+#define MAX_RAINBOW_PARTICLES 20000
+#define MAX_RAINBOW_WAVES 200
 
 typedef struct {
     double x, y;                // Position
