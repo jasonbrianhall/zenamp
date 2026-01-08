@@ -93,18 +93,25 @@ bool load_m3u_playlist(AudioPlayer *player, const char *m3u_path) {
         full_path[sizeof(full_path) - 1] = '\0';
         
         // Check if file exists
-        if (access(full_path, F_OK) == 0) {
-            // Add any existing file to the queue - let load_file handle format validation
-            if (add_to_queue(&player->queue, full_path)) {
-                added_count++;
+        bool file_exists = (access(full_path, F_OK) == 0);
+        
+        // ✅ FIXED: Add file to queue REGARDLESS of whether it exists
+        // The queue display will handle marking it with ⚠ if inaccessible
+        if (add_to_queue(&player->queue, full_path)) {
+            added_count++;
+            if (file_exists) {
                 printf("Added to queue: %s\n", full_path);
+            } else {
+                printf("Warning: File not found, adding to queue anyway: %s (will show ⚠)\n", full_path);
             }
-        } else {
-            printf("File not found, skipping: %s\n", full_path);
+        }
+        
+        // Track missing files for user feedback
+        if (!file_exists) {
             has_errors = true;
             
             if (!error_message[0]) {
-                error_buffer_pos = snprintf(error_message, sizeof(error_message), "Can't open: %s", full_path);
+                error_buffer_pos = snprintf(error_message, sizeof(error_message), "Not found: %s", full_path);
             } else {
                 int remaining = sizeof(error_message) - error_buffer_pos - 1;
                 if (remaining > strlen(full_path) + 2) {
@@ -135,7 +142,7 @@ bool load_m3u_playlist(AudioPlayer *player, const char *m3u_path) {
         }
     }
     
-    update_queue_display(player);
+    update_queue_display_with_filter(player);
     update_gui_state(player);
     
     return added_count > 0;

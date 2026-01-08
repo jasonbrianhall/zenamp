@@ -1062,6 +1062,7 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
 
         char *metadata = NULL;
         int duration_seconds = 0;
+        bool file_accessible = true;  // NEW: Track if file is accessible
 
         if (ext && strcasecmp(ext, ".zip") == 0) {
             char *extracted_path = extract_audio_from_zip(filepath);
@@ -1071,11 +1072,28 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
                 unlink(extracted_path);
                 g_free(extracted_path);
             } else {
-                metadata = g_strdup("No metadata available");
+                // NEW: Handle inaccessible ZIP files - keep in queue with warning
+                metadata = g_strdup("(File not accessible)");
+                duration_seconds = 0;
+                file_accessible = false;
+                printf("Warning: ZIP file not accessible: %s\n", filepath);
             }
         } else {
+            // NEW: Explicit handling for inaccessible regular files
             metadata = extract_metadata(filepath);
-            duration_seconds = get_file_duration(filepath);
+            
+            // If metadata is empty/null, file is likely inaccessible
+            if (!metadata || strlen(metadata) == 0) {
+                // File is inaccessible but DON'T REMOVE IT!
+                g_free(metadata);
+                metadata = g_strdup("(File not accessible)");
+                duration_seconds = 0;
+                file_accessible = false;
+                printf("Warning: File not accessible: %s\n", filepath);
+            } else {
+                // File seems accessible, get duration
+                duration_seconds = get_file_duration(filepath);
+            }
         }
 
         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
@@ -1107,11 +1125,17 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
 
             const char *cdgk_indicator = (ext && strcasecmp(ext, ".zip") == 0) ? "✓" : "";
             const char *indicator = (i == player->queue.current_index) ? "▶" : "";
+            
+            // NEW: Add visual indicator for inaccessible files
+            const char *accessibility_indicator = file_accessible ? "" : "⚠ ";
+            char display_filename[512];
+            snprintf(display_filename, sizeof(display_filename), "%s%s", 
+                     accessibility_indicator, basename);
 
             gtk_list_store_set(player->queue_store, &iter,
                 COL_FILEPATH, filepath,
                 COL_PLAYING, indicator,
-                COL_FILENAME, basename,
+                COL_FILENAME, display_filename,  // Changed from 'basename'
                 COL_TITLE, title,
                 COL_ARTIST, artist,
                 COL_ALBUM, album,
