@@ -1,5 +1,7 @@
 #include "visualization.h"
 
+// Parrot visualization
+
 void init_parrot_system(Visualizer *vis) {
     vis->parrot_state.mouth_open = 0.0;
     vis->parrot_state.blink_timer = 0.0;
