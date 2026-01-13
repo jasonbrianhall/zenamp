@@ -745,6 +745,7 @@ void comet_buster_update_enemy_ships(CometBusterGame *game, double dt, int width
 void comet_buster_brown_coat_standard_fire(CometBusterGame *game, int ship_index, Visualizer *visualizer);
 void comet_buster_update_brown_coat_ship(CometBusterGame *game, int ship_index, double dt, Visualizer *visualizer);
 void comet_buster_update_ufos(CometBusterGame *game, double dt, int width, int height, Visualizer *visualizer);
+bool comet_buster_check_ship_bomb_pickup(CometBusterGame *game, BombPickup *p, Visualizer *visualizer);
 
 // Rainbow
 void draw_rainbow_system(Visualizer *vis_ptr, cairo_t *cr);
