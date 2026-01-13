@@ -1,6 +1,6 @@
 #include "visualization.h"
 
-// Parrot visualization
+// Parrot visualization (originally thinking about sbtalker)
 
 void init_parrot_system(Visualizer *vis) {
     vis->parrot_state.mouth_open = 0.0;
