@@ -1,3 +1,5 @@
+// Zenamp (c) Jason Hall 2026 - Main GTK3 File
+
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <glib.h>
