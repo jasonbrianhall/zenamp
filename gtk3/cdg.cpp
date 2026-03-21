@@ -5,7 +5,7 @@
 #include <math.h>
 
 CDGDisplay* cdg_display_new(void) {
-    CDGDisplay *display = calloc(1, sizeof(CDGDisplay));
+    CDGDisplay *display = (CDGDisplay*)calloc(1, sizeof(CDGDisplay));
     if (!display) return NULL;
     
     for (int i = 0; i < CDG_COLORS; i++) {
@@ -51,7 +51,7 @@ bool cdg_load_file(CDGDisplay *display, const char *filename) {
     }
     
     display->packet_count = size / 24;
-    display->packets = malloc(display->packet_count * sizeof(CDGPacket));
+    display->packets = (CDGPacket*)malloc(display->packet_count * sizeof(CDGPacket));
     if (!display->packets) {
         fclose(f);
         return false;
