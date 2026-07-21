@@ -402,3 +402,85 @@ bool convertMp3ToWavInMemory(const std::vector<uint8_t>& mp3Data, std::vector<ui
     
     return true;
 }
+
+bool mixTwoWavFiles(const std::vector<uint8_t>& wavA, const std::vector<uint8_t>& wavB, std::vector<uint8_t>& mixedWav) {
+    if (wavA.size() < 44 || wavB.size() < 44) {
+        std::cerr << "Invalid WAV input" << std::endl;
+        return false;
+    }
+
+    // Extract headers
+    const uint8_t* hdrA = wavA.data();
+    const uint8_t* hdrB = wavB.data();
+
+    auto readLE16 = [](const uint8_t* p) {
+        return (uint16_t)(p[0] | (p[1] << 8));
+    };
+    auto readLE32 = [](const uint8_t* p) {
+        return (uint32_t)(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
+    };
+
+    uint16_t channelsA = readLE16(hdrA + 22);
+    uint32_t sampleRateA = readLE32(hdrA + 24);
+    uint16_t bitsA = readLE16(hdrA + 34);
+
+    uint16_t channelsB = readLE16(hdrB + 22);
+    uint32_t sampleRateB = readLE32(hdrB + 24);
+    uint16_t bitsB = readLE16(hdrB + 34);
+
+    // Ensure formats match
+    if (channelsA != channelsB || sampleRateA != sampleRateB || bitsA != bitsB || bitsA != 16) {
+        std::cerr << "WAV formats do not match or are not 16-bit PCM" << std::endl;
+        return false;
+    }
+
+    // PCM data starts at byte 44
+    const int HEADER_SIZE = 44;
+    size_t dataSizeA = wavA.size() - HEADER_SIZE;
+    size_t dataSizeB = wavB.size() - HEADER_SIZE;
+
+    size_t mixedSize = std::min(dataSizeA, dataSizeB);
+
+    const int16_t* pcmA = (const int16_t*)(wavA.data() + HEADER_SIZE);
+    const int16_t* pcmB = (const int16_t*)(wavB.data() + HEADER_SIZE);
+
+    size_t samples = mixedSize / 2; // 2 bytes per sample
+
+    std::vector<int16_t> mixedPCM(samples);
+
+    for (size_t i = 0; i < samples; i++) {
+        int32_t s = (int32_t)pcmA[i] + (int32_t)pcmB[i];
+
+        // Clip to 16-bit
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+
+        mixedPCM[i] = (int16_t)s;
+    }
+
+    // Build output WAV
+    mixedWav.resize(HEADER_SIZE + mixedSize);
+
+    // Copy header from A (safe because formats match)
+    std::memcpy(mixedWav.data(), wavA.data(), HEADER_SIZE);
+
+    // Fix data size fields
+    uint32_t dataBytes = mixedSize;
+    uint32_t riffSize = 36 + dataBytes;
+
+    mixedWav[4] = riffSize & 0xFF;
+    mixedWav[5] = (riffSize >> 8) & 0xFF;
+    mixedWav[6] = (riffSize >> 16) & 0xFF;
+    mixedWav[7] = (riffSize >> 24) & 0xFF;
+
+    mixedWav[40] = dataBytes & 0xFF;
+    mixedWav[41] = (dataBytes >> 8) & 0xFF;
+    mixedWav[42] = (dataBytes >> 16) & 0xFF;
+    mixedWav[43] = (dataBytes >> 24) & 0xFF;
+
+    // Copy mixed PCM
+    std::memcpy(mixedWav.data() + HEADER_SIZE, mixedPCM.data(), mixedSize);
+
+    return true;
+}
+
