@@ -69,7 +69,7 @@ AVCODEC_LIBS_LINUX := $(shell $(PKG_CONFIG_LINUX) --libs libavcodec libavformat 
 
 CXXFLAGS_LINUX = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(VORBIS_CFLAGS_LINUX) $(OPUS_CFLAGS_LINUX) $(AVCODEC_CFLAGS_LINUX) -DLINUX -DCAIROBUILD -DVERSION=\"$(BUILDNUM)\"
 CFLAGS_LINUX = $(CFLAGS_COMMON) $(SDL2_CFLAGS_LINUX) $(GTK_CFLAGS_LINUX) $(VORBIS_CFLAGS_LINUX) $(OPUS_CFLAGS_LINUX) $(AVCODEC_CFLAGS_LINUX) -DLINUX -DCAIROBUILD
-LDFLAGS_LINUX = $(SDL2_LIBS_LINUX) $(GTK_LIBS_LINUX) $(VORBIS_LIBS_LINUX) $(OPUS_LIBS_LINUX) $(AVCODEC_LIBS_LINUX) -lSDL2_mixer -lm -pthread -lstdc++ -lFLAC
+LDFLAGS_LINUX = $(SDL2_LIBS_LINUX) $(GTK_LIBS_LINUX) $(VORBIS_LIBS_LINUX) $(OPUS_LIBS_LINUX) $(AVCODEC_LIBS_LINUX) -lSDL2_mixer -lm -pthread -lstdc++ -lFLAC -lssl -lcrypto
 
 CFLAGS_LINUX   += $(shell pkg-config --cflags taglib_c)
 LDFLAGS_LINUX  += $(shell pkg-config --libs taglib_c)
@@ -97,7 +97,7 @@ MEDIA_FOUNDATION_LIBS = -lmf -lmfplat -lmfreadwrite -lmfuuid -lole32
 
 CXXFLAGS_WIN = $(CXXFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(VORBIS_CFLAGS_WIN) $(OPUS_CFLAGS_WIN) $(TAGLIB_CFLAGS_WIN) -DWIN32 -D_WIN32 -DCAIROBUILD -DVERSION=\"$(BUILDNUM)\"
 CFLAGS_WIN = $(CFLAGS_COMMON) $(SDL2_CFLAGS_WIN) $(GTK_CFLAGS_WIN) $(VORBIS_CFLAGS_WIN) $(OPUS_CFLAGS_WIN) $(TAGLIB_CFLAGS_WIN) -DWIN32 -D_WIN32 -DCAIROBUILD
-LDFLAGS_WIN = $(SDL2_LIBS_WIN) $(GTK_LIBS_WIN) $(VORBIS_LIBS_WIN) $(OPUS_LIBS_WIN) $(TAGLIB_LIBS_WIN) -lSDL2_mixer -lm -lstdc++ -lFLAC -lwinmm $(MEDIA_FOUNDATION_LIBS)
+LDFLAGS_WIN = $(SDL2_LIBS_WIN) $(GTK_LIBS_WIN) $(VORBIS_LIBS_WIN) $(OPUS_LIBS_WIN) $(TAGLIB_LIBS_WIN) -lSDL2_mixer -lm -lstdc++ -lFLAC -lwinmm $(MEDIA_FOUNDATION_LIBS) -lssl -lcrypto
 
 CXXFLAGS_WIN += -Os -ffunction-sections -fdata-sections
 LDFLAGS_WIN  += -s -Wl,--gc-sections
@@ -126,7 +126,8 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp main.cpp midiplayer.cpp \
 	cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp \
 	cometbuster_boss.cpp cometbuster_render.cpp beatchess_draw.cpp \
 	cometbuster_util.cpp cometbuster_starboss.cpp cometbuster_bombs.cpp \
-	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp
+	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp karafun.cpp \
+	kfn.cpp
 
 # Platform-specific source files
 SOURCES_CPP_LINUX = $(SOURCES_CPP_COMMON) \

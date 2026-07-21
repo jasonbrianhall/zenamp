@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
 #include <signal.h>
 
 #ifndef _WIN32
@@ -41,6 +42,12 @@ extern bool paused;
 extern int globalVolume;
 extern void processEvents(void);
 extern double playwait;
+extern void karafun_update(double playback_position_seconds);
+extern bool karafun_load(const char *kfn_path);
+extern const char* karafun_get_vocal_path(void);
+extern const char* karafun_get_backing_path(void);
+extern void karafun_set_paused(bool paused);
+extern void karafun_seek(int position_ms);
 
 AudioPlayer *player = NULL;
 
@@ -675,6 +682,31 @@ bool load_file(AudioPlayer *player, const char *filename) {
     bool success = false;
     bool is_zip_file = false;
     
+    // Check for Karafun (.kfn) files FIRST
+    if (strcmp(ext_lower, ".kfn") == 0) {
+        printf("Loading Karafun file: %s\n", filename);
+        if (karafun_load(filename)) {
+            const char *vocal_path = karafun_get_vocal_path();
+            if (vocal_path) {
+                printf("Karafun loaded, playing both vocal and backing tracks\n");
+                success = load_file(player, vocal_path);
+                if (success && player->visualizer) {
+                    visualizer_set_type(player->visualizer, VIS_KARAOKE);
+                    // Play backing track via SDL_mixer if available
+                    const char *backing_path = karafun_get_backing_path();
+                    if (backing_path) {
+                        Mix_Music *backing = Mix_LoadMUS(backing_path);
+                        if (backing) {
+                            Mix_PlayMusic(backing, -1);
+                            printf("Backing track playing via SDL_mixer\n");
+                        }
+                    }
+                }
+            }
+        }
+        return success;
+    }
+    
     if (strcmp(ext_lower, ".wav") == 0) {
         printf("Loading WAV file: %s\n", filename);
         success = load_wav_file(player, filename);
@@ -1134,6 +1166,7 @@ void toggle_pause(AudioPlayer *player) {
     
     if (player->is_paused) {
         SDL_PauseAudioDevice(player->audio_device, 1);
+        karafun_set_paused(true);
         
         // Zero out frequency bands when paused so visualizations stop
         if (player->visualizer && player->visualizer->frequency_bands) {
@@ -1150,6 +1183,7 @@ void toggle_pause(AudioPlayer *player) {
         }
     } else {
         SDL_PauseAudioDevice(player->audio_device, 0);
+        karafun_set_paused(false);
     }
     pthread_mutex_unlock(&player->audio_mutex);
     

@@ -1,5 +1,6 @@
 #include "visualization.h"
 #include "cdg.h"
+#include "karafun.h"
 #include <cairo.h>
 #include <string.h>
 
@@ -153,6 +154,13 @@ void draw_karaoke_visualization(Visualizer *vis, cairo_t *cr, double center_x, d
 
 
 void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
+    // Check if Karafun is active first
+    KarafunState *kfn = karafun_get_state();
+    if (kfn && kfn->active) {
+        draw_karafun_lyrics(vis, cr);
+        return;
+    }
+    
     // Check if we actually have valid CDG data loaded
     if (!vis->cdg_display || !vis->cdg_display->packets || vis->cdg_display->packet_count == 0) {
         // Draw "no CDG loaded" message
@@ -250,6 +258,13 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
 }
 
 void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
+    // Check if Karafun is active first
+    KarafunState *kfn = karafun_get_state();
+    if (kfn && kfn->active) {
+        draw_karafun_lyrics(vis, cr);
+        return;
+    }
+    
     if (!vis->cdg_display || !vis->cdg_display->packets || vis->cdg_display->packet_count == 0) {
         cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
         cairo_paint(cr);
