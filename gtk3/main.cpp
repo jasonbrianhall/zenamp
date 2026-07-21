@@ -192,7 +192,7 @@ bool open_windows_file_dialog(char* filename, size_t filename_size, bool multipl
     ofn.lStructSize = sizeof(ofn);
     ofn.lpstrFile = filename;
     ofn.nMaxFile = (DWORD)filename_size;
-    ofn.lpstrFilter = "All Supported\0*.mid;*.midi;*.wav;*.mp3;*.m4a;*.aiff;*.aif;*.ogg;*.flac;*.opus;*.wma;*.lrc;*.zip\0"
+    ofn.lpstrFilter = "All Supported\0*.mid;*.midi;*.wav;*.mp3;*.m4a;*.aiff;*.aif;*.ogg;*.flac;*.opus;*.wma;*.lrc;*.kfn;*.zip\0"
                       "MIDI Files\0*.mid;*.midi\0"
                       "WAV Files\0*.wav\0"
                       "MP3 Files\0*.mp3\0"
@@ -204,6 +204,7 @@ bool open_windows_file_dialog(char* filename, size_t filename_size, bool multipl
                       "WMA Files\0*.wma\0"
                       "CD+G Files\0*.zip\0"
                       "Lyric Files\0*.lrc\0"
+                      "Karafun Files\0*.kfn\0"
                       "All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.lpstrFileTitle = NULL;
@@ -1961,6 +1962,7 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
     gtk_file_filter_add_pattern(all_filter, "*.opus");
     gtk_file_filter_add_pattern(all_filter, "*.wma");
     gtk_file_filter_add_pattern(all_filter, "*.lrc");
+    gtk_file_filter_add_pattern(all_filter, "*.kfn");
     gtk_file_filter_add_pattern(all_filter, "*.zip");
 
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_filter);
@@ -2149,6 +2151,7 @@ void on_menu_open(GtkMenuItem *menuitem, gpointer user_data) {
     gtk_file_filter_add_pattern(all_filter, "*.m4a");
     gtk_file_filter_add_pattern(all_filter, "*.wma");
     gtk_file_filter_add_pattern(all_filter, "*.lrc");
+    gtk_file_filter_add_pattern(all_filter, "*.kfn");
     gtk_file_filter_add_pattern(all_filter, "*.zip");
 
 
