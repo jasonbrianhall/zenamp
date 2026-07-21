@@ -128,7 +128,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                     // text0=Yan/kee Doo/dle went to town/_
                     // Split on "/" and spaces to get syllables
                     
-                    // Count syllables first
+                    // Count syllables first (including underscores, which consume sync times)
                     int syl_count = 0;
                     char *count_copy = (char*)malloc(strlen(val) + 1);
                     strcpy(count_copy, val);
@@ -141,7 +141,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                         char syl_t[512] = {0};
                         strncpy(syl_t, syl_tmp, sizeof(syl_t) - 1);
                         trim_string(syl_t, strlen(syl_t));
-                        if (syl_t[0] && strcmp(syl_t, "_") != 0) syl_count++;
+                        if (syl_t[0]) syl_count++;  // Count ALL syllables, including underscores
                         syl_tmp = strtok_r(NULL, " ", &save_tmp);
                     }
                     free(count_copy);
@@ -187,7 +187,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                         }
                     }
                     
-                    // NOW add syllables as words
+                    // NOW add syllables as words (including underscores as placeholders)
                     char *val_copy = (char*)malloc(strlen(val) + 1);
                     strcpy(val_copy, val);
                     for (char *p = val_copy; *p; p++) {
@@ -201,7 +201,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                         strncpy(syl_trimmed, syllable, sizeof(syl_trimmed) - 1);
                         trim_string(syl_trimmed, strlen(syl_trimmed));
                         
-                        if (syl_trimmed[0] && strcmp(syl_trimmed, "_") != 0) {
+                        if (syl_trimmed[0]) {  // Add ALL syllables, including underscores
                             if (g_karafun.word_count < 10000) {
                                 char **new_words = (char**)realloc(g_karafun.words,
                                     sizeof(char*) * (g_karafun.word_count + 1));
@@ -550,7 +550,24 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
     // --- FULL WORD HIGHLIGHT BOX ---
     //
     const char *current_word = g_karafun.words[current_word_idx];
-    const char *word_pos = strstr(current_text, current_word);
+    
+    // Find which occurrence of this word we need (in case it repeats in the line)
+    int word_occurrence = 0;
+    for (int i = g_karafun.lines[current_line].start_word_idx; i < current_word_idx; i++) {
+        if (strcmp(g_karafun.words[i], current_word) == 0) {
+            word_occurrence++;
+        }
+    }
+    
+    // Find the Nth occurrence of current_word in current_text
+    const char *word_pos = current_text;
+    for (int i = 0; i <= word_occurrence; i++) {
+        word_pos = strstr(word_pos, current_word);
+        if (!word_pos) break;
+        if (i < word_occurrence) {
+            word_pos++;  // Move past this match to find the next one
+        }
+    }
 
     if (word_pos) {
         size_t before_len = word_pos - current_text;
