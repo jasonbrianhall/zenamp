@@ -1,50 +1,43 @@
+// Karafun (.kfn) support - integrated with Zenamp's audio system
+// Based on felixchirp's fc_kfn.cpp approach:
+//   - Vocal track plays via normal load_file() -> SDL audio
+//   - Backing track plays as Mix_Chunk on separate channel
+//   - Sync via playTime (no separate karafun_update needed)
+
 #include "karafun.h"
+#include "kfn.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
-#include <fcntl.h>
+#include <strings.h>
 #include "visualization.h"
 #include <SDL2/SDL_mixer.h>
 
-// Forward declare from kfn.cpp
-class KFNArchive;
-extern "C" {
-    KFNArchive* kfn_archive_open(const char* path);
-    void kfn_archive_close(KFNArchive* archive);
-    const char* kfn_archive_last_error(KFNArchive* archive);
-    unsigned char* kfn_archive_extract_by_name(KFNArchive* archive, const char* name, size_t* out_size);
-    const char** kfn_archive_get_entries(KFNArchive* archive, int* count);
-    char* kfn_archive_extract_to_temp(KFNArchive* archive, const char* entry_name, const char* ext);
-}
-
 static KarafunState g_karafun = {0};
-static Mix_Music *g_backing_music = NULL;
+
+// ============================================================================
+// HELPERS
+// ============================================================================
 
 static void trim_string(char *str, size_t len) {
     if (!str || len == 0) return;
-    for (int i = (int)len - 1; i >= 0; i--) {
-        if (!isspace((unsigned char)str[i])) {
-            str[i + 1] = '\0';
-            break;
-        }
+    // Trim trailing whitespace
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\r' || str[len-1] == '\n')) {
+        str[--len] = '\0';
     }
-    int start = 0;
-    while (start < (int)len && isspace((unsigned char)str[start])) {
-        start++;
-    }
+    // Trim leading whitespace
+    size_t start = 0;
+    while (start < len && (str[start] == ' ' || str[start] == '\t')) start++;
     if (start > 0) {
         memmove(str, str + start, len - start + 1);
     }
 }
 
-static char* to_lower_str(char *str) {
-    if (!str) return str;
-    for (int i = 0; str[i]; i++) {
-        str[i] = (char)tolower((unsigned char)str[i]);
-    }
-    return str;
+static void to_lower_str(char *str) {
+    if (!str) return;
+    for (; *str; str++) *str = tolower((unsigned char)*str);
 }
 
 static bool all_digits(const char *str, size_t from) {
@@ -56,26 +49,28 @@ static bool all_digits(const char *str, size_t from) {
 }
 
 static bool is_audio_file(const char *name) {
-    static const char *exts[] = {
-        ".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac", ".opus", NULL
-    };
+    if (!name) return false;
     const char *dot = strrchr(name, '.');
     if (!dot) return false;
-    
-    char ext_lower[16] = {0};
-    strncpy(ext_lower, dot, sizeof(ext_lower) - 1);
-    to_lower_str(ext_lower);
-    
-    for (int i = 0; exts[i]; i++) {
-        if (strcmp(ext_lower, exts[i]) == 0) return true;
-    }
-    return false;
+    char ext[8] = {0};
+    for (int i = 0; i < 7 && dot[i]; i++) ext[i] = tolower((unsigned char)dot[i]);
+    return strcmp(ext, ".ogg") == 0 || strcmp(ext, ".mp3") == 0 || 
+           strcmp(ext, ".wav") == 0 || strcmp(ext, ".m4a") == 0 || 
+           strcmp(ext, ".aac") == 0 || strcmp(ext, ".flac") == 0;
 }
 
 static void delete_temp_file(const char *path) {
     if (!path || !path[0]) return;
+#ifndef _WIN32
     unlink(path);
+#else
+    DeleteFileA(path);
+#endif
 }
+
+// ============================================================================
+// PARSING (song.ini from KFN archive)
+// ============================================================================
 
 static void parse_song_ini(const char *content, size_t content_len) {
     printf("KARAFUN: Parsing song.ini (%zu bytes)\n", content_len);
@@ -131,9 +126,9 @@ static void parse_song_ini(const char *content, size_t content_len) {
                     strncpy(artist, val, sizeof(artist) - 1);
                 } else if (strncmp(key, "text", 4) == 0 && all_digits(key, 4)) {
                     // text0=Yan/kee Doo/dle went to town/_
-                    // Split on BOTH "/" and spaces - each creates a sync point
+                    // Split on "/" and spaces to get syllables
                     
-                    // FIRST: Count syllables in this line
+                    // Count syllables first
                     int syl_count = 0;
                     char *count_copy = (char*)malloc(strlen(val) + 1);
                     strcpy(count_copy, val);
@@ -153,7 +148,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                     
                     // Store line BEFORE adding syllables
                     if (syl_count > 0 && g_karafun.line_count < 1000) {
-                        int line_start_idx = g_karafun.word_count;  // Current word index
+                        int line_start_idx = g_karafun.word_count;
                         
                         KarafunLyricLine *new_lines = (KarafunLyricLine*)realloc(
                             g_karafun.lines,
@@ -192,14 +187,12 @@ static void parse_song_ini(const char *content, size_t content_len) {
                         }
                     }
                     
-                    // SECOND: Now add syllables as words
+                    // NOW add syllables as words
                     char *val_copy = (char*)malloc(strlen(val) + 1);
                     strcpy(val_copy, val);
-                    
                     for (char *p = val_copy; *p; p++) {
                         if (*p == '/') *p = ' ';
                     }
-                    
                     char *saveptr = NULL;
                     char *syllable = strtok_r(val_copy, " ", &saveptr);
                     
@@ -228,8 +221,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                     free(val_copy);
                 } else if (strncmp(key, "sync", 4) == 0 && all_digits(key, 4)) {
                     // sync0=177,179,182,185,...  (centiseconds!)
-                    // Convert to milliseconds: centiseconds * 10 = milliseconds
-                    // 1772 centiseconds = 17.72 seconds = 17720 milliseconds
+                    // Convert to seconds: centiseconds / 100.0
                     char *val_copy = (char*)malloc(strlen(val) + 1);
                     strcpy(val_copy, val);
                     char *saveptr = NULL;
@@ -241,14 +233,14 @@ static void parse_song_ini(const char *content, size_t content_len) {
                         trim_string(token_trimmed, strlen(token_trimmed));
                         
                         int centiseconds = atoi(token_trimmed);
-                        int ms = centiseconds * 10;  // 1772cs * 10 = 17720ms = 17.72 seconds
+                        double seconds = centiseconds / 100.0;
                         
                         if (g_karafun.sync_count < 10000) {
                             int *new_syncs = (int*)realloc(g_karafun.sync_times_ms,
                                 sizeof(int) * (g_karafun.sync_count + 1));
                             if (new_syncs) {
                                 g_karafun.sync_times_ms = new_syncs;
-                                g_karafun.sync_times_ms[g_karafun.sync_count++] = ms;
+                                g_karafun.sync_times_ms[g_karafun.sync_count++] = (int)(seconds * 1000.0);
                             }
                         }
                         
@@ -272,105 +264,86 @@ static void parse_song_ini(const char *content, size_t content_len) {
     free(ini_copy);
 }
 
+// ============================================================================
+// PUBLIC API
+// ============================================================================
 
 bool karafun_load(const char *kfn_path) {
     printf("KARAFUN: Loading %s\n", kfn_path);
-    
-    if (!kfn_path) return false;
-    
     karafun_stop();
     
-    // Open KFN archive
-    KFNArchive* archive = kfn_archive_open(kfn_path);
-    if (!archive) {
-        printf("KARAFUN: Failed to open archive\n");
+    // Open KFN archive using C++ class
+    KFNArchive archive;
+    if (!archive.open(kfn_path)) {
+        printf("KARAFUN: Failed to open archive: %s\n", archive.lastError().c_str());
         return false;
     }
-    
-    printf("KARAFUN: Archive opened\n");
     
     // Extract song.ini
-    size_t ini_size = 0;
-    unsigned char *ini_buf = kfn_archive_extract_by_name(archive, "song.ini", &ini_size);
-    if (!ini_buf) {
+    printf("KARAFUN: Extracting song.ini\n");
+    const KFNEntry *ini_entry = archive.find("song.ini");
+    if (!ini_entry) {
         printf("KARAFUN: No song.ini found\n");
-        kfn_archive_close(archive);
         return false;
     }
     
-    printf("KARAFUN: song.ini extracted (%zu bytes)\n", ini_size);
-    parse_song_ini((const char *)ini_buf, ini_size);
-    
-    // Parse [general] section for source= to find vocal track filename
-    char vocal_filename[512] = {0};
-    char *general_start = strstr((const char *)ini_buf, "[general]");
-    if (general_start) {
-        char *source_line = strstr(general_start, "source=");
-        if (source_line) {
-            source_line += 7;  // Skip "source="
-            char *comma = strchr(source_line, ',');
-            if (comma) {
-                comma++;  // Skip first comma
-                comma = strchr(comma, ',');
-                if (comma) {
-                    comma++;  // Skip to third field
-                    char *newline = strchr(comma, '\n');
-                    int len = newline ? (newline - comma) : strlen(comma);
-                    strncpy(vocal_filename, comma, len);
-                    vocal_filename[len] = '\0';
-                    trim_string(vocal_filename, strlen(vocal_filename));
-                    printf("KARAFUN: Vocal track from source: %s\n", vocal_filename);
-                }
-            }
-        }
+    size_t ini_size = 0;
+    unsigned char *ini_data = archive.extract(*ini_entry, ini_size);
+    if (!ini_data || ini_size == 0) {
+        printf("KARAFUN: Failed to extract song.ini\n");
+        return false;
     }
     
-    free(ini_buf);
+    // Parse lyrics and sync
+    parse_song_ini((const char*)ini_data, ini_size);
+    free(ini_data);
     
-    // Get entry list
-    int entry_count = 0;
-    const char** entries = kfn_archive_get_entries(archive, &entry_count);
-    printf("KARAFUN: Archive has %d entries\n", entry_count);
+    if (g_karafun.word_count == 0) {
+        printf("KARAFUN: No lyrics parsed\n");
+        return false;
+    }
     
-    // Extract all audio files to temp (for Zenamp to use)
+    // Extract audio files
+    printf("KARAFUN: Extracting audio tracks\n");
+    const auto &entries = archive.entries();
+    
     char *vocal_path = NULL;
     char *backing_path = NULL;
     
-    for (int i = 0; i < entry_count; i++) {
-        if (!is_audio_file(entries[i])) continue;
+    for (const auto &entry : entries) {
+        if (!is_audio_file(entry.filename.c_str())) continue;
         
-        printf("KARAFUN: Extracting audio: %s\n", entries[i]);
+        printf("KARAFUN: Found audio: %s\n", entry.filename.c_str());
         
-        const char *dot = strrchr(entries[i], '.');
-        char *tmp_path = kfn_archive_extract_to_temp(archive, entries[i], dot ? dot : "");
+        std::string ext = entry.filename;
+        size_t dot = ext.find_last_of('.');
+        if (dot == std::string::npos) ext = ".ogg";
+        else ext = ext.substr(dot);
         
-        if (!tmp_path) {
-            printf("KARAFUN: Failed to extract %s\n", entries[i]);
+        std::string tmp_path = archive.extractToTemp(entry, ext.c_str());
+        if (tmp_path.empty()) {
+            printf("KARAFUN: Failed to extract %s\n", entry.filename.c_str());
             continue;
         }
         
-        printf("KARAFUN: Extracted to: %s\n", tmp_path);
+        // Simple heuristic: if contains "instru" or "beat" it's backing, else vocal
+        std::string lower = entry.filename;
+        for (auto &c : lower) c = tolower((unsigned char)c);
         
-        // Check if this matches the vocal track from Song.ini
-        bool is_vocal = (vocal_filename[0] && strcasecmp(entries[i], vocal_filename) == 0);
+        bool is_backing = lower.find("instru") != std::string::npos || 
+                         lower.find("beat") != std::string::npos;
         
-        if (is_vocal) {
-            vocal_path = (char*)malloc(strlen(tmp_path) + 1);
-            strcpy(vocal_path, tmp_path);
-            strncpy(g_karafun.tmp_vocal_path, tmp_path, sizeof(g_karafun.tmp_vocal_path) - 1);
-            printf("KARAFUN: Vocal track (will be mixed): %s\n", entries[i]);
-        } else {
-            backing_path = (char*)malloc(strlen(tmp_path) + 1);
-            strcpy(backing_path, tmp_path);
-            strncpy(g_karafun.tmp_backing_path, tmp_path, sizeof(g_karafun.tmp_backing_path) - 1);
+        if (is_backing && !backing_path) {
+            backing_path = (char*)malloc(tmp_path.length() + 1);
+            strcpy(backing_path, tmp_path.c_str());
+            strncpy(g_karafun.tmp_backing_path, tmp_path.c_str(), sizeof(g_karafun.tmp_backing_path) - 1);
             g_karafun.has_backing_track = true;
-            printf("KARAFUN: Backing track (will be mixed): %s\n", entries[i]);
+        } else if (!is_backing && !vocal_path) {
+            vocal_path = (char*)malloc(tmp_path.length() + 1);
+            strcpy(vocal_path, tmp_path.c_str());
+            strncpy(g_karafun.tmp_vocal_path, tmp_path.c_str(), sizeof(g_karafun.tmp_vocal_path) - 1);
         }
-        
-        free(tmp_path);
     }
-    
-    kfn_archive_close(archive);
     
     if (!vocal_path) {
         printf("KARAFUN: No vocal track found\n");
@@ -378,47 +351,31 @@ bool karafun_load(const char *kfn_path) {
         return false;
     }
     
-    // Use vocal track for Zenamp playback
-    // (Backing track would require complex FFmpeg mixing)
-    if (backing_path) {
-        // Load backing track with SDL_mixer to play alongside Zenamp's vocal
-        g_backing_music = Mix_LoadMUS(backing_path);
-        if (g_backing_music) {
-            Mix_PlayMusic(g_backing_music, -1);
-            printf("KARAFUN: Backing track playing via SDL_mixer\n");
-        }
-        free(backing_path);
-    }
-    
     g_karafun.active = true;
     g_karafun.current_word_idx = 0;
     
     printf("KARAFUN: Successfully loaded - Title: %s, Artist: %s\n", g_karafun.title, g_karafun.artist);
-    printf("KARAFUN: Sync timing debug (first 20 entries, centiseconds->milliseconds->seconds):\n");
+    printf("KARAFUN: Sync timing (first 20 words):\n");
     for (int i = 0; i < g_karafun.sync_count && i < 20; i++) {
         if (i < g_karafun.word_count && g_karafun.words[i]) {
             double seconds = g_karafun.sync_times_ms[i] / 1000.0;
-            printf("  [%d] %dcs (%dms = %.2fs) -> %s\n", i, g_karafun.sync_times_ms[i]/10, g_karafun.sync_times_ms[i], seconds, g_karafun.words[i]);
+            printf("  [%d] %.2fs -> %s\n", i, seconds, g_karafun.words[i]);
         }
     }
     
-    printf("KARAFUN: Audio will be played by Zenamp (vocal) + SDL_mixer (backing)\n");
+    free(vocal_path);
+    if (backing_path) free(backing_path);
     
     return true;
 }
 
 void karafun_stop(void) {
-    printf("KARAFUN: Stopping playback\n");
-    
     if (!g_karafun.active) return;
     
-    // Stop SDL_mixer backing track
-    Mix_HaltMusic();
+    printf("KARAFUN: Stopping\n");
     
-    if (g_backing_music) {
-        Mix_FreeMusic(g_backing_music);
-        g_backing_music = NULL;
-    }
+    // Stop backing track
+    karafun_stop_backing();
     
     for (int i = 0; i < g_karafun.word_count; i++) {
         if (g_karafun.words && g_karafun.words[i]) {
@@ -442,7 +399,7 @@ void karafun_stop(void) {
     delete_temp_file(g_karafun.tmp_backing_path);
     
     memset(&g_karafun, 0, sizeof(g_karafun));
-    printf("KARAFUN: Fully stopped and cleaned up\n");
+    g_karafun.backing_channel = -1;
 }
 
 void karafun_update(double playback_position_seconds) {
@@ -450,7 +407,7 @@ void karafun_update(double playback_position_seconds) {
     
     int current_ms = (int)(playback_position_seconds * 1000);
     
-    // Find current word based on millisecond sync times
+    // Find current word based on sync times
     int idx = 0;
     for (int i = 0; i < g_karafun.sync_count; i++) {
         if (current_ms >= g_karafun.sync_times_ms[i]) {
@@ -464,18 +421,22 @@ void karafun_update(double playback_position_seconds) {
 }
 
 int karafun_current_word(void) {
-    return g_karafun.current_word_idx;
+    return g_karafun.active ? g_karafun.current_word_idx : -1;
 }
 
 int karafun_current_line(void) {
-    if (!g_karafun.active) return -1;
+    if (!g_karafun.active || g_karafun.current_word_idx >= g_karafun.word_count) return -1;
     
     for (int i = 0; i < g_karafun.line_count; i++) {
-        if (g_karafun.current_word_idx < g_karafun.lines[i].start_word_idx) {
-            return i - 1;
+        int line_end = (i + 1 < g_karafun.line_count) ? 
+            g_karafun.lines[i + 1].start_word_idx : g_karafun.word_count;
+        
+        if (g_karafun.current_word_idx >= g_karafun.lines[i].start_word_idx &&
+            g_karafun.current_word_idx < line_end) {
+            return i;
         }
     }
-    return g_karafun.line_count - 1;
+    return -1;
 }
 
 KarafunState* karafun_get_state(void) {
@@ -483,208 +444,306 @@ KarafunState* karafun_get_state(void) {
 }
 
 bool is_karafun_ext(const char *filename) {
+    if (!filename) return false;
     const char *dot = strrchr(filename, '.');
     if (!dot) return false;
     char ext[8] = {0};
-    strncpy(ext, dot, sizeof(ext) - 1);
-    to_lower_str(ext);
+    for (int i = 0; i < 7 && dot[i]; i++) ext[i] = tolower((unsigned char)dot[i]);
     return strcmp(ext, ".kfn") == 0;
 }
 
 const char* karafun_get_vocal_path(void) {
-    return g_karafun.tmp_vocal_path[0] ? g_karafun.tmp_vocal_path : NULL;
+    return g_karafun.active && g_karafun.tmp_vocal_path[0] ? g_karafun.tmp_vocal_path : NULL;
 }
 
 const char* karafun_get_backing_path(void) {
-    return g_karafun.tmp_backing_path[0] ? g_karafun.tmp_backing_path : NULL;
+    return g_karafun.active && g_karafun.tmp_backing_path[0] ? g_karafun.tmp_backing_path : NULL;
 }
 
-bool karafun_play_both_tracks(void *audio_player) {
-    // This function should be implemented to use the Zenamp audio API
-    // to play both vocal_path and backing_path simultaneously
-    
-    if (!g_karafun.active || !g_karafun.tmp_vocal_path[0]) {
-        printf("KARAFUN: No active karaoke loaded\n");
-        return false;
-    }
-    
-    printf("KARAFUN: karafun_play_both_tracks called\n");
-    printf("KARAFUN: Vocal track: %s\n", g_karafun.tmp_vocal_path);
-    if (g_karafun.has_backing_track) {
-        printf("KARAFUN: Backing track: %s\n", g_karafun.tmp_backing_path);
-    }
-    
-    // TODO: Call audio_player API to load and play both tracks
-    // For now, return true and let main.cpp handle loading the vocal track
-    return true;
+void karafun_set_backing_channel(int channel) {
+    g_karafun.backing_channel = channel;
+    printf("KARAFUN: Set backing channel to %d\n", channel);
 }
 
-void karafun_set_paused(bool paused) {
-    if (!g_karafun.active || !g_backing_music) return;
-    
-    if (paused) {
-        Mix_PauseMusic();
-        printf("KARAFUN: Backing track paused\n");
-    } else {
-        Mix_ResumeMusic();
-        printf("KARAFUN: Backing track resumed\n");
+void karafun_stop_backing(void) {
+    if (g_karafun.backing_channel >= 0) {
+        Mix_HaltChannel(g_karafun.backing_channel);
+        g_karafun.backing_channel = -1;
+        printf("KARAFUN: Stopped backing track\n");
     }
 }
 
-void karafun_seek(int position_ms) {
-    // SDL_mixer doesn't support seeking on all formats
-    // We'd need to stop and restart from position, which is complex
-    // For now, just log it
-    if (!g_karafun.active || !g_backing_music) return;
-    
-    printf("KARAFUN: Seek to %dms requested (SDL_mixer seek not fully supported)\n", position_ms);
-    
-    // Ideally: Mix_SetMusicPosition((double)position_ms / 1000.0);
-    // But this doesn't work for all formats
-}
+// Render lyrics display with full-word highlight box
 void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
     Visualizer *vis = (Visualizer*)vis_ptr;
     cairo_t *cr = (cairo_t*)cr_ptr;
-    
-    if (!vis || !cr) return;
-    
-    KarafunState *kfn = karafun_get_state();
-    if (!kfn || !kfn->active || !kfn->words || kfn->word_count <= 0) return;
-    
-    // Get current playback position from global playTime (in seconds)
+
+    if (!vis || !cr || !g_karafun.active || !g_karafun.words || g_karafun.word_count <= 0)
+        return;
+
     extern double playTime;
     int current_ms = (int)(playTime * 1000);
-    
-    // Recalculate current word index based on sync times
+
+    // Find current word
     int current_word_idx = 0;
-    for (int i = 0; i < kfn->sync_count; i++) {
-        if (current_ms >= kfn->sync_times_ms[i]) {
+    for (int i = 0; i < g_karafun.sync_count; i++) {
+        if (current_ms >= g_karafun.sync_times_ms[i])
             current_word_idx = i;
-        } else {
+        else
             break;
-        }
     }
-    
-    // Debug: print sync info occasionally
-    static int draw_counter = 0;
-    if (draw_counter++ % 10 == 0) {  // Every 10 frames
-        if (current_word_idx < kfn->word_count && kfn->words[current_word_idx]) {
-            printf("DRAW: playTime=%.2fs (%dms) -> word[%d]=%s (sync=%dms = %.2fs)\n",
-                   playTime, current_ms, current_word_idx, kfn->words[current_word_idx],
-                   kfn->sync_times_ms[current_word_idx], kfn->sync_times_ms[current_word_idx]/1000.0);
-        }
-    }
-    
-    // Black background
+
+    // Background
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     cairo_rectangle(cr, 0, 0, vis->width, vis->height);
     cairo_fill(cr);
-    
-    // Title at top
+
+    // Title
     cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, 20);
-    
     cairo_text_extents_t extents;
-    cairo_text_extents(cr, kfn->title, &extents);
+    cairo_text_extents(cr, g_karafun.title, &extents);
     cairo_move_to(cr, (vis->width - extents.width) / 2, 40);
-    cairo_show_text(cr, kfn->title);
-    
+    cairo_show_text(cr, g_karafun.title);
+
     // Artist
     cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
     cairo_set_font_size(cr, 14);
-    cairo_text_extents(cr, kfn->artist, &extents);
+    cairo_text_extents(cr, g_karafun.artist, &extents);
     cairo_move_to(cr, (vis->width - extents.width) / 2, 70);
-    cairo_show_text(cr, kfn->artist);
-    
-    // Find current line based on current word index
+    cairo_show_text(cr, g_karafun.artist);
+
+    // Find current line
     int current_line = -1;
-    for (int i = 0; i < kfn->line_count; i++) {
-        if (current_word_idx >= kfn->lines[i].start_word_idx &&
-            (i + 1 >= kfn->line_count || 
-             current_word_idx < kfn->lines[i + 1].start_word_idx)) {
+    for (int i = 0; i < g_karafun.line_count; i++) {
+        int line_end = (i + 1 < g_karafun.line_count)
+            ? g_karafun.lines[i + 1].start_word_idx
+            : g_karafun.word_count;
+
+        if (current_word_idx >= g_karafun.lines[i].start_word_idx &&
+            current_word_idx < line_end) {
             current_line = i;
             break;
         }
     }
-    
-    if (current_line < 0 || current_line >= kfn->line_count || !kfn->lines) return;
-    
-    // Dynamic font size based on window height
-    int font_size = (vis->height / 6);
-    if (font_size < 24) font_size = 24;
+
+    if (current_line < 0)
+        return;
+
+    // Dynamic font size
+    int font_size = vis->height / 6;
+    if (font_size < 8) font_size = 8;
     if (font_size > 60) font_size = 60;
-    
-    // Render current line with individual word highlighting
+
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, font_size);
-    
-    int line_start_word = kfn->lines[current_line].start_word_idx;
-    int line_end_word = line_start_word + kfn->lines[current_line].word_count;
-    
-    // Bounds check
-    if (line_start_word < 0) line_start_word = 0;
-    if (line_end_word > kfn->word_count) line_end_word = kfn->word_count;
-    
-    // First pass: measure total width to center
-    double total_width = 0;
-    for (int w = line_start_word; w < line_end_word; w++) {
-        if (w >= 0 && w < kfn->word_count && kfn->words[w]) {
-            cairo_text_extents(cr, kfn->words[w], &extents);
-            total_width += extents.width;
-            if (w < line_end_word - 1) total_width += 10;  // Space between words
-        }
+
+    const char *current_text = g_karafun.lines[current_line].display_text;
+
+    // Center text
+    cairo_text_extents(cr, current_text, &extents);
+    double text_x = (vis->width - extents.width) / 2;
+    double text_y = vis->height / 2 + 20;
+
+    //
+    // --- FULL WORD HIGHLIGHT BOX ---
+    //
+    const char *current_word = g_karafun.words[current_word_idx];
+    const char *word_pos = strstr(current_text, current_word);
+
+    if (word_pos) {
+        size_t before_len = word_pos - current_text;
+        size_t word_len = strlen(current_word);
+
+        // Measure BEFORE text width
+        char before[2048];
+        strncpy(before, current_text, before_len);
+        before[before_len] = '\0';
+        cairo_text_extents(cr, before, &extents);
+        double word_x = text_x + extents.x_advance;
+
+        // Measure WORD width
+        cairo_text_extents(cr, current_word, &extents);
+        double word_w = extents.x_advance;
+
+        // FIX: pad the box so it fully covers the glyphs
+        double pad_x = font_size * 0.15;   // horizontal padding
+        double pad_y = font_size * 0.35;   // vertical padding
+
+        double box_x = word_x - pad_x;
+        double box_y = text_y - extents.height - pad_y;
+        double box_w = word_w + pad_x * 2;
+        double box_h = extents.height + pad_y * 2;
+
+        // Draw highlight box
+        cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.35); // translucent blue
+        cairo_rectangle(cr, box_x, box_y, box_w, box_h);
+        cairo_fill(cr);
     }
-    
-    double x_start = (vis->width - total_width) / 2;
-    double y_pos = vis->height / 2 + 20;
-    double x_pos = x_start;
-    
-    // Second pass: render each word with highlight if current
-    for (int w = line_start_word; w < line_end_word; w++) {
-        if (w < 0 || w >= kfn->word_count || !kfn->words[w]) continue;
-        
-        cairo_text_extents(cr, kfn->words[w], &extents);
-        
-        // Draw blue highlight if this is the current word
-        if (w == current_word_idx) {
-            cairo_set_source_rgba(cr, 0.2, 0.4, 1.0, 0.3);
-            cairo_rectangle(cr, x_pos - 4, y_pos - extents.height - 4, 
-                           extents.width + 8, extents.height + 8);
-            cairo_fill(cr);
-            
-            // Blue border
-            cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);
-            cairo_set_line_width(cr, 2);
-            cairo_rectangle(cr, x_pos - 4, y_pos - extents.height - 4, 
-                           extents.width + 8, extents.height + 8);
-            cairo_stroke(cr);
-            
-            // White text for current word
-            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-        } else if (w < current_word_idx) {
-            // Past words - white
-            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-        } else {
-            // Future words - gray
-            cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
-        }
-        
-        cairo_move_to(cr, x_pos, y_pos);
-        cairo_show_text(cr, kfn->words[w]);
-        
-        x_pos += extents.width + 10;  // Move to next word position
-    }
-    
-    // Next line (smaller, gray, centered)
-    if (current_line + 1 < kfn->line_count && kfn->lines) {
+
+    //
+    // --- DRAW FULL LINE (WHITE, NORMAL SPACING) ---
+    //
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_move_to(cr, text_x, text_y);
+    cairo_show_text(cr, current_text);
+
+    // Next line
+    if (current_line + 1 < g_karafun.line_count) {
         cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, font_size / 2);
-        
-        const char *next_text = kfn->lines[current_line + 1].display_text;
+
+        const char *next_text = g_karafun.lines[current_line + 1].display_text;
         cairo_text_extents(cr, next_text, &extents);
         cairo_move_to(cr, (vis->width - extents.width) / 2, vis->height / 2 + 80);
         cairo_show_text(cr, next_text);
     }
 }
+
+
+
+
+// Render lyrics display
+/*void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
+    Visualizer *vis = (Visualizer*)vis_ptr;
+    cairo_t *cr = (cairo_t*)cr_ptr;
+
+    if (!vis || !cr || !g_karafun.active || !g_karafun.words || g_karafun.word_count <= 0)
+        return;
+
+    extern double playTime;
+    int current_ms = (int)(playTime * 1000);
+
+    // Find current word
+    int current_word_idx = 0;
+    for (int i = 0; i < g_karafun.sync_count; i++) {
+        if (current_ms >= g_karafun.sync_times_ms[i])
+            current_word_idx = i;
+        else
+            break;
+    }
+
+    // Background
+    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+    cairo_rectangle(cr, 0, 0, vis->width, vis->height);
+    cairo_fill(cr);
+
+    // Title
+    cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 20);
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, g_karafun.title, &extents);
+    cairo_move_to(cr, (vis->width - extents.width) / 2, 40);
+    cairo_show_text(cr, g_karafun.title);
+
+    // Artist
+    cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
+    cairo_set_font_size(cr, 14);
+    cairo_text_extents(cr, g_karafun.artist, &extents);
+    cairo_move_to(cr, (vis->width - extents.width) / 2, 70);
+    cairo_show_text(cr, g_karafun.artist);
+
+    // Find current line
+    int current_line = -1;
+    for (int i = 0; i < g_karafun.line_count; i++) {
+        int line_end = (i + 1 < g_karafun.line_count)
+            ? g_karafun.lines[i + 1].start_word_idx
+            : g_karafun.word_count;
+
+        if (current_word_idx >= g_karafun.lines[i].start_word_idx &&
+            current_word_idx < line_end) {
+            current_line = i;
+            break;
+        }
+    }
+
+    if (current_line < 0)
+        return;
+
+    // Dynamic font size
+    int font_size = vis->height / 6;
+    if (font_size < 24) font_size = 24;
+    if (font_size > 60) font_size = 60;
+
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, font_size);
+
+    const char *current_text = g_karafun.lines[current_line].display_text;
+
+    // Center text
+    cairo_text_extents(cr, current_text, &extents);
+    double text_x = (vis->width - extents.width) / 2;
+    double text_y = vis->height / 2 + 20;
+
+    // Highlight logic
+    const char *current_word = g_karafun.words[current_word_idx];
+    const char *word_pos = strstr(current_text, current_word);
+
+    if (word_pos) {
+        size_t before_len = word_pos - current_text;
+        size_t word_len = strlen(current_word);
+
+        // Draw BEFORE (white)
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_move_to(cr, text_x, text_y);
+
+        char before[2048];
+        strncpy(before, current_text, before_len);
+        before[before_len] = '\0';
+        cairo_show_text(cr, before);
+
+        // Measure BEFORE width
+        cairo_text_extents(cr, before, &extents);
+        double word_x = text_x + extents.width;
+
+        // Draw WORD (blue)
+        cairo_set_source_rgb(cr, 0.2, 0.6, 1.0);
+        cairo_move_to(cr, word_x, text_y);
+        cairo_show_text(cr, current_word);
+
+        // Measure WORD width
+        cairo_text_extents(cr, current_word, &extents);
+        double after_x = word_x + extents.width;
+
+        // Draw SPACE AFTER WORD (white)
+        const char *after_ptr = word_pos + word_len;
+        if (*after_ptr == ' ') {
+            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            cairo_move_to(cr, after_x, text_y);
+            cairo_show_text(cr, " ");
+
+            cairo_text_extents(cr, " ", &extents);
+            after_x += extents.width;
+            after_ptr++; // skip space
+        }
+
+        // Draw REMAINDER (white)
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_move_to(cr, after_x, text_y);
+        cairo_show_text(cr, after_ptr);
+    } else {
+        // No highlight
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_move_to(cr, text_x, text_y);
+        cairo_show_text(cr, current_text);
+    }
+
+    // Next line
+    if (current_line + 1 < g_karafun.line_count) {
+        cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, font_size / 2);
+
+        const char *next_text = g_karafun.lines[current_line + 1].display_text;
+        cairo_text_extents(cr, next_text, &extents);
+        cairo_move_to(cr, (vis->width - extents.width) / 2, vis->height / 2 + 80);
+        cairo_show_text(cr, next_text);
+    }
+}
+
+
+
+*/

@@ -30,6 +30,8 @@ typedef struct {
     
     bool vocal_muted;
     bool backing_muted;
+    
+    int backing_channel;  // SDL_mixer channel for backing track (-1 = not playing)
 } KarafunState;
 
 bool karafun_load(const char *kfn_path);
@@ -41,22 +43,8 @@ KarafunState* karafun_get_state(void);
 bool is_karafun_ext(const char *filename);
 const char* karafun_get_vocal_path(void);
 const char* karafun_get_backing_path(void);
-
-/**
- * Play both vocal and backing tracks via Zenamp audio API
- * Returns true if successfully playing
- */
-bool karafun_play_both_tracks(void *audio_player);
-
-/**
- * Pause/resume backing track to match Zenamp's state
- */
-void karafun_set_paused(bool paused);
-
-/**
- * Seek backing track to match Zenamp's position (milliseconds)
- */
-void karafun_seek(int position_ms);
+void karafun_set_backing_channel(int channel);
+void karafun_stop_backing(void);
 
 /**
  * Render Karafun lyrics display (for karaoke visualization)
