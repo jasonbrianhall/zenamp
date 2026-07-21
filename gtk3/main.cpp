@@ -44,10 +44,7 @@ extern void processEvents(void);
 extern double playwait;
 extern void karafun_update(double playback_position_seconds);
 extern bool karafun_load(const char *kfn_path);
-extern const char* karafun_get_vocal_path(void);
-extern const char* karafun_get_backing_path(void);
-extern void karafun_set_backing_channel(int channel);
-extern void karafun_stop_backing(void);
+extern const char* karafun_get_mixed_path(void);
 extern void* karafun_get_state(void);
 
 AudioPlayer *player = NULL;
@@ -688,26 +685,12 @@ bool load_file(AudioPlayer *player, const char *filename) {
     if (strcmp(ext_lower, ".kfn") == 0) {
         printf("Loading Karafun file: %s\n", filename);
         if (karafun_load(filename)) {
-            const char *vocal_path = karafun_get_vocal_path();
-            if (vocal_path) {
-                printf("Karafun loaded, playing both tracks\n");
-                success = load_file(player, vocal_path);
+            const char *mixed_path = karafun_get_mixed_path();
+            if (mixed_path) {
+                printf("Karafun loaded, playing mixed vocal+backing track\n");
+                success = load_file(player, mixed_path);
                 if (success && player->visualizer) {
                     visualizer_set_type(player->visualizer, VIS_KARAOKE);
-                    
-                    // Load and play backing track on separate channel
-                    const char *backing_path = karafun_get_backing_path();
-                    if (backing_path) {
-                        Mix_Chunk *backing_chunk = Mix_LoadWAV(backing_path);
-                        if (backing_chunk) {
-                            int channel = Mix_PlayChannel(-1, backing_chunk, 0);
-                            if (channel >= 0) {
-                                Mix_Volume(channel, (int)(SDL_MIX_MAXVOLUME * 0.8f));
-                                karafun_set_backing_channel(channel);
-                                printf("Backing track playing on channel %d\n", channel);
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -1315,9 +1298,6 @@ void stop_playback(AudioPlayer *player) {
     player->audio_buffer.position = 0;
     playTime = 0;
     pthread_mutex_unlock(&player->audio_mutex);
-    
-    // Stop karafun backing track
-    karafun_stop_backing();
     
     // Allow system to sleep when playback stops
     allow_system_sleep();

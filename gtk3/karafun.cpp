@@ -12,8 +12,17 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <strings.h>
+#include <string>
+#include <vector>
 #include "visualization.h"
 #include <SDL2/SDL_mixer.h>
+#include "audioconverter.h"
+#include "convertoggtowav.h"
+#include "convertflactowav.h"
+#include "convertopustowav.h"
+
+// convertm4atowav{lin,win}.cpp expose this but ship no shared header
+extern bool convertM4aToWavInMemory(const std::vector<uint8_t>& m4a_data, std::vector<uint8_t>& wav_data);
 
 static KarafunState g_karafun = {0};
 
@@ -66,6 +75,137 @@ static void delete_temp_file(const char *path) {
 #else
     DeleteFileA(path);
 #endif
+}
+
+// ============================================================================
+// VOCAL/BACKING -> WAV -> MIX
+// ============================================================================
+
+static bool read_file_bytes(const char *path, std::vector<uint8_t> &out) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0) { fclose(f); return false; }
+    out.resize((size_t)sz);
+    size_t rd = fread(out.data(), 1, (size_t)sz, f);
+    fclose(f);
+    return rd == (size_t)sz;
+}
+
+static std::string get_ext_lower(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "";
+    std::string ext(dot);
+    for (auto &c : ext) c = (char)tolower((unsigned char)c);
+    return ext;
+}
+
+// Reads the extracted track off disk and converts it to WAV in memory using
+// the same per-format converters the rest of the player uses (ogg/mp3/flac/
+// opus/m4a). If it's already a WAV, passes it through untouched.
+static bool convert_track_to_wav(const char *path, std::vector<uint8_t> &wav_out) {
+    std::vector<uint8_t> raw;
+    if (!read_file_bytes(path, raw)) {
+        printf("KARAFUN: Failed to read %s for mixing\n", path);
+        return false;
+    }
+
+    std::string ext = get_ext_lower(path);
+
+    if (ext == ".wav")  { wav_out = raw; return true; }
+    if (ext == ".ogg")  return convertOggToWavInMemory(raw, wav_out);
+    if (ext == ".mp3")  return convertMp3ToWavInMemory(raw, wav_out);
+    if (ext == ".flac") return convertFlacToWavInMemory(raw, wav_out);
+    if (ext == ".opus") return convertOpusToWavInMemory(raw, wav_out);
+    if (ext == ".m4a" || ext == ".aac") return convertM4aToWavInMemory(raw, wav_out);
+
+    printf("KARAFUN: Unsupported extension '%s' for mixing\n", ext.c_str());
+    return false;
+}
+
+// Writes a WAV byte buffer to a fresh temp file and hands back its path.
+static bool write_temp_wav(const std::vector<uint8_t> &wav_data, char *out_path, size_t out_path_size) {
+#ifndef _WIN32
+    char path[] = "/tmp/karafun_mix_XXXXXX.wav";
+    int fd = mkstemps(path, 4); // ".wav" = 4 chars
+    if (fd < 0) {
+        printf("KARAFUN: mkstemps failed for mixed WAV\n");
+        return false;
+    }
+    FILE *f = fdopen(fd, "wb");
+    if (!f) { ::close(fd); unlink(path); return false; }
+#else
+    char tmp_dir[MAX_PATH];
+    if (!GetTempPathA(sizeof(tmp_dir), tmp_dir)) return false;
+    char base[MAX_PATH];
+    if (!GetTempFileNameA(tmp_dir, "kfm_", 0, base)) return false;
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "%s.wav", base);
+    DeleteFileA(base);
+    FILE *f = fopen(path, "wb");
+    if (!f) return false;
+#endif
+
+    size_t written = fwrite(wav_data.data(), 1, wav_data.size(), f);
+    fclose(f);
+    if (written != wav_data.size()) {
+        printf("KARAFUN: Failed writing mixed WAV to %s\n", path);
+        delete_temp_file(path);
+        return false;
+    }
+
+    strncpy(out_path, path, out_path_size - 1);
+    out_path[out_path_size - 1] = '\0';
+    return true;
+}
+
+// Converts vocal (+ backing, if present) to WAV, mixes them, writes a single
+// temp WAV file. This is what should be handed to load_file() for playback
+// instead of playing vocal + backing as two separate tracks.
+bool karafun_prepare_mixed_track(void) {
+    if (!g_karafun.tmp_vocal_path[0]) {
+        printf("KARAFUN: No vocal track to mix\n");
+        return false;
+    }
+
+    std::vector<uint8_t> vocalWav;
+    if (!convert_track_to_wav(g_karafun.tmp_vocal_path, vocalWav)) {
+        printf("KARAFUN: Failed to convert vocal track to WAV\n");
+        return false;
+    }
+
+    if (!g_karafun.has_backing_track || !g_karafun.tmp_backing_path[0]) {
+        // Vocal-only file: still funnel it through the same temp-WAV path
+        // so callers always load karafun_get_mixed_path() and never have
+        // to special-case "no backing track".
+        return write_temp_wav(vocalWav, g_karafun.tmp_mixed_path, sizeof(g_karafun.tmp_mixed_path));
+    }
+
+    std::vector<uint8_t> backingWav;
+    if (!convert_track_to_wav(g_karafun.tmp_backing_path, backingWav)) {
+        printf("KARAFUN: Failed to convert backing track to WAV\n");
+        return false;
+    }
+
+    std::vector<uint8_t> mixedWav;
+    if (!mixTwoWavFiles(vocalWav, backingWav, mixedWav)) {
+        printf("KARAFUN: Mixing vocal + backing failed "
+               "(sample rate / channels / bit depth mismatch)\n");
+        return false;
+    }
+
+    if (!write_temp_wav(mixedWav, g_karafun.tmp_mixed_path, sizeof(g_karafun.tmp_mixed_path))) {
+        return false;
+    }
+
+    printf("KARAFUN: Mixed vocal+backing -> %s\n", g_karafun.tmp_mixed_path);
+    return true;
+}
+
+const char* karafun_get_mixed_path(void) {
+    return g_karafun.active && g_karafun.tmp_mixed_path[0] ? g_karafun.tmp_mixed_path : NULL;
 }
 
 // ============================================================================
@@ -353,7 +493,17 @@ bool karafun_load(const char *kfn_path) {
     
     g_karafun.active = true;
     g_karafun.current_word_idx = 0;
-    
+
+    // Convert vocal (+ backing) to WAV and mix down to a single playback
+    // file. karafun_get_mixed_path() is what the caller should load.
+    if (!karafun_prepare_mixed_track()) {
+        printf("KARAFUN: Failed to prepare mixed playback track\n");
+        free(vocal_path);
+        if (backing_path) free(backing_path);
+        g_karafun.active = false;
+        return false;
+    }
+
     printf("KARAFUN: Successfully loaded - Title: %s, Artist: %s\n", g_karafun.title, g_karafun.artist);
     printf("KARAFUN: Sync timing (first 20 words):\n");
     for (int i = 0; i < g_karafun.sync_count && i < 20; i++) {
@@ -397,6 +547,7 @@ void karafun_stop(void) {
     
     delete_temp_file(g_karafun.tmp_vocal_path);
     delete_temp_file(g_karafun.tmp_backing_path);
+    delete_temp_file(g_karafun.tmp_mixed_path);
     
     memset(&g_karafun, 0, sizeof(g_karafun));
     g_karafun.backing_channel = -1;

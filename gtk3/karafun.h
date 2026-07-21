@@ -26,6 +26,7 @@ typedef struct {
     
     char tmp_vocal_path[4096];
     char tmp_backing_path[4096];
+    char tmp_mixed_path[4096];     // vocal+backing pre-mixed to a single WAV for playback
     bool has_backing_track;
     
     bool vocal_muted;
@@ -45,6 +46,14 @@ const char* karafun_get_vocal_path(void);
 const char* karafun_get_backing_path(void);
 void karafun_set_backing_channel(int channel);
 void karafun_stop_backing(void);
+
+/**
+ * Converts the extracted vocal + backing tracks to WAV and mixes them into
+ * a single temp WAV file. Called automatically by karafun_load(). Result is
+ * available via karafun_get_mixed_path().
+ */
+bool karafun_prepare_mixed_track(void);
+const char* karafun_get_mixed_path(void);
 
 /**
  * Render Karafun lyrics display (for karaoke visualization)
