@@ -624,8 +624,8 @@ void karafun_stop_backing(void) {
     }
 }
 
-// Render lyrics display with full-word highlight box
-void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
+void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr)
+{
     Visualizer *vis = (Visualizer*)vis_ptr;
     cairo_t *cr = (cairo_t*)cr_ptr;
 
@@ -635,7 +635,9 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
     extern double playTime;
     int current_ms = (int)(playTime * 1000);
 
-    // Find current word
+    //
+    // --- FIND CURRENT WORD ---
+    //
     int current_word_idx = 0;
     for (int i = 0; i < g_karafun.sync_count; i++) {
         if (current_ms >= g_karafun.sync_times_ms[i])
@@ -644,28 +646,37 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
             break;
     }
 
-    // Background
+    //
+    // --- BACKGROUND ---
+    //
     cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     cairo_rectangle(cr, 0, 0, vis->width, vis->height);
     cairo_fill(cr);
 
-    // Title
+    //
+    // --- TITLE ---
+    //
     cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, 20);
-    cairo_text_extents_t extents;
-    cairo_text_extents(cr, g_karafun.title, &extents);
-    cairo_move_to(cr, (vis->width - extents.width) / 2, 40);
+
+    cairo_text_extents_t ext;
+    cairo_text_extents(cr, g_karafun.title, &ext);
+    cairo_move_to(cr, (vis->width - ext.width) / 2, 40);
     cairo_show_text(cr, g_karafun.title);
 
-    // Artist
+    //
+    // --- ARTIST ---
+    //
     cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
     cairo_set_font_size(cr, 14);
-    cairo_text_extents(cr, g_karafun.artist, &extents);
-    cairo_move_to(cr, (vis->width - extents.width) / 2, 70);
+    cairo_text_extents(cr, g_karafun.artist, &ext);
+    cairo_move_to(cr, (vis->width - ext.width) / 2, 70);
     cairo_show_text(cr, g_karafun.artist);
 
-    // Find current line
+    //
+    // --- FIND CURRENT LINE ---
+    //
     int current_line = -1;
     for (int i = 0; i < g_karafun.line_count; i++) {
         int line_end = (i + 1 < g_karafun.line_count)
@@ -682,93 +693,110 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr) {
     if (current_line < 0)
         return;
 
-    // Dynamic font size
+    const char *current_text = g_karafun.lines[current_line].display_text;
+
+    //
+    // --- DYNAMIC FONT SIZE (WIDTH + HEIGHT AWARE) ---
+    //
     int font_size = vis->height / 6;
     if (font_size < 8) font_size = 8;
     if (font_size > 60) font_size = 60;
 
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, font_size);
 
-    const char *current_text = g_karafun.lines[current_line].display_text;
+    // shrink until text fits width
+    for (;;) {
+        cairo_set_font_size(cr, font_size);
+        cairo_text_extents(cr, current_text, &ext);
 
-    // Center text
-    cairo_text_extents(cr, current_text, &extents);
-    double text_x = (vis->width - extents.width) / 2;
+        if (ext.width <= vis->width * 0.90)
+            break;
+
+        font_size--;
+        if (font_size <= 8)
+            break;
+    }
+
+    //
+    // --- CENTER TEXT ---
+    //
+    cairo_text_extents(cr, current_text, &ext);
+    double text_x = (vis->width - ext.width) / 2;
     double text_y = vis->height / 2 + 20;
 
     //
     // --- FULL WORD HIGHLIGHT BOX ---
     //
     const char *current_word = g_karafun.words[current_word_idx];
-    
-    // Find which occurrence of this word we need (in case it repeats in the line)
-    int word_occurrence = 0;
+
+    // count occurrences before this word
+    int occurrence = 0;
     for (int i = g_karafun.lines[current_line].start_word_idx; i < current_word_idx; i++) {
-        if (strcmp(g_karafun.words[i], current_word) == 0) {
-            word_occurrence++;
-        }
-    }
-    
-    // Find the Nth occurrence of current_word in current_text
-    const char *word_pos = current_text;
-    for (int i = 0; i <= word_occurrence; i++) {
-        word_pos = strstr(word_pos, current_word);
-        if (!word_pos) break;
-        if (i < word_occurrence) {
-            word_pos++;  // Move past this match to find the next one
-        }
+        if (strcmp(g_karafun.words[i], current_word) == 0)
+            occurrence++;
     }
 
-    if (word_pos) {
-        size_t before_len = word_pos - current_text;
-        size_t word_len = strlen(current_word);
+    // find Nth occurrence in the display text
+    const char *pos = current_text;
+    for (int i = 0; i <= occurrence; i++) {
+        pos = strstr(pos, current_word);
+        if (!pos) break;
+        if (i < occurrence)
+            pos++;
+    }
 
-        // Measure BEFORE text width
+    if (pos) {
+        size_t before_len = pos - current_text;
+
         char before[2048];
         strncpy(before, current_text, before_len);
         before[before_len] = '\0';
-        cairo_text_extents(cr, before, &extents);
-        double word_x = text_x + extents.x_advance;
 
-        // Measure WORD width
-        cairo_text_extents(cr, current_word, &extents);
-        double word_w = extents.x_advance;
+        // measure BEFORE text
+        cairo_text_extents(cr, before, &ext);
+        double word_x = text_x + ext.x_advance;
 
-        // FIX: pad the box so it fully covers the glyphs
-        double pad_x = font_size * 0.15;   // horizontal padding
-        double pad_y = font_size * 0.35;   // vertical padding
+        // measure WORD
+        cairo_text_extents(cr, current_word, &ext);
+        double word_w = ext.x_advance;
+
+        // padding
+        double pad_x = font_size * 0.15;
+        double pad_y = font_size * 0.35;
 
         double box_x = word_x - pad_x;
-        double box_y = text_y - extents.height - pad_y;
+        double box_y = text_y - ext.height - pad_y;
         double box_w = word_w + pad_x * 2;
-        double box_h = extents.height + pad_y * 2;
+        double box_h = ext.height + pad_y * 2;
 
-        // Draw highlight box
-        cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.35); // translucent blue
+        cairo_set_source_rgba(cr, 0.2, 0.6, 1.0, 0.35);
         cairo_rectangle(cr, box_x, box_y, box_w, box_h);
         cairo_fill(cr);
     }
 
     //
-    // --- DRAW FULL LINE (WHITE, NORMAL SPACING) ---
+    // --- DRAW CURRENT LINE ---
     //
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
     cairo_move_to(cr, text_x, text_y);
     cairo_show_text(cr, current_text);
 
-    // Next line
+    //
+    // --- NEXT LINE ---
+    //
     if (current_line + 1 < g_karafun.line_count) {
+        const char *next_text = g_karafun.lines[current_line + 1].display_text;
+
         cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
         cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
         cairo_set_font_size(cr, font_size / 2);
 
-        const char *next_text = g_karafun.lines[current_line + 1].display_text;
-        cairo_text_extents(cr, next_text, &extents);
-        cairo_move_to(cr, (vis->width - extents.width) / 2, vis->height / 2 + 80);
+        cairo_text_extents(cr, next_text, &ext);
+        cairo_move_to(cr, (vis->width - ext.width) / 2, vis->height / 2 + 80);
         cairo_show_text(cr, next_text);
     }
 }
+
 
 
 
