@@ -237,11 +237,6 @@ std::string KFNArchive::extractToTemp(const KFNEntry &entry, const char *ext) {
     return std::string(path);
 }
 
-// ============================================================================
-// C WRAPPER FUNCTIONS FOR C CODE (WITH DEBUG)
-// ============================================================================
-
-extern "C" {
     KFNArchive* kfn_archive_open(const char* path) {
         fprintf(stderr, "KFN DEBUG: kfn_archive_open called with: %s\n", path);
         KFNArchive* archive = new KFNArchive();
@@ -324,4 +319,4 @@ extern "C" {
         strcpy(result, temp_path.c_str());
         return result;
     }
-}
+
