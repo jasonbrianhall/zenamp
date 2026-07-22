@@ -4,6 +4,7 @@
 #include <string.h>
 #include "visualization.h"
 #include "audio_player.h"
+#include "karafun.h"
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -536,6 +537,27 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
           break;          
 
     }
+
+    // Karafun lyrics overlay: when a .kfn file is loaded, show synced lyrics
+    // on top of whichever visualization is selected, not just the two
+    // dedicated Karaoke modes. Those two already draw the lyrics themselves
+    // (via draw_karaoke_boring()/draw_karaoke_exciting()), so skip here to
+    // avoid drawing them twice.
+    if (vis->type != VIS_KARAOKE && vis->type != VIS_KARAOKE_EXCITING) {
+        KarafunState *kfn = karafun_get_state();
+        if (kfn && kfn->active) {
+            // Dim whatever's underneath a touch so lyric text stays legible
+            // over busier visualizations (Matrix rain, fireworks, etc).
+            cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.35);
+            cairo_rectangle(cr, 0, 0, vis->width, vis->height);
+            cairo_fill(cr);
+
+            karafun_set_skip_background(true);
+            draw_karafun_lyrics(vis, cr);
+            karafun_set_skip_background(false);
+        }
+    }
+
     draw_track_info_overlay(vis, cr);
     
     return FALSE;
