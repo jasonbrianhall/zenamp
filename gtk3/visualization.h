@@ -576,6 +576,7 @@ void get_block_color(int frequency_band, double intensity, double *r, double *g,
 // Karaoke
 void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr);
 void draw_karaoke_boring(Visualizer *vis, cairo_t *cr);
+void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
 
 // Parrot
 void draw_audio_bars_around_parrot(Visualizer *vis, cairo_t *cr, double cx, double cy, double scale);

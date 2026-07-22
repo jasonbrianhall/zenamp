@@ -257,6 +257,86 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
     cairo_restore(cr);
 }
 
+void draw_cdg_overlay(Visualizer *vis, cairo_t *cr) {
+    if (!vis->cdg_display || !vis->cdg_display->packets || vis->cdg_display->packet_count == 0) {
+        return;
+    }
+
+    CDGDisplay *cdg = vis->cdg_display;
+
+    int render_width = CDG_WIDTH * 2;
+    int render_height = CDG_HEIGHT * 2;
+
+    if (!vis->cdg_surface ||
+        cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
+        cairo_image_surface_get_height(vis->cdg_surface) != render_height) {
+
+        if (vis->cdg_surface) {
+            cairo_surface_destroy(vis->cdg_surface);
+        }
+        vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
+        vis->cdg_last_packet = -1;
+    }
+
+    if (vis->cdg_last_packet != cdg->current_packet) {
+        unsigned char *data = cairo_image_surface_get_data(vis->cdg_surface);
+        int stride = cairo_image_surface_get_stride(vis->cdg_surface);
+
+        for (int y = 0; y < CDG_HEIGHT; y++) {
+            for (int x = 0; x < CDG_WIDTH; x++) {
+                uint8_t color_index = cdg->screen[y][x];
+                uint32_t rgb = cdg->palette[color_index];
+
+                uint8_t r = (rgb >> 16) & 0xFF;
+                uint8_t g = (rgb >> 8) & 0xFF;
+                uint8_t b = rgb & 0xFF;
+
+                // Luminance-based alpha: dark CDG background pixels become
+                // transparent so whatever visualization is underneath shows
+                // through, while bright pixels (the actual lyrics/graphics)
+                // stay opaque. Same trick draw_karaoke_exciting() uses to
+                // composite CDG over the starburst.
+                double luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+                uint8_t alpha = (uint8_t)luminance;
+
+                for (int dy = 0; dy < 2; dy++) {
+                    for (int dx = 0; dx < 2; dx++) {
+                        int dest_y = y * 2 + dy;
+                        int dest_x = x * 2 + dx;
+                        unsigned char *row = data + dest_y * stride;
+                        int pixel_offset = dest_x * 4;
+
+                        row[pixel_offset + 0] = b;
+                        row[pixel_offset + 1] = g;
+                        row[pixel_offset + 2] = r;
+                        row[pixel_offset + 3] = alpha;
+                    }
+                }
+            }
+        }
+
+        apply_smooth_filter(data, render_width, render_height, stride);
+
+        cairo_surface_mark_dirty(vis->cdg_surface);
+        vis->cdg_last_packet = cdg->current_packet;
+    }
+
+    double scale_x = vis->width / (double)render_width;
+    double scale_y = vis->height / (double)render_height;
+    double scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+    double offset_x = (vis->width - render_width * scale) / 2.0;
+    double offset_y = (vis->height - render_height * scale) / 2.0;
+
+    cairo_save(cr);
+    cairo_translate(cr, offset_x, offset_y);
+    cairo_scale(cr, scale, scale);
+    cairo_set_source_surface(cr, vis->cdg_surface, 0, 0);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
+    cairo_paint(cr);
+    cairo_restore(cr);
+}
+
 void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
     // Check if Karafun is active first
     KarafunState *kfn = karafun_get_state();

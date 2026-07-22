@@ -555,6 +555,12 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
             karafun_set_skip_background(true);
             draw_karafun_lyrics(vis, cr);
             karafun_set_skip_background(false);
+        } else if (vis->cdg_display && vis->cdg_display->packets && vis->cdg_display->packet_count > 0) {
+            // Same idea for CD+G karaoke (zip/lrc-generated) files: overlay
+            // the CDG graphics on top of any visualization. draw_cdg_overlay()
+            // already keys dark CDG background pixels to transparent via
+            // luminance-based alpha, so no extra dimming pass is needed here.
+            draw_cdg_overlay(vis, cr);
         }
     }
 
@@ -732,16 +738,18 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_RAINBOW:
                 update_rainbow_system(vis, dt); 
                 break;
-            case VIS_KARAOKE:
-            case VIS_KARAOKE_EXCITING:
-                if (vis->cdg_display) {
-                    //printf("playtime %.3f\n", playTime);
-                    cdg_update(vis->cdg_display, playTime);
-                }
-                break;                                
             default:
                 // No update function needed for other visualization types
                 break;
+        }
+        
+        // CDG animation needs to keep advancing regardless of which
+        // visualization is selected, since it's now overlaid on top of any
+        // of them (not just the two dedicated Karaoke modes) — otherwise
+        // switching away from Karaoke freezes it at whatever packet it was
+        // on when you switched.
+        if (vis->cdg_display) {
+            cdg_update(vis->cdg_display, playTime);
         }
         
         update_track_info_overlay(vis, dt);
