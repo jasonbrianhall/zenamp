@@ -10,7 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <unistd.h>
+#ifndef _WIN32
+#  include <unistd.h>
+#else
+#  include <windows.h>
+#endif
 #include <strings.h>
 #include <string>
 #include <vector>
