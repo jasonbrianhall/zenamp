@@ -30,6 +30,13 @@ extern bool convertM4aToWavInMemory(const std::vector<uint8_t>& m4a_data, std::v
 
 static KarafunState g_karafun = {0};
 
+// See karafun_set_skip_background() / karafun.h.
+static bool g_karafun_skip_background = false;
+
+void karafun_set_skip_background(bool skip) {
+    g_karafun_skip_background = skip;
+}
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -693,9 +700,11 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr)
     //
     // --- BACKGROUND ---
     //
-    cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-    cairo_rectangle(cr, 0, 0, vis->width, vis->height);
-    cairo_fill(cr);
+    if (!g_karafun_skip_background) {
+        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+        cairo_rectangle(cr, 0, 0, vis->width, vis->height);
+        cairo_fill(cr);
+    }
 
     //
     // --- TITLE ---

@@ -60,4 +60,11 @@ const char* karafun_get_mixed_path(void);
  */
 void draw_karafun_lyrics(void *vis, void *cr);
 
+/**
+ * When true, draw_karafun_lyrics() skips painting its own opaque
+ * background, so a caller (e.g. the "exciting"/starburst visualization)
+ * can composite the lyrics on top of something it already drew.
+ */
+void karafun_set_skip_background(bool skip);
+
 #endif

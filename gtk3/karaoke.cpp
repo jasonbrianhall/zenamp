@@ -261,7 +261,24 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
     // Check if Karafun is active first
     KarafunState *kfn = karafun_get_state();
     if (kfn && kfn->active) {
+        // Paint the starburst as a background layer, then let the lyrics
+        // draw on top of it without repainting their own opaque background
+        // (otherwise the burst would be completely hidden underneath).
+        cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+        cairo_paint(cr);
+
+        double center_x = vis->width / 2.0;
+        double center_y = vis->height / 2.0;
+        draw_karaoke_visualization(vis, cr, center_x, center_y);
+
+        // Dim the burst a touch so the lyric text stays readable on top of it.
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.35);
+        cairo_rectangle(cr, 0, 0, vis->width, vis->height);
+        cairo_fill(cr);
+
+        karafun_set_skip_background(true);
         draw_karafun_lyrics(vis, cr);
+        karafun_set_skip_background(false);
         return;
     }
     
