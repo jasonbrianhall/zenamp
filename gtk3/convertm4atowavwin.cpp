@@ -3,483 +3,368 @@
 #include <string.h>
 #include <vector>
 #include <cstdint>
-#include <memory>
 #include "audio_player.h"
 #include "vfs.h"
 
-#ifdef __linux__
-extern "C" {
-#include <libavformat/avformat.h>
-#include <libavcodec/avcodec.h>
-#include <libavutil/opt.h>
-#include <libavutil/channel_layout.h>
-#include <libavutil/samplefmt.h>
-#include <libswresample/swresample.h>
-}
+#ifdef _WIN32
+#include <windows.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <mferror.h>
 
-// FFmpeg initialization helper
-static bool g_ffmpeg_initialized = false;
+#pragma comment(lib, "mf.lib")
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfuuid.lib")
 
-static bool initializeFFmpeg() {
-    if (g_ffmpeg_initialized) return true;
+// Media Foundation initialization helper
+static bool g_mf_initialized = false;
+
+static bool initializeMediaFoundation() {
+    if (g_mf_initialized) return true;
     
-    // Register all formats and codecs (for older FFmpeg versions)
-#if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(58, 9, 100)
-    av_register_all();
-    avcodec_register_all();
-#endif
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    if (FAILED(hr)) {
+        printf("Failed to initialize COM\n");
+        return false;
+    }
     
-    g_ffmpeg_initialized = true;
+    hr = MFStartup(MF_VERSION);
+    if (FAILED(hr)) {
+        printf("Failed to initialize Media Foundation\n");
+        CoUninitialize();
+        return false;
+    }
+    
+    g_mf_initialized = true;
     return true;
 }
 
-// RAII wrappers for FFmpeg resources
-struct AVFormatContextDeleter {
-    void operator()(AVFormatContext* ctx) {
-        if (ctx) avformat_close_input(&ctx);
+static void cleanupMediaFoundation() {
+    if (g_mf_initialized) {
+        MFShutdown();
+        CoUninitialize();
+        g_mf_initialized = false;
     }
-};
-
-struct AVCodecContextDeleter {
-    void operator()(AVCodecContext* ctx) {
-        if (ctx) avcodec_free_context(&ctx);
-    }
-};
-
-struct AVIOContextDeleter {
-    void operator()(AVIOContext* ctx) {
-        if (ctx) avio_context_free(&ctx);
-    }
-};
-
-struct SwrContextDeleter {
-    void operator()(SwrContext* ctx) {
-        if (ctx) swr_free(&ctx);
-    }
-};
-
-struct AVPacketDeleter {
-    void operator()(AVPacket* pkt) {
-        if (pkt) av_packet_free(&pkt);
-    }
-};
-
-struct AVFrameDeleter {
-    void operator()(AVFrame* frame) {
-        if (frame) av_frame_free(&frame);
-    }
-};
-
-struct AVSamplesDeleter {
-    uint8_t** data;
-    AVSamplesDeleter(uint8_t** d) : data(d) {}
-    ~AVSamplesDeleter() {
-        if (data) {
-            if (data[0]) av_freep(&data[0]);
-            av_freep(&data);
-        }
-    }
-};
-
-using AVFormatContextPtr = std::unique_ptr<AVFormatContext, AVFormatContextDeleter>;
-using AVCodecContextPtr = std::unique_ptr<AVCodecContext, AVCodecContextDeleter>;
-using AVIOContextPtr = std::unique_ptr<AVIOContext, AVIOContextDeleter>;
-using SwrContextPtr = std::unique_ptr<SwrContext, SwrContextDeleter>;
-using AVPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
-using AVFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
-
-// Memory-based I/O context for FFmpeg
-struct MemoryIOContext {
-    const uint8_t* data;
-    size_t size;
-    size_t pos;
-};
-
-static int memory_read(void* opaque, uint8_t* buf, int buf_size) {
-    MemoryIOContext* ctx = (MemoryIOContext*)opaque;
-    int bytes_to_read = buf_size;
-    
-    if (ctx->pos >= ctx->size) {
-        return AVERROR_EOF;
-    }
-    
-    if (ctx->pos + bytes_to_read > ctx->size) {
-        bytes_to_read = ctx->size - ctx->pos;
-    }
-    
-    if (bytes_to_read > 0) {
-        memcpy(buf, ctx->data + ctx->pos, bytes_to_read);
-        ctx->pos += bytes_to_read;
-    }
-    
-    return bytes_to_read;
 }
 
-static int64_t memory_seek(void* opaque, int64_t offset, int whence) {
-    MemoryIOContext* ctx = (MemoryIOContext*)opaque;
-    
-    switch (whence) {
-        case SEEK_SET:
-            ctx->pos = offset;
-            break;
-        case SEEK_CUR:
-            ctx->pos += offset;
-            break;
-        case SEEK_END:
-            ctx->pos = ctx->size + offset;
-            break;
-        case AVSEEK_SIZE:
-            return ctx->size;
-        default:
-            return -1;
-    }
-    
-    if (ctx->pos > ctx->size) {
-        ctx->pos = ctx->size;
-    }
-    
-    return ctx->pos;
+// Utility function to convert string to wstring
+static std::wstring stringToWString(const std::string& str) {
+    if (str.empty()) return std::wstring();
+    int size = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), nullptr, 0);
+    std::wstring result(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &result[0], size);
+    return result;
 }
 
-bool convertM4aToWavInMemory(const std::vector<uint8_t>& m4a_data, std::vector<uint8_t>& wav_data) {
-    if (!initializeFFmpeg()) {
+// Function to detect audio file format
+static bool isWmaFile(const char* filename) {
+    const char* ext = strrchr(filename, '.');
+    return ext && (_stricmp(ext, ".wma") == 0);
+}
+
+static bool isM4aFile(const char* filename) {
+    const char* ext = strrchr(filename, '.');
+    return ext && (_stricmp(ext, ".m4a") == 0 || _stricmp(ext, ".m4p") == 0);
+}
+
+// Generic function that works for both M4A and WMA
+static bool convertAudioToWav(const char* input_filename, const char* wav_filename) {
+    if (!initializeMediaFoundation()) {
         return false;
     }
     
-    // Set up memory I/O context
-    MemoryIOContext mem_ctx;
-    mem_ctx.data = m4a_data.data();
-    mem_ctx.size = m4a_data.size();
-    mem_ctx.pos = 0;
+    // Convert filename to wide string
+    std::wstring wide_filename = stringToWString(input_filename);
     
-    const int avio_buffer_size = 4096;
-    uint8_t* avio_buffer = (uint8_t*)av_malloc(avio_buffer_size);
-    if (!avio_buffer) {
-        printf("Failed to allocate AVIO buffer\n");
+    HRESULT hr;
+    IMFSourceReader* pReader = nullptr;
+    
+    // Create source reader from file - works for both M4A and WMA
+    hr = MFCreateSourceReaderFromURL(wide_filename.c_str(), nullptr, &pReader);
+    if (FAILED(hr)) {
+        printf("Cannot open audio file: %s (Error: 0x%lx)\n", input_filename, hr);
         return false;
     }
     
-    AVIOContextPtr avio_ctx(avio_alloc_context(avio_buffer, avio_buffer_size, 0, &mem_ctx, 
-                                              memory_read, nullptr, memory_seek));
-    if (!avio_ctx) {
-        printf("Failed to create AVIO context\n");
-        av_free(avio_buffer);
+    // GET ORIGINAL FORMAT INFORMATION FIRST
+    IMFMediaType* pOriginalType = nullptr;
+    hr = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &pOriginalType);
+    if (FAILED(hr)) {
+        printf("Failed to get original media type\n");
+        pReader->Release();
         return false;
     }
     
-    // Allocate format context
-    AVFormatContext* format_ctx_raw = avformat_alloc_context();
-    if (!format_ctx_raw) {
-        printf("Failed to allocate format context\n");
+    // Extract original audio parameters
+    UINT32 originalSampleRate = 44100; // default fallback
+    UINT32 originalChannels = 2;       // default fallback
+    
+    pOriginalType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &originalSampleRate);
+    pOriginalType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &originalChannels);
+    
+    // Determine file type for logging
+    const char* fileType = isWmaFile(input_filename) ? "WMA" : 
+                          isM4aFile(input_filename) ? "M4A" : "Audio";
+    printf("Original %s: %d Hz, %d channels\n", fileType, originalSampleRate, originalChannels);
+    
+    // Configure source reader for PCM output WITH ORIGINAL SAMPLE RATE
+    IMFMediaType* pType = nullptr;
+    hr = MFCreateMediaType(&pType);
+    if (FAILED(hr)) {
+        printf("Failed to create media type\n");
+        pOriginalType->Release();
+        pReader->Release();
         return false;
     }
     
-    format_ctx_raw->pb = avio_ctx.get();
-    AVFormatContextPtr format_ctx(format_ctx_raw);
-    
-    // Open input
-    AVFormatContext* temp_ctx = format_ctx.release();
-    if (avformat_open_input(&temp_ctx, nullptr, nullptr, nullptr) < 0) {
-        printf("Failed to open M4A data\n");
-        if (temp_ctx) avformat_close_input(&temp_ctx);
-        return false;
+    hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    if (SUCCEEDED(hr)) {
+        hr = pType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
     }
-    format_ctx.reset(temp_ctx);
-    
-    // Find stream info
-    if (avformat_find_stream_info(format_ctx.get(), nullptr) < 0) {
-        printf("Failed to find stream info\n");
-        return false;
+    if (SUCCEEDED(hr)) {
+        hr = pType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, originalSampleRate);
+    }
+    if (SUCCEEDED(hr)) {
+        hr = pType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, originalChannels);
+    }
+    if (SUCCEEDED(hr)) {
+        hr = pType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
     }
     
-    // Find audio stream
-    int audio_stream_index = -1;
-    for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
-        if (format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            audio_stream_index = i;
-            break;
-        }
+    if (SUCCEEDED(hr)) {
+        hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pType);
     }
     
-    if (audio_stream_index == -1) {
-        printf("No audio stream found\n");
+    if (FAILED(hr)) {
+        printf("Failed to configure source reader\n");
+        pOriginalType->Release();
+        pType->Release();
+        pReader->Release();
         return false;
     }
     
-    AVStream* audio_stream = format_ctx->streams[audio_stream_index];
-    AVCodecParameters* codecpar = audio_stream->codecpar;
-    
-    // Find decoder
-    const AVCodec* codec = avcodec_find_decoder(codecpar->codec_id);
-    if (!codec) {
-        printf("Codec not found\n");
+    // Verify the configured format
+    IMFMediaType* pCurrentType = nullptr;
+    hr = pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pCurrentType);
+    if (FAILED(hr)) {
+        printf("Failed to get current media type\n");
+        pOriginalType->Release();
+        pType->Release();
+        pReader->Release();
         return false;
     }
     
-    // Create codec context
-    AVCodecContextPtr codec_ctx(avcodec_alloc_context3(codec));
-    if (!codec_ctx) {
-        printf("Failed to allocate codec context\n");
+    UINT32 sampleRate = originalSampleRate;  // Use original sample rate
+    UINT32 channels = originalChannels;      // Use original channel count
+    UINT32 bitsPerSample = 16;
+    
+    // Double-check the configured values
+    pCurrentType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+    pCurrentType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+    pCurrentType->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bitsPerSample);
+    
+    printf("Output format: %d Hz, %d channels, %d bits per sample\n", sampleRate, channels, bitsPerSample);
+    
+    // Warn if there's a mismatch
+    if (sampleRate != originalSampleRate) {
+        printf("WARNING: Sample rate mismatch! Original: %d, Output: %d\n", originalSampleRate, sampleRate);
+    }
+    
+    // Create WAV file
+    FILE* wav_file = fopen(wav_filename, "wb");
+    if (!wav_file) {
+        printf("Cannot create WAV file: %s\n", wav_filename);
+        pCurrentType->Release();
+        pOriginalType->Release();
+        pType->Release();
+        pReader->Release();
         return false;
     }
     
-    // Copy codec parameters
-    if (avcodec_parameters_to_context(codec_ctx.get(), codecpar) < 0) {
-        printf("Failed to copy codec parameters\n");
-        return false;
-    }
+    // Write initial WAV header (we'll update sizes later)
+    long riff_size_pos, data_size_pos;
     
-    // Open codec
-    if (avcodec_open2(codec_ctx.get(), codec, nullptr) < 0) {
-        printf("Failed to open codec\n");
-        return false;
-    }
-    
-    // Get channel count (compatibility with different FFmpeg versions)
-    int channels;
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
-    channels = codec_ctx->ch_layout.nb_channels;
-#else
-    channels = codec_ctx->channels;
-#endif
-    
-    printf("M4A (memory): %d Hz, %d channels, %d bits per sample\n", 
-           codec_ctx->sample_rate, channels, 
-           av_get_bytes_per_sample(codec_ctx->sample_fmt) * 8);
-    
-    // Set up resampler for conversion to 16-bit PCM
-    SwrContextPtr swr_ctx(swr_alloc());
-    if (!swr_ctx) {
-        printf("Failed to allocate resampler\n");
-        return false;
-    }
-    
-    // Configure resampler
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 24, 100)
-    AVChannelLayout in_ch_layout, out_ch_layout;
-    av_channel_layout_copy(&in_ch_layout, &codec_ctx->ch_layout);
-    av_channel_layout_default(&out_ch_layout, channels);
-    
-    av_opt_set_chlayout(swr_ctx.get(), "in_chlayout", &in_ch_layout, 0);
-    av_opt_set_chlayout(swr_ctx.get(), "out_chlayout", &out_ch_layout, 0);
-    
-    av_channel_layout_uninit(&in_ch_layout);
-    av_channel_layout_uninit(&out_ch_layout);
-#else
-    uint64_t in_layout = codec_ctx->channel_layout ? codec_ctx->channel_layout : av_get_default_channel_layout(channels);
-    av_opt_set_int(swr_ctx.get(), "in_channel_layout", in_layout, 0);
-    av_opt_set_int(swr_ctx.get(), "out_channel_layout", av_get_default_channel_layout(channels), 0);
-#endif
-    
-    av_opt_set_int(swr_ctx.get(), "in_sample_rate", codec_ctx->sample_rate, 0);
-    av_opt_set_int(swr_ctx.get(), "out_sample_rate", codec_ctx->sample_rate, 0);
-    av_opt_set_sample_fmt(swr_ctx.get(), "in_sample_fmt", codec_ctx->sample_fmt, 0);
-    av_opt_set_sample_fmt(swr_ctx.get(), "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
-    
-    if (swr_init(swr_ctx.get()) < 0) {
-        printf("Failed to initialize resampler\n");
-        return false;
-    }
-    
-    // Prepare WAV data vector
-    wav_data.clear();
-    wav_data.reserve(m4a_data.size() * 2); // Rough estimate
-    
-    // Helper function to append data to vector
-    auto append_bytes = [&wav_data](const void* data, size_t size) {
-        const uint8_t* bytes = (const uint8_t*)data;
-        wav_data.insert(wav_data.end(), bytes, bytes + size);
-    };
-    
-    // Write WAV header (we'll update the sizes later)
-    size_t riff_size_pos, data_size_pos;
-    
-    append_bytes("RIFF", 4);
-    riff_size_pos = wav_data.size();
+    // RIFF header
+    fwrite("RIFF", 1, 4, wav_file);
+    riff_size_pos = ftell(wav_file);
     uint32_t placeholder = 0;
-    append_bytes(&placeholder, 4); // File size (will update later)
-    append_bytes("WAVE", 4);
+    fwrite(&placeholder, 4, 1, wav_file); // File size (will update later)
+    fwrite("WAVE", 1, 4, wav_file);
     
     // fmt chunk
-    append_bytes("fmt ", 4);
+    fwrite("fmt ", 1, 4, wav_file);
     int fmt_chunk_size = 16;
     short audio_format = 1; // PCM
-    short wav_channels = (short)channels;
-    int sample_rate = codec_ctx->sample_rate;
-    short bits_per_sample = 16;
-    int byte_rate = sample_rate * channels * bits_per_sample / 8;
-    short block_align = channels * bits_per_sample / 8;
+    int byte_rate = sampleRate * channels * bitsPerSample / 8;
+    short block_align = channels * bitsPerSample / 8;
     
-    append_bytes(&fmt_chunk_size, 4);
-    append_bytes(&audio_format, 2);
-    append_bytes(&wav_channels, 2);
-    append_bytes(&sample_rate, 4);
-    append_bytes(&byte_rate, 4);
-    append_bytes(&block_align, 2);
-    append_bytes(&bits_per_sample, 2);
+    fwrite(&fmt_chunk_size, 4, 1, wav_file);
+    fwrite(&audio_format, 2, 1, wav_file);
+    fwrite(&channels, 2, 1, wav_file);
+    fwrite(&sampleRate, 4, 1, wav_file);
+    fwrite(&byte_rate, 4, 1, wav_file);
+    fwrite(&block_align, 2, 1, wav_file);
+    fwrite(&bitsPerSample, 2, 1, wav_file);
     
     // data chunk header
-    append_bytes("data", 4);
-    data_size_pos = wav_data.size();
-    append_bytes(&placeholder, 4); // Data size (will update later)
+    fwrite("data", 1, 4, wav_file);
+    data_size_pos = ftell(wav_file);
+    fwrite(&placeholder, 4, 1, wav_file); // Data size (will update later)
     
-    size_t audio_data_start = wav_data.size();
+    long audio_data_start = ftell(wav_file);
     
-    // Allocate packet and frame
-    AVPacketPtr packet(av_packet_alloc());
-    AVFramePtr frame(av_frame_alloc());
+    // Read and write audio data
+    uint32_t total_bytes_written = 0;
     
-    if (!packet || !frame) {
-        printf("Failed to allocate packet or frame\n");
-        return false;
-    }
-    
-    // Allocate output buffer for resampler
-    uint8_t** output_buffer = nullptr;
-    int output_linesize = 0;
-    int max_samples = 1024; // Conservative estimate
-    
-    int ret = av_samples_alloc_array_and_samples(&output_buffer, &output_linesize,
-                                               channels, max_samples, AV_SAMPLE_FMT_S16, 0);
-    if (ret < 0) {
-        printf("Failed to allocate output buffer\n");
-        return false;
-    }
-    
-    // Use RAII wrapper for output buffer
-    AVSamplesDeleter output_deleter(output_buffer);
-    
-    // Decode and convert audio data
-    while (av_read_frame(format_ctx.get(), packet.get()) >= 0) {
-        if (packet->stream_index == audio_stream_index) {
-            if (avcodec_send_packet(codec_ctx.get(), packet.get()) >= 0) {
-                while (avcodec_receive_frame(codec_ctx.get(), frame.get()) >= 0) {
-                    // Reallocate output buffer if needed
-                    if (frame->nb_samples > max_samples) {
-                        output_deleter.~AVSamplesDeleter();
-                        output_buffer = nullptr;
-                        
-                        max_samples = frame->nb_samples;
-                        ret = av_samples_alloc_array_and_samples(&output_buffer, &output_linesize,
-                                                               channels, max_samples, AV_SAMPLE_FMT_S16, 0);
-                        if (ret < 0) {
-                            printf("Failed to reallocate output buffer\n");
-                            return false;
-                        }
-                        new (&output_deleter) AVSamplesDeleter(output_buffer);
-                    }
-                    
-                    // Convert to 16-bit PCM
-                    int output_samples = swr_convert(swr_ctx.get(), output_buffer, frame->nb_samples,
-                                                   (const uint8_t**)frame->data, frame->nb_samples);
-                    
-                    if (output_samples > 0) {
-                        int output_size = output_samples * channels * sizeof(int16_t);
-                        append_bytes(output_buffer[0], output_size);
-                    }
+    while (SUCCEEDED(hr)) {
+        DWORD flags = 0;
+        LONGLONG timestamp = 0;
+        IMFSample* pSample = nullptr;
+        
+        hr = pReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, 
+                                nullptr, &flags, &timestamp, &pSample);
+        
+        if (FAILED(hr)) break;
+        
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+            break;
+        }
+        
+        if (pSample) {
+            IMFMediaBuffer* pBuffer = nullptr;
+            hr = pSample->ConvertToContiguousBuffer(&pBuffer);
+            if (SUCCEEDED(hr)) {
+                BYTE* pData = nullptr;
+                DWORD maxLength = 0, currentLength = 0;
+                
+                hr = pBuffer->Lock(&pData, &maxLength, &currentLength);
+                if (SUCCEEDED(hr)) {
+                    fwrite(pData, 1, currentLength, wav_file);
+                    total_bytes_written += currentLength;
+                    pBuffer->Unlock();
                 }
+                pBuffer->Release();
             }
-        }
-        av_packet_unref(packet.get());
-    }
-    
-    // Flush decoder
-    avcodec_send_packet(codec_ctx.get(), nullptr);
-    while (avcodec_receive_frame(codec_ctx.get(), frame.get()) >= 0) {
-        // Reallocate output buffer if needed
-        if (frame->nb_samples > max_samples) {
-            output_deleter.~AVSamplesDeleter();
-            output_buffer = nullptr;
-            
-            max_samples = frame->nb_samples;
-            ret = av_samples_alloc_array_and_samples(&output_buffer, &output_linesize,
-                                                   channels, max_samples, AV_SAMPLE_FMT_S16, 0);
-            if (ret < 0) {
-                printf("Failed to reallocate output buffer during flush\n");
-                break;
-            }
-            new (&output_deleter) AVSamplesDeleter(output_buffer);
-        }
-        
-        int output_samples = swr_convert(swr_ctx.get(), output_buffer, frame->nb_samples,
-                                       (const uint8_t**)frame->data, frame->nb_samples);
-        
-        if (output_samples > 0) {
-            int output_size = output_samples * channels * sizeof(int16_t);
-            append_bytes(output_buffer[0], output_size);
+            pSample->Release();
         }
     }
     
     // Update WAV header with actual sizes
-    uint32_t data_size = (uint32_t)(wav_data.size() - audio_data_start);
-    uint32_t file_size = (uint32_t)(wav_data.size() - 8);
+    uint32_t file_size = total_bytes_written + 36; // Audio data + header size - 8
     
     // Update RIFF chunk size
-    memcpy(&wav_data[riff_size_pos], &file_size, 4);
+    fseek(wav_file, riff_size_pos, SEEK_SET);
+    fwrite(&file_size, 4, 1, wav_file);
     
     // Update data chunk size
-    memcpy(&wav_data[data_size_pos], &data_size, 4);
+    fseek(wav_file, data_size_pos, SEEK_SET);
+    fwrite(&total_bytes_written, 4, 1, wav_file);
     
-    printf("M4A to WAV memory conversion complete (%zu bytes)\n", wav_data.size());
-    return !wav_data.empty();
-}
-
-// Similar fixes should be applied to the file-based version
-bool convertM4aToWav(const char* m4a_filename, const char* wav_filename) {
-    // Read the file into memory first
-    FILE* file = fopen(m4a_filename, "rb");
-    if (!file) {
-        printf("Cannot open M4A file: %s\n", m4a_filename);
-        return false;
-    }
-    
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    
-    std::vector<uint8_t> m4a_data(size);
-    if (fread(m4a_data.data(), 1, size, file) != (size_t)size) {
-        fclose(file);
-        printf("Failed to read M4A file\n");
-        return false;
-    }
-    fclose(file);
-    
-    // Convert in memory
-    std::vector<uint8_t> wav_data;
-    if (!convertM4aToWavInMemory(m4a_data, wav_data)) {
-        return false;
-    }
-    
-    // Write to file
-    FILE* wav_file = fopen(wav_filename, "wb");
-    if (!wav_file) {
-        printf("Cannot create WAV file: %s\n", wav_filename);
-        return false;
-    }
-    
-    size_t written = fwrite(wav_data.data(), 1, wav_data.size(), wav_file);
     fclose(wav_file);
     
-    if (written != wav_data.size()) {
-        printf("Failed to write complete WAV file\n");
-        return false;
-    }
+    // Cleanup
+    pCurrentType->Release();
+    pOriginalType->Release();
+    pType->Release();
+    pReader->Release();
     
-    printf("M4A conversion complete\n");
+    printf("%s conversion complete\n", fileType);
     return true;
 }
 
-bool convert_m4a_to_wav(AudioPlayer *player, const char* filename) {
-    return convert_audio_to_wav(player, filename);
+// Memory-based conversion for any supported audio format
+static bool convertAudioToWavInMemory(const std::vector<uint8_t>& audio_data, std::vector<uint8_t>& wav_data, const char* file_extension) {
+    // Media Foundation requires actual file access for audio files
+    // Create a temporary file for the conversion process
+    char temp_path[MAX_PATH];
+    char temp_audio_file[MAX_PATH];
+    
+    if (GetTempPathA(MAX_PATH, temp_path) == 0 ||
+        GetTempFileNameA(temp_path, file_extension, 0, temp_audio_file) == 0) {
+        printf("Failed to create temporary file path\n");
+        return false;
+    }
+    
+    // Write audio data to temporary file
+    FILE* temp_file = fopen(temp_audio_file, "wb");
+    if (!temp_file) {
+        printf("Failed to create temporary audio file\n");
+        return false;
+    }
+    
+    if (fwrite(audio_data.data(), 1, audio_data.size(), temp_file) != audio_data.size()) {
+        printf("Failed to write audio data to temporary file\n");
+        fclose(temp_file);
+        DeleteFileA(temp_audio_file);
+        return false;
+    }
+    fclose(temp_file);
+    
+    // Create temporary WAV file
+    char temp_wav_file[MAX_PATH];
+    if (GetTempFileNameA(temp_path, "wav", 0, temp_wav_file) == 0) {
+        printf("Failed to create temporary WAV file path\n");
+        DeleteFileA(temp_audio_file);
+        return false;
+    }
+    
+    // Convert using file-based method
+    bool success = convertAudioToWav(temp_audio_file, temp_wav_file);
+    
+    if (success) {
+        // Read converted WAV data back into memory
+        FILE* wav_file = fopen(temp_wav_file, "rb");
+        if (wav_file) {
+            fseek(wav_file, 0, SEEK_END);
+            long wav_size = ftell(wav_file);
+            fseek(wav_file, 0, SEEK_SET);
+            
+            wav_data.resize(wav_size);
+            if (fread(wav_data.data(), 1, wav_size, wav_file) == (size_t)wav_size) {
+                printf("Audio to WAV memory conversion complete (%zu bytes)\n", wav_data.size());
+            } else {
+                success = false;
+                printf("Failed to read converted WAV data\n");
+            }
+            fclose(wav_file);
+        } else {
+            success = false;
+            printf("Failed to read converted WAV file\n");
+        }
+    }
+    
+    // Clean up temporary files
+    DeleteFileA(temp_audio_file);
+    DeleteFileA(temp_wav_file);
+    
+    return success;
 }
 
-bool convert_wma_to_wav(AudioPlayer *player, const char* filename) {
-    return convert_audio_to_wav(player, filename);
+// Wrapper functions for backward compatibility
+bool convertM4aToWavInMemory(const std::vector<uint8_t>& m4a_data, std::vector<uint8_t>& wav_data) {
+    return convertAudioToWavInMemory(m4a_data, wav_data, "m4a");
 }
 
+bool convertWmaToWavInMemory(const std::vector<uint8_t>& wma_data, std::vector<uint8_t>& wav_data) {
+    return convertAudioToWavInMemory(wma_data, wav_data, "wma");
+}
+
+bool convertM4aToWav(const char* m4a_filename, const char* wav_filename) {
+    return convertAudioToWav(m4a_filename, wav_filename);
+}
+
+bool convertWmaToWav(const char* wma_filename, const char* wav_filename) {
+    return convertAudioToWav(wma_filename, wav_filename);
+}
 
 bool convert_audio_to_wav(AudioPlayer *player, const char* filename) {
+    return convert_audio_to_wav_internal(player, filename);
+}
+
+// Internal generic audio converter for Windows Media Foundation
+bool convert_audio_to_wav_internal(AudioPlayer *player, const char* filename) {
     // Check cache first
     const char* cached_file = get_cached_conversion(&player->conversion_cache, filename);
     if (cached_file) {
@@ -488,39 +373,58 @@ bool convert_audio_to_wav(AudioPlayer *player, const char* filename) {
         return true;
     }
     
+    // Determine file type
+    bool isWma = isWmaFile(filename);
+    bool isM4a = isM4aFile(filename);
+    
+    if (!isWma && !isM4a) {
+        printf("Unsupported audio format: %s\n", filename);
+        return false;
+    }
+    
     // Generate a unique virtual filename
     static int virtual_counter = 0;
     char virtual_filename[256];
-    snprintf(virtual_filename, sizeof(virtual_filename), "virtual_m4a_%d.wav", virtual_counter++);
+    const char* prefix = isWma ? "virtual_wma" : "virtual_m4a";
+    snprintf(virtual_filename, sizeof(virtual_filename), "%s_%d.wav", prefix, virtual_counter++);
     
     strncpy(player->temp_wav_file, virtual_filename, sizeof(player->temp_wav_file) - 1);
     player->temp_wav_file[sizeof(player->temp_wav_file) - 1] = '\0';
     
-    printf("Converting M4A to virtual WAV: %s -> %s\n", filename, virtual_filename);
+    printf("Converting %s to virtual WAV: %s -> %s\n", 
+           isWma ? "WMA" : "M4A", filename, virtual_filename);
     
-    // Read M4A file into memory
-    FILE* m4a_file = fopen(filename, "rb");
-    if (!m4a_file) {
-        printf("Cannot open file: %s\n", filename);
+    // Read audio file into memory
+    FILE* audio_file = fopen(filename, "rb");
+    if (!audio_file) {
+        printf("Cannot open audio file: %s\n", filename);
         return false;
     }
     
-    fseek(m4a_file, 0, SEEK_END);
-    long m4a_size = ftell(m4a_file);
-    fseek(m4a_file, 0, SEEK_SET);
+    fseek(audio_file, 0, SEEK_END);
+    long audio_size = ftell(audio_file);
+    fseek(audio_file, 0, SEEK_SET);
     
-    std::vector<uint8_t> m4a_data(m4a_size);
-    if (fread(m4a_data.data(), 1, m4a_size, m4a_file) != (size_t)m4a_size) {
-        printf("Failed to read M4A file\n");
-        fclose(m4a_file);
+    std::vector<uint8_t> audio_data(audio_size);
+    if (fread(audio_data.data(), 1, audio_size, audio_file) != (size_t)audio_size) {
+        printf("Failed to read audio file\n");
+        fclose(audio_file);
         return false;
     }
-    fclose(m4a_file);
+    fclose(audio_file);
     
-    // Convert M4A to WAV in memory
+    // Convert to WAV in memory
     std::vector<uint8_t> wav_data;
-    if (!convertM4aToWavInMemory(m4a_data, wav_data)) {
-        printf("Conversion to WAV conversion failed\n");
+    bool conversion_success = false;
+    
+    if (isWma) {
+        conversion_success = convertWmaToWavInMemory(audio_data, wav_data);
+    } else {
+        conversion_success = convertM4aToWavInMemory(audio_data, wav_data);
+    }
+    
+    if (!conversion_success) {
+        printf("Audio to WAV conversion failed\n");
         return false;
     }
     
@@ -539,8 +443,18 @@ bool convert_audio_to_wav(AudioPlayer *player, const char* filename) {
     // Add to cache after successful conversion
     add_to_conversion_cache(&player->conversion_cache, filename, virtual_filename);
     
-    printf("Conversion to virtual file complete\n");
+    printf("Audio conversion to virtual file complete\n");
     return true;
 }
 
-#endif // __linux__
+// Windows-specific M4A converter (calls generic function)
+bool convert_m4a_to_wav(AudioPlayer *player, const char* filename) {
+    return convert_audio_to_wav_internal(player, filename);
+}
+
+// Windows-specific WMA converter (calls generic function)
+bool convert_wma_to_wav(AudioPlayer *player, const char* filename) {
+    return convert_audio_to_wav_internal(player, filename);
+}
+
+#endif // _WIN32
