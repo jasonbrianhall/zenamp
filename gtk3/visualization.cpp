@@ -38,6 +38,9 @@ Visualizer* visualizer_new(void) {
     // Create drawing area with DPI awareness
     vis->drawing_area = gtk_drawing_area_new();
     gtk_widget_set_size_request(vis->drawing_area, 400, 200);
+    gtk_widget_set_tooltip_text(vis->drawing_area,
+        "F9 or F: Toggle fullscreen\n"
+        "Karafun karaoke files: V = toggle vocal track | B = toggle backing track");
     
     // Enable mouse and scroll events
     gtk_widget_set_events(vis->drawing_area, 

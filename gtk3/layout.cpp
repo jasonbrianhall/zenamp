@@ -565,7 +565,7 @@ void create_queue_treeview(AudioPlayer *player) {
     add_column(tree_view, "Album", COL_ALBUM, 150, TRUE);
     add_column(tree_view, "Genre", COL_GENRE, 100, TRUE);
     add_column(tree_view, "Time", COL_DURATION, 60, TRUE);
-    add_column(tree_view, "CD+G", COL_CDGK, 50, TRUE);
+    add_column(tree_view, "Karaoke", COL_CDGK, 50, TRUE);
     // Note: COL_QUEUE_INDEX is not displayed as a column, it's just stored in the model
     
     // Enable sorting

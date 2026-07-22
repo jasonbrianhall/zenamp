@@ -685,7 +685,7 @@ void update_queue_display(AudioPlayer *player) {
         
         //const char *ext = strrchr(player->queue.files[i], '.');
         const char *cdgk_indicator = "";
-        if (ext && strcasecmp(ext, ".zip") == 0) {
+        if (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) {
             cdgk_indicator = "✓";
         }
         
@@ -1269,7 +1269,7 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
                 strcpy(duration_str, "");
             }
 
-            const char *cdgk_indicator = (ext && strcasecmp(ext, ".zip") == 0) ? "✓" : "";
+            const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
             const char *indicator = (i == player->queue.current_index) ? "▶" : "";
             
             // NEW: Add visual indicator for inaccessible files

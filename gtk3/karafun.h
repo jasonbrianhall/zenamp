@@ -56,6 +56,30 @@ bool karafun_prepare_mixed_track(void);
 const char* karafun_get_mixed_path(void);
 
 /**
+ * Toggles mute on the vocal or backing track and re-derives the mixed
+ * playback WAV to match (see karafun_get_mixed_path()). Returns false if
+ * no Karafun file is active, or (for backing) if the file has no separate
+ * backing track. Muting both tracks at once isn't allowed — toggling one
+ * on will automatically un-mute the other if needed.
+ */
+bool karafun_toggle_vocal_mute(void);
+bool karafun_toggle_backing_mute(void);
+bool karafun_is_vocal_muted(void);
+bool karafun_is_backing_muted(void);
+
+/**
+ * Toggles vocal/backing mute AND hot-swaps the reloaded mixed track into
+ * the currently-playing AudioPlayer, seeking back to where playback was.
+ * Defined in main.cpp (needs load_file()/seek_to_position()); declared
+ * here so other files (e.g. the keyboard handler) can just include
+ * karafun.h instead of hand-writing externs. `player` is an AudioPlayer*
+ * (void* here, same as draw_karafun_lyrics(), so this header doesn't need
+ * to pull in audio_player.h). No-op if no .kfn is active.
+ */
+void karafun_toggle_vocal_and_reload(void *player);
+void karafun_toggle_backing_and_reload(void *player);
+
+/**
  * Render Karafun lyrics display (for karaoke visualization)
  */
 void draw_karafun_lyrics(void *vis, void *cr);

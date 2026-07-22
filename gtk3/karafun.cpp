@@ -219,6 +219,98 @@ const char* karafun_get_mixed_path(void) {
     return g_karafun.active && g_karafun.tmp_mixed_path[0] ? g_karafun.tmp_mixed_path : NULL;
 }
 
+// Re-derives the single playback WAV honoring the current vocal_muted /
+// backing_muted flags, and swaps it into g_karafun.tmp_mixed_path (deleting
+// the old temp file). Used when toggling V/B mid-playback — the initial
+// load always goes through karafun_prepare_mixed_track() with both tracks
+// enabled instead.
+static bool karafun_remix_for_mute_state(void) {
+    if (!g_karafun.tmp_vocal_path[0]) {
+        printf("KARAFUN: No vocal track to remix\n");
+        return false;
+    }
+
+    bool has_backing = g_karafun.has_backing_track && g_karafun.tmp_backing_path[0];
+
+    // Never allow both tracks to end up muted -- there'd be nothing to
+    // play. Whichever track was just toggled on wins; force the other back on.
+    if (g_karafun.vocal_muted && (g_karafun.backing_muted || !has_backing)) {
+        g_karafun.backing_muted = false;
+    }
+    if (g_karafun.backing_muted && g_karafun.vocal_muted) {
+        g_karafun.vocal_muted = false;
+    }
+
+    std::vector<uint8_t> outputWav;
+
+    if (g_karafun.vocal_muted && has_backing) {
+        // Backing only.
+        if (!convert_track_to_wav(g_karafun.tmp_backing_path, outputWav)) {
+            printf("KARAFUN: Failed to convert backing track to WAV\n");
+            return false;
+        }
+    } else if (g_karafun.backing_muted || !has_backing) {
+        // Vocal only (backing explicitly muted, or there just isn't one).
+        if (!convert_track_to_wav(g_karafun.tmp_vocal_path, outputWav)) {
+            printf("KARAFUN: Failed to convert vocal track to WAV\n");
+            return false;
+        }
+    } else {
+        // Neither muted: full mix, same as the initial load.
+        std::vector<uint8_t> vocalWav, backingWav;
+        if (!convert_track_to_wav(g_karafun.tmp_vocal_path, vocalWav) ||
+            !convert_track_to_wav(g_karafun.tmp_backing_path, backingWav)) {
+            printf("KARAFUN: Failed to convert tracks to WAV for remix\n");
+            return false;
+        }
+        if (!mixTwoWavFiles(vocalWav, backingWav, outputWav)) {
+            printf("KARAFUN: Remixing vocal + backing failed\n");
+            return false;
+        }
+    }
+
+    char new_path[sizeof(g_karafun.tmp_mixed_path)] = {0};
+    if (!write_temp_wav(outputWav, new_path, sizeof(new_path))) {
+        return false;
+    }
+
+    delete_temp_file(g_karafun.tmp_mixed_path);
+    strncpy(g_karafun.tmp_mixed_path, new_path, sizeof(g_karafun.tmp_mixed_path) - 1);
+    g_karafun.tmp_mixed_path[sizeof(g_karafun.tmp_mixed_path) - 1] = '\0';
+
+    printf("KARAFUN: Remixed (vocal_muted=%d, backing_muted=%d) -> %s\n",
+           g_karafun.vocal_muted, g_karafun.backing_muted, g_karafun.tmp_mixed_path);
+    return true;
+}
+
+bool karafun_toggle_vocal_mute(void) {
+    if (!g_karafun.active) return false;
+    g_karafun.vocal_muted = !g_karafun.vocal_muted;
+    if (!karafun_remix_for_mute_state()) {
+        g_karafun.vocal_muted = !g_karafun.vocal_muted;  // roll back
+        return false;
+    }
+    return true;
+}
+
+bool karafun_toggle_backing_mute(void) {
+    if (!g_karafun.active || !g_karafun.has_backing_track) return false;
+    g_karafun.backing_muted = !g_karafun.backing_muted;
+    if (!karafun_remix_for_mute_state()) {
+        g_karafun.backing_muted = !g_karafun.backing_muted;  // roll back
+        return false;
+    }
+    return true;
+}
+
+bool karafun_is_vocal_muted(void) {
+    return g_karafun.active && g_karafun.vocal_muted;
+}
+
+bool karafun_is_backing_muted(void) {
+    return g_karafun.active && g_karafun.backing_muted;
+}
+
 // ============================================================================
 // PARSING (song.ini from KFN archive)
 // ============================================================================

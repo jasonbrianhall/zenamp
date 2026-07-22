@@ -1146,6 +1146,53 @@ void start_playback(AudioPlayer *player) {
     }
 }
 
+// Toggles mute on the currently-playing Karafun (.kfn) file's vocal or
+// backing track. Karafun plays back a single pre-mixed WAV (see
+// karafun_prepare_mixed_track()), so there's no live per-channel volume to
+// flip — instead this re-derives that mixed WAV honoring the new mute
+// state, hot-swaps it in via load_file(), and seeks back to where playback
+// was so the swap is inaudible as anything but the track dropping out.
+// No-op (and returns false) if a Karafun file isn't currently active.
+static bool karafun_toggle_track_and_reload(AudioPlayer *p, bool toggle_vocal) {
+    if (!p) return false;
+    KarafunState *kfn = karafun_get_state();
+    if (!kfn || !kfn->active) return false;
+
+    bool ok = toggle_vocal ? karafun_toggle_vocal_mute() : karafun_toggle_backing_mute();
+    if (!ok) {
+        printf("KARAFUN: Failed to toggle %s mute\n", toggle_vocal ? "vocal" : "backing");
+        return false;
+    }
+
+    const char *mixed_path = karafun_get_mixed_path();
+    if (!mixed_path) return false;
+
+    double saved_position = playTime;
+    bool was_playing = p->is_playing && !p->is_paused;
+
+    if (load_file(p, mixed_path)) {
+        seek_to_position(p, saved_position);
+        if (was_playing) {
+            start_playback(p);
+        }
+    }
+
+    printf("KARAFUN: %s track %s\n", toggle_vocal ? "Vocal" : "Backing",
+           (toggle_vocal ? kfn->vocal_muted : kfn->backing_muted) ? "muted" : "unmuted");
+    return true;
+}
+
+// Wire these to the 'V' and 'B' keys respectively. Signature is void* (not
+// AudioPlayer*) to match the declaration in karafun.h, which avoids that
+// header needing to pull in audio_player.h.
+void karafun_toggle_vocal_and_reload(void *player) {
+    karafun_toggle_track_and_reload((AudioPlayer*)player, true);
+}
+
+void karafun_toggle_backing_and_reload(void *player) {
+    karafun_toggle_track_and_reload((AudioPlayer*)player, false);
+}
+
 bool remove_from_queue(PlayQueue *queue, int index) {
     if (index < 0 || index >= queue->count) {
         return false;

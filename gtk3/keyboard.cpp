@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include "audio_player.h"
+#include "karafun.h"
 
 static gboolean is_text_input_widget(GtkWidget *widget) {
     return GTK_IS_ENTRY(widget) || 
@@ -181,6 +182,18 @@ gboolean on_key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer user
                 visualizer_next_mode(player->visualizer);
                 printf("Switched to next visualization\n");
             }
+            return TRUE;
+            
+        case GDK_KEY_v:
+        case GDK_KEY_V:
+            // V: Toggle Karafun vocal track (no-op unless a .kfn is loaded)
+            karafun_toggle_vocal_and_reload(player);
+            return TRUE;
+            
+        case GDK_KEY_b:
+        case GDK_KEY_B:
+            // B: Toggle Karafun backing track (no-op unless a .kfn is loaded)
+            karafun_toggle_backing_and_reload(player);
             return TRUE;
             
         case GDK_KEY_space:
@@ -442,6 +455,16 @@ gboolean on_vis_fullscreen_key_press(GtkWidget *widget, GdkEventKey *event, gpoi
                 visualizer_next_mode(player->visualizer);
                 printf("Switched to next visualization in fullscreen\n");
             }
+            return TRUE;
+            
+        case GDK_KEY_v:
+        case GDK_KEY_V:
+            karafun_toggle_vocal_and_reload(player);
+            return TRUE;
+            
+        case GDK_KEY_b:
+        case GDK_KEY_B:
+            karafun_toggle_backing_and_reload(player);
             return TRUE;
             
         case GDK_KEY_space:

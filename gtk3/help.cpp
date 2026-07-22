@@ -157,6 +157,53 @@ void on_menu_about(GtkMenuItem *menuitem, gpointer user_data) {
                                 gtk_label_new("About"));
     }
     
+    // === KEYBOARD SHORTCUTS TAB ===
+    GtkWidget *shortcuts_scrolled = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(shortcuts_scrolled),
+                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+
+    GtkWidget *shortcuts_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, use_compact_dialog ? 12 : 15);
+    gtk_container_set_border_width(GTK_CONTAINER(shortcuts_vbox), use_compact_dialog ? 15 : 25);
+
+    GtkWidget *shortcuts_heading = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(shortcuts_heading),
+        "<span size='x-large' weight='bold'>Keyboard Shortcuts</span>");
+    gtk_label_set_justify(GTK_LABEL(shortcuts_heading), GTK_JUSTIFY_CENTER);
+    gtk_box_pack_start(GTK_BOX(shortcuts_vbox), shortcuts_heading, FALSE, FALSE, 0);
+
+    GtkWidget *shortcuts_general_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(shortcuts_general_label),
+        "<b>Visualization</b>\n"
+        "<tt>F9 or F</tt>   Toggle fullscreen visualization\n"
+        "<tt>Q</tt>         Next visualization type\n"
+        "<tt>A</tt>         Previous visualization type");
+    gtk_label_set_justify(GTK_LABEL(shortcuts_general_label), GTK_JUSTIFY_LEFT);
+    gtk_label_set_line_wrap(GTK_LABEL(shortcuts_general_label), TRUE);
+    gtk_widget_set_halign(shortcuts_general_label, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(shortcuts_vbox), shortcuts_general_label, FALSE, FALSE, 0);
+
+    GtkWidget *shortcuts_karafun_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(shortcuts_karafun_label),
+        "<b>Karaoke (Karafun .kfn files)</b>\n"
+        "<tt>V</tt>         Toggle vocal track on/off\n"
+        "<tt>B</tt>         Toggle backing track on/off\n\n"
+        "Muting vocals lets you sing along without the original vocalist; "
+        "muting the backing track isolates the vocals for practice. At least "
+        "one track always stays on — toggling one back in automatically "
+        "un-mutes the other if both would otherwise go silent. These only "
+        "do anything while a Karafun (.kfn) file is loaded.");
+    gtk_label_set_justify(GTK_LABEL(shortcuts_karafun_label), GTK_JUSTIFY_LEFT);
+    gtk_label_set_line_wrap(GTK_LABEL(shortcuts_karafun_label), TRUE);
+    gtk_widget_set_halign(shortcuts_karafun_label, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(shortcuts_vbox), shortcuts_karafun_label, FALSE, FALSE, 0);
+
+    GtkWidget *shortcuts_spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_pack_start(GTK_BOX(shortcuts_vbox), shortcuts_spacer, TRUE, TRUE, 0);
+
+    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(shortcuts_scrolled), shortcuts_vbox);
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), shortcuts_scrolled,
+                            gtk_label_new("Shortcuts"));
+
     // === LICENSE TAB ===
     GtkWidget *license_scrolled = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(license_scrolled),
