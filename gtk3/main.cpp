@@ -44,6 +44,7 @@ extern void processEvents(void);
 extern double playwait;
 extern void karafun_update(double playback_position_seconds);
 extern bool karafun_load(const char *kfn_path);
+extern void karafun_stop(void);
 extern const char* karafun_get_mixed_path(void);
 extern void* karafun_get_state(void);
 
@@ -696,7 +697,18 @@ bool load_file(AudioPlayer *player, const char *filename) {
         }
         return success;
     }
-    
+
+    // Any non-.kfn load means we're leaving karaoke-lyrics mode. Clear stale
+    // karafun state (words/sync/lines, active flag, temp files) so the lyric
+    // overlay stops rendering — but not when this call IS the recursive
+    // load of karafun's own mixed vocal+backing WAV right after karafun_load().
+    {
+        const char *karafun_mixed = karafun_get_mixed_path();
+        if (!(karafun_mixed && strcmp(filename, karafun_mixed) == 0)) {
+            karafun_stop();
+        }
+    }
+
     if (strcmp(ext_lower, ".wav") == 0) {
         printf("Loading WAV file: %s\n", filename);
         success = load_wav_file(player, filename);
