@@ -46,6 +46,30 @@ extern double playwait;
 
 AudioPlayer *player = NULL;
 
+// Remembers whatever visualization type was active before we auto-switched
+// into karaoke mode (for a .kfn, CDG zip, or LRC-generated karaoke load),
+// so a later non-karaoke file can restore it instead of getting stuck on
+// VIS_KARAOKE forever.
+static VisualizationType s_pre_karaoke_vis_type = VIS_WAVEFORM;
+static bool s_vis_in_karaoke_mode = false;
+
+static void enter_karaoke_visualization(AudioPlayer *p) {
+    if (!p || !p->visualizer) return;
+    if (!s_vis_in_karaoke_mode) {
+        s_pre_karaoke_vis_type = p->visualizer->type;
+    }
+    s_vis_in_karaoke_mode = true;
+    visualizer_set_type(p->visualizer, VIS_KARAOKE);
+}
+
+static void leave_karaoke_visualization(AudioPlayer *p) {
+    if (!p || !p->visualizer) return;
+    if (s_vis_in_karaoke_mode) {
+        visualizer_set_type(p->visualizer, s_pre_karaoke_vis_type);
+        s_vis_in_karaoke_mode = false;
+    }
+}
+
 // Signal handler for graceful shutdown
 static void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
@@ -687,7 +711,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
                 printf("Karafun loaded, playing mixed vocal+backing track\n");
                 success = load_file(player, mixed_path);
                 if (success && player->visualizer) {
-                    visualizer_set_type(player->visualizer, VIS_KARAOKE);
+                    enter_karaoke_visualization(player);
                 }
             }
         }
@@ -702,6 +726,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
         const char *karafun_mixed = karafun_get_mixed_path();
         if (!(karafun_mixed && strcmp(filename, karafun_mixed) == 0)) {
             karafun_stop();
+            leave_karaoke_visualization(player);
         }
     }
 
@@ -778,7 +803,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
   
                     if (player->visualizer) {
                         player->visualizer->cdg_display = player->cdg_display;
-                        visualizer_set_type(player->visualizer, VIS_KARAOKE);
+                        enter_karaoke_visualization(player);
                     }
 
                     success = load_file(player, zip_contents.audio_file);
@@ -824,7 +849,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
             
                 if (player->visualizer) {
                     player->visualizer->cdg_display = player->cdg_display;
-                    visualizer_set_type(player->visualizer, VIS_KARAOKE);
+                    enter_karaoke_visualization(player);
                 }
             
                 success = load_file(player, zip_contents.audio_file);
@@ -870,7 +895,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
         playTime = 0;
 
         if (player->has_cdg && player->visualizer) {
-            visualizer_set_type(player->visualizer, VIS_KARAOKE);
+            enter_karaoke_visualization(player);
         }
         
         // Extract and display metadata (for non-ZIP files)

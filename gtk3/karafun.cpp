@@ -228,6 +228,50 @@ static void parse_song_ini(const char *content, size_t content_len) {
     
     char title[512] = "Unknown Song";
     char artist[512] = "Unknown Artist";
+
+    // Title/artist live in [general], which comes BEFORE [eff6] in the file.
+    // The scan below intentionally starts at [eff6] (see comment there), so
+    // it never sees [general] — pull title/artist out separately first.
+    {
+        bool in_general = false;
+        char *scan = ini_copy;
+        char *scan_end = ini_copy + content_len;
+        while (scan && scan < scan_end) {
+            char *newline = strchr(scan, '\n');
+            if (!newline) newline = scan_end;
+
+            int line_len = newline - scan;
+            if (line_len > 2048) line_len = 2048;
+
+            char line[2048] = {0};
+            strncpy(line, scan, line_len);
+            trim_string(line, strlen(line));
+
+            if (line[0] == '[') {
+                in_general = (strcasecmp(line, "[general]") == 0);
+            } else if (in_general && line[0] && line[0] != ';' && line[0] != '#') {
+                char *eq = strchr(line, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char key[256] = {0};
+                    char val[512] = {0};
+                    strncpy(key, line, sizeof(key) - 1);
+                    strncpy(val, eq + 1, sizeof(val) - 1);
+                    trim_string(key, strlen(key));
+                    trim_string(val, strlen(val));
+                    to_lower_str(key);
+
+                    if (strcmp(key, "title") == 0 && val[0]) {
+                        strncpy(title, val, sizeof(title) - 1);
+                    } else if (strcmp(key, "artist") == 0 && val[0]) {
+                        strncpy(artist, val, sizeof(artist) - 1);
+                    }
+                }
+            }
+
+            scan = newline + 1;
+        }
+    }
     
     // Find [eff6] section which contains the lyrics
     char *eff6_start = strstr(ini_copy, "[eff6]");
@@ -264,11 +308,7 @@ static void parse_song_ini(const char *content, size_t content_len) {
                 trim_string(val, strlen(val));
                 to_lower_str(key);
                 
-                if (strcmp(key, "title") == 0) {
-                    strncpy(title, val, sizeof(title) - 1);
-                } else if (strcmp(key, "artist") == 0) {
-                    strncpy(artist, val, sizeof(artist) - 1);
-                } else if (strncmp(key, "text", 4) == 0 && all_digits(key, 4)) {
+                if (strncmp(key, "text", 4) == 0 && all_digits(key, 4)) {
                     // text0=Yan/kee Doo/dle went to town/_
                     // Split on "/" and spaces to get syllables
                     
