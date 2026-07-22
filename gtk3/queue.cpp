@@ -1,10 +1,132 @@
 #include "audio_player.h"
 #include "miniz.h"
+#include "kfn.h"
 #include <glib.h>
 #include <string.h>
 #include <filesystem>
    
 namespace fs = std::filesystem;
+
+// Karafun (.kfn) files aren't audio files, so extract_metadata()'s normal
+// tag-reading finds nothing for them. The real title/artist live in the
+// embedded Song.ini's [general] section, so pull them from there and format
+// them into the same "<b>Title:</b> ...\n<b>Artist:</b> ..." markup that
+// extract_metadata() produces, so parse_metadata() can pick them up as-is.
+static char *extract_kfn_metadata(const char *kfn_path) {
+    KFNArchive archive;
+    if (!archive.open(kfn_path)) {
+        return g_strdup("");
+    }
+
+    const KFNEntry *entry = archive.find("Song.ini");
+    if (!entry) {
+        return g_strdup("");
+    }
+
+    size_t size = 0;
+    unsigned char *raw = archive.extract(*entry, size);
+    if (!raw) {
+        return g_strdup("");
+    }
+
+    std::string ini((const char *)raw, size);
+    free(raw);
+
+    std::string title, artist;
+    bool in_general = false;
+    size_t pos = 0;
+    while (pos < ini.size()) {
+        size_t eol = ini.find('\n', pos);
+        size_t line_end = (eol == std::string::npos) ? ini.size() : eol;
+        std::string line = ini.substr(pos, line_end - pos);
+        pos = (eol == std::string::npos) ? ini.size() : eol + 1;
+
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+
+        if (line.front() == '[') {
+            in_general = (strcasecmp(line.c_str(), "[general]") == 0);
+            continue;
+        }
+
+        if (!in_general) continue;
+
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+
+        std::string key = line.substr(0, eq);
+        std::string value = line.substr(eq + 1);
+
+        if (strcasecmp(key.c_str(), "title") == 0) {
+            title = value;
+        } else if (strcasecmp(key.c_str(), "artist") == 0) {
+            artist = value;
+        }
+
+        if (!title.empty() && !artist.empty()) break;
+    }
+
+    if (title.empty() && artist.empty()) {
+        return g_strdup("");
+    }
+
+    std::string markup = "<b>Title:</b> " + (title.empty() ? "Unknown Title" : title) +
+                          "\n<b>Artist:</b> " + (artist.empty() ? "Unknown Artist" : artist) + "\n";
+
+    return g_strdup(markup.c_str());
+}
+
+// Measures the length of a .kfn karaoke file by pulling its backing track
+// (falling back to the vocal track if there's no separate backing track)
+// out to a temp file and running it through the normal duration reader —
+// Song.ini doesn't carry a duration field, so this is the only real way.
+static int get_kfn_duration(const char *kfn_path) {
+    KFNArchive archive;
+    if (!archive.open(kfn_path)) {
+        return 0;
+    }
+
+    const KFNEntry *backing_entry = nullptr;
+    const KFNEntry *vocal_entry = nullptr;
+
+    for (const auto &entry : archive.entries()) {
+        const char *dot = strrchr(entry.filename.c_str(), '.');
+        if (!dot) continue;
+        std::string ext = dot;
+        for (auto &c : ext) c = tolower((unsigned char)c);
+        bool is_audio = (ext == ".ogg" || ext == ".mp3" || ext == ".wav" ||
+                          ext == ".m4a" || ext == ".aac" || ext == ".flac");
+        if (!is_audio) continue;
+
+        std::string lower = entry.filename;
+        for (auto &c : lower) c = tolower((unsigned char)c);
+        bool is_backing = lower.find("instru") != std::string::npos ||
+                           lower.find("beat") != std::string::npos;
+
+        if (is_backing && !backing_entry) {
+            backing_entry = &entry;
+        } else if (!is_backing && !vocal_entry) {
+            vocal_entry = &entry;
+        }
+    }
+
+    const KFNEntry *chosen = backing_entry ? backing_entry : vocal_entry;
+    if (!chosen) {
+        return 0;
+    }
+
+    const char *dot = strrchr(chosen->filename.c_str(), '.');
+    std::string ext = dot ? dot : ".ogg";
+
+    std::string tmp_path = archive.extractToTemp(*chosen, ext.c_str());
+    if (tmp_path.empty()) {
+        return 0;
+    }
+
+    int duration = get_file_duration(tmp_path.c_str());
+    unlink(tmp_path.c_str());
+    return duration;
+}
 
 #ifdef _WIN32
 #include <windows.h>
@@ -495,6 +617,7 @@ void update_queue_display(AudioPlayer *player) {
         gtk_list_store_append(player->queue_store, &iter);
         
         char *metadata = NULL;
+        int kfn_duration_seconds = -1;  // -1 = not a .kfn file
 
         const char *ext = strrchr(player->queue.files[i], '.');
         if (ext && strcasecmp(ext, ".zip") == 0) {
@@ -505,6 +628,13 @@ void update_queue_display(AudioPlayer *player) {
             } else {
                 metadata = g_strdup("No metadata available");
             }
+        } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+            metadata = extract_kfn_metadata(player->queue.files[i]);
+            if (!metadata || metadata[0] == '\0') {
+                g_free(metadata);
+                metadata = g_strdup("No metadata available");
+            }
+            kfn_duration_seconds = get_kfn_duration(player->queue.files[i]);
         } else {
             metadata = extract_metadata(player->queue.files[i]);
         }
@@ -545,6 +675,10 @@ void update_queue_display(AudioPlayer *player) {
             }
         }
         
+        if (kfn_duration_seconds >= 0) {
+            duration_seconds = kfn_duration_seconds;
+        }
+
         g_free(metadata);
         
         char *basename = g_path_get_basename(player->queue.files[i]);
@@ -1077,6 +1211,18 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
                 duration_seconds = 0;
                 file_accessible = false;
                 printf("Warning: ZIP file not accessible: %s\n", filepath);
+            }
+        } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+            metadata = extract_kfn_metadata(filepath);
+
+            if (!metadata || strlen(metadata) == 0) {
+                g_free(metadata);
+                metadata = g_strdup("(File not accessible)");
+                duration_seconds = 0;
+                file_accessible = false;
+                printf("Warning: KFN file not accessible: %s\n", filepath);
+            } else {
+                duration_seconds = get_kfn_duration(filepath);
             }
         } else {
             // NEW: Explicit handling for inaccessible regular files

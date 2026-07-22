@@ -35,6 +35,7 @@
 #include "aiff.h"
 #include "equalizer.h"
 #include "zip_support.h"
+#include "karafun.h"
 
 extern double playTime;
 extern bool isPlaying;
@@ -42,11 +43,6 @@ extern bool paused;
 extern int globalVolume;
 extern void processEvents(void);
 extern double playwait;
-extern void karafun_update(double playback_position_seconds);
-extern bool karafun_load(const char *kfn_path);
-extern void karafun_stop(void);
-extern const char* karafun_get_mixed_path(void);
-extern void* karafun_get_state(void);
 
 AudioPlayer *player = NULL;
 
