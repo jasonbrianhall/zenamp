@@ -193,6 +193,44 @@ static GtkWidget *original_vis_parent = NULL;
 static int original_vis_width = 0;
 static int original_vis_height = 0;
 
+// Auto-hide the mouse cursor in fullscreen visualization after a period of inactivity
+static guint vis_cursor_hide_timeout_id = 0;
+static GdkCursor *vis_blank_cursor = NULL;
+#define VIS_CURSOR_HIDE_DELAY_MS 3000
+
+static gboolean hide_vis_cursor(gpointer user_data) {
+    if (vis_fullscreen_window) {
+        GdkWindow *gdk_win = gtk_widget_get_window(vis_fullscreen_window);
+        if (gdk_win) {
+            if (!vis_blank_cursor) {
+                vis_blank_cursor = gdk_cursor_new_for_display(gdk_window_get_display(gdk_win), GDK_BLANK_CURSOR);
+            }
+            gdk_window_set_cursor(gdk_win, vis_blank_cursor);
+        }
+    }
+    vis_cursor_hide_timeout_id = 0;
+    return FALSE; // one-shot
+}
+
+static void reset_vis_cursor_timer() {
+    if (vis_cursor_hide_timeout_id) {
+        g_source_remove(vis_cursor_hide_timeout_id);
+        vis_cursor_hide_timeout_id = 0;
+    }
+    if (vis_fullscreen_window) {
+        GdkWindow *gdk_win = gtk_widget_get_window(vis_fullscreen_window);
+        if (gdk_win) {
+            gdk_window_set_cursor(gdk_win, NULL); // restore default visible cursor
+        }
+    }
+    vis_cursor_hide_timeout_id = g_timeout_add(VIS_CURSOR_HIDE_DELAY_MS, hide_vis_cursor, NULL);
+}
+
+static gboolean on_vis_fullscreen_motion(GtkWidget *widget, GdkEventMotion *event, gpointer user_data) {
+    reset_vis_cursor_timer();
+    return FALSE;
+}
+
 #ifdef _WIN32
 #include <windows.h>
 #include <commdlg.h>
@@ -1316,16 +1354,30 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
         g_signal_connect(vis_fullscreen_window, "delete-event", 
                         G_CALLBACK(on_vis_fullscreen_delete_event), player);
         
+        // Auto-hide the mouse cursor after a few seconds of inactivity
+        gtk_widget_add_events(vis_fullscreen_window, GDK_POINTER_MOTION_MASK);
+        g_signal_connect(vis_fullscreen_window, "motion-notify-event",
+                        G_CALLBACK(on_vis_fullscreen_motion), player);
+        
         // Show fullscreen window
         gtk_widget_show_all(vis_fullscreen_window);
         gtk_window_present(GTK_WINDOW(vis_fullscreen_window));
         
         is_vis_fullscreen = true;
+        reset_vis_cursor_timer();
+        gtk_widget_set_tooltip_text(player->visualizer->drawing_area, NULL);
+        gtk_widget_set_has_tooltip(player->visualizer->drawing_area, FALSE);
         printf("Visualization fullscreen activated (F9 or Escape to exit)\n");
         
     } else {
         // Exit visualization fullscreen mode
         printf("Exiting visualization fullscreen mode\n");
+        
+        // Stop the cursor auto-hide timer before the window goes away
+        if (vis_cursor_hide_timeout_id) {
+            g_source_remove(vis_cursor_hide_timeout_id);
+            vis_cursor_hide_timeout_id = 0;
+        }
         
         if (vis_fullscreen_window && player->visualizer && player->visualizer->drawing_area) {
             // Reparent visualization back to original location
@@ -1352,6 +1404,9 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
         original_vis_parent = NULL;
         original_vis_width = 0;
         original_vis_height = 0;
+        if (player->visualizer && player->visualizer->drawing_area) {
+            gtk_widget_set_has_tooltip(player->visualizer->drawing_area, TRUE);
+        }
         
         printf("Visualization returned to normal view\n");
     }
