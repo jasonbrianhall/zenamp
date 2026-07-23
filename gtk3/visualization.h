@@ -21,6 +21,7 @@
 #include "cdg.h"
 #include "zip_support.h"
 #include "parrot.h"
+#include "monkey.h"
 #include "sauron.h"
 #include "hanoi.h"
 #include "beatchess.h"
@@ -65,6 +66,7 @@ typedef enum {
     VIS_MANDELBROT,
     VIS_MATRIX,
     VIS_MINESWEEPER,
+    VIS_MONKEY_DRUMMER,
     VIS_OSCILLOSCOPE,
     VIS_PONG,
     VIS_RADIAL_BARS,
@@ -346,6 +348,9 @@ typedef struct {
     // Parrot
     ParrotState parrot_state;
 
+    // Monkey Drummer
+    MonkeyState monkey_state;
+
     // EOS
     EyeOfSauronState eye_of_sauron;
 
@@ -582,6 +587,13 @@ void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
 void draw_audio_bars_around_parrot(Visualizer *vis, cairo_t *cr, double cx, double cy, double scale);
 void draw_parrot(Visualizer *vis, cairo_t *cr);
 void update_parrot(Visualizer *vis, double dt);
+
+// Monkey Drummer
+void init_monkey_system(Visualizer *vis);
+void update_monkey(Visualizer *vis, double dt);
+void draw_monkey(Visualizer *vis, cairo_t *cr);
+void draw_music_notes_monkey(Visualizer *vis, cairo_t *cr, double drum_x, double drum_y, double scale, double time_since_hit);
+void draw_drum_hit_particles(Visualizer *vis, cairo_t *cr, double drum_x, double drum_y, double scale, double time_since_hit);
 
 // EOS
 void update_eye_of_sauron(Visualizer *vis, double dt);

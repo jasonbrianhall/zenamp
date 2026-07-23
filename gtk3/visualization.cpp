@@ -106,6 +106,7 @@ Visualizer* visualizer_new(void) {
     init_minesweeper(vis);
     pong_init(vis);
     init_comet_buster_system(vis);
+    init_monkey_system(vis);
 
     init_rainbow_system(vis);
     vis->rainbow_system.vortex.base_x = 400 / 2.0;
@@ -481,6 +482,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_PARROT:
           draw_parrot(vis, cr);
           break;
+       case VIS_MONKEY_DRUMMER:
+          draw_monkey(vis, cr);
+          break;
        case VIS_COMET_BUSTER:
           draw_comet_buster(vis, cr);
           break;          
@@ -694,6 +698,9 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_PARROT:
                 update_parrot(vis, dt);
                 break;
+            case VIS_MONKEY_DRUMMER:
+                update_monkey(vis, dt);
+                break;
             case VIS_COMET_BUSTER:
                 update_comet_buster(vis, dt);
                 break;
@@ -839,6 +846,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Mandelbrot Fractal");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Matrix Rain (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Minesweeper (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Monkey Drummer");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
