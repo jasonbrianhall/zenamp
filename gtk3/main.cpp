@@ -14,8 +14,9 @@
 #include <SDL2/SDL_mixer.h>
 #include <signal.h>
 
-#ifndef _WIN32
 #include <sys/stat.h>
+
+#ifndef _WIN32
 #include <sys/types.h>
 #else
 #include <shlobj.h>
@@ -45,6 +46,82 @@ extern void processEvents(void);
 extern double playwait;
 
 AudioPlayer *player = NULL;
+
+// ============================================================================
+// Helper functions for standalone CDG file loading
+// ============================================================================
+
+// Get filename without extension
+static void get_filename_without_ext(const char *filepath, char *out, size_t out_size) {
+    const char *filename = strrchr(filepath, '/');
+    if (!filename) filename = strrchr(filepath, '\\');
+    if (!filename) filename = filepath;
+    else filename++;  // Skip the separator
+    
+    strncpy(out, filename, out_size - 1);
+    out[out_size - 1] = '\0';
+    
+    // Remove extension
+    char *dot = strrchr(out, '.');
+    if (dot) *dot = '\0';
+}
+
+// Check if file exists
+static bool file_exists(const char *filepath) {
+    struct stat buffer;
+    return (stat(filepath, &buffer) == 0);
+}
+
+// Try to load CDG file with same name as audio file
+// Returns true if CDG was found and loaded, false otherwise
+static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filepath) {
+    if (!player || !player->cdg_display || !audio_filepath) {
+        return false;
+    }
+    
+    // Get directory of audio file
+    char dir_path[4096];
+    strncpy(dir_path, audio_filepath, sizeof(dir_path) - 1);
+    dir_path[sizeof(dir_path) - 1] = '\0';
+    
+    // Find last separator and truncate there
+    char *last_sep = strrchr(dir_path, '/');
+#ifdef _WIN32
+    char *last_sep_win = strrchr(dir_path, '\\');
+    if (!last_sep || (last_sep_win && last_sep_win > last_sep)) {
+        last_sep = last_sep_win;
+    }
+#endif
+    
+    if (!last_sep) {
+        // No directory separator, file is in current directory
+        strcpy(dir_path, ".");
+    } else {
+        *last_sep = '\0';
+    }
+    
+    // Get filename without extension
+    char base_filename[256];
+    get_filename_without_ext(audio_filepath, base_filename, sizeof(base_filename));
+    
+    // Construct CDG filepath
+    char cdg_filepath[4096];
+    snprintf(cdg_filepath, sizeof(cdg_filepath), "%s/%s.cdg", dir_path, base_filename);
+    
+    // Try to load it
+    if (file_exists(cdg_filepath)) {
+        printf("Found standalone CDG file: %s\n", cdg_filepath);
+        if (cdg_load_file(player->cdg_display, cdg_filepath)) {
+            printf("Successfully loaded CDG from: %s\n", cdg_filepath);
+            return true;
+        } else {
+            printf("Failed to load CDG file: %s\n", cdg_filepath);
+            return false;
+        }
+    }
+    
+    return false;
+}
 
 // Remembers whatever visualization type was active before we auto-switched
 // into karaoke mode (for a .kfn, CDG zip, or LRC-generated karaoke load),
@@ -932,7 +1009,18 @@ bool load_file(AudioPlayer *player, const char *filename) {
         player->is_paused = false;
         playTime = 0;
 
-        if (player->has_cdg && player->visualizer) {
+        // Try to load standalone CDG file with same name
+        if (!player->cdg_display) {
+            player->cdg_display = cdg_display_new();
+        }
+        
+        if (player->cdg_display && try_load_standalone_cdg(player, filename)) {
+            player->has_cdg = true;
+            if (player->visualizer) {
+                player->visualizer->cdg_display = player->cdg_display;
+                enter_karaoke_visualization(player);
+            }
+        } else if (player->has_cdg && player->visualizer) {
             enter_karaoke_visualization(player);
         }
         
