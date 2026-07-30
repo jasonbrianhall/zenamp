@@ -194,7 +194,7 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
         vis->cdg_last_packet = -1;
     }
     
-    // Always update surface when packets have changed
+    // Update surface only when packets have changed
     if (vis->cdg_last_packet != cdg->current_packet) {
         unsigned char *data = cairo_image_surface_get_data(vis->cdg_surface);
         int stride = cairo_image_surface_get_stride(vis->cdg_surface);
@@ -252,7 +252,7 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
     cairo_translate(cr, offset_x, offset_y);
     cairo_scale(cr, scale, scale);
     cairo_set_source_surface(cr, vis->cdg_surface, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);  // Changed from CAIRO_FILTER_BEST for speed
     cairo_paint(cr);
     cairo_restore(cr);
 }
@@ -332,7 +332,7 @@ void draw_cdg_overlay(Visualizer *vis, cairo_t *cr) {
     cairo_translate(cr, offset_x, offset_y);
     cairo_scale(cr, scale, scale);
     cairo_set_source_surface(cr, vis->cdg_surface, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);  // Changed from CAIRO_FILTER_BEST for speed
     cairo_paint(cr);
     cairo_restore(cr);
 }
@@ -452,7 +452,7 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
     cairo_translate(cr, offset_x, offset_y);
     cairo_scale(cr, scale, scale);
     cairo_set_source_surface(cr, vis->cdg_surface, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);  // Changed from CAIRO_FILTER_BEST for speed
     cairo_paint(cr);
     cairo_restore(cr);
 }

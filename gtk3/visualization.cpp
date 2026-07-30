@@ -757,6 +757,12 @@ gboolean visualizer_timer_callback(gpointer user_data) {
         // on when you switched.
         if (vis->cdg_display) {
             cdg_update(vis->cdg_display, playTime);
+            // In karaoke mode, we need to redraw frequently to show smooth CDG animations
+            // even if the current packet hasn't changed. CDG runs at 75 packets/sec
+            // but we want to render at display refresh rate (usually 60Hz) for smooth motion.
+            if (vis->type == VIS_KARAOKE || vis->type == VIS_KARAOKE_EXCITING) {
+                gtk_widget_queue_draw(vis->drawing_area);
+            }
         }
         
         update_track_info_overlay(vis, dt);
