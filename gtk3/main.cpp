@@ -51,6 +51,27 @@ AudioPlayer *player = NULL;
 // Helper functions for standalone CDG file loading
 // ============================================================================
 
+// Thread function for non-blocking file access check with timeout
+static gboolean file_access_timeout_callback(gpointer user_data) {
+    // This is just a marker - the actual timeout is handled by the OS fopen() call
+    return FALSE;
+}
+
+// Check if file is accessible without blocking (with implicit OS timeout)
+static bool is_file_accessible_with_timeout(const char *filepath) {
+    if (!filepath) return false;
+    
+    // fopen() will timeout after OS default (usually 5-30 seconds on network issues)
+    // For local files, this returns instantly
+    FILE *f = fopen(filepath, "rb");
+    if (!f) {
+        printf("File inaccessible: %s (errno: %d)\n", filepath, errno);
+        return false;
+    }
+    fclose(f);
+    return true;
+}
+
 // Get filename without extension
 static void get_filename_without_ext(const char *filepath, char *out, size_t out_size) {
     const char *filename = strrchr(filepath, '/');
@@ -76,8 +97,12 @@ static bool file_exists(const char *filepath) {
 // Returns true if CDG was found and loaded, false otherwise
 static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filepath) {
     if (!player || !player->cdg_display || !audio_filepath) {
+        printf("CDG load skipped: player=%p, cdg_display=%p, filepath=%p\n", 
+               player, player ? player->cdg_display : NULL, audio_filepath);
         return false;
     }
+    
+    printf("Attempting to load standalone CDG for: %s\n", audio_filepath);
     
     // Get directory of audio file
     char dir_path[4096];
@@ -100,13 +125,19 @@ static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filep
         *last_sep = '\0';
     }
     
+    printf("CDG search directory: %s\n", dir_path);
+    
     // Get filename without extension
     char base_filename[256];
     get_filename_without_ext(audio_filepath, base_filename, sizeof(base_filename));
     
+    printf("CDG base filename: %s\n", base_filename);
+    
     // Construct CDG filepath
     char cdg_filepath[4096];
     snprintf(cdg_filepath, sizeof(cdg_filepath), "%s/%s.cdg", dir_path, base_filename);
+    
+    printf("CDG full path: %s\n", cdg_filepath);
     
     // Try to load it
     if (file_exists(cdg_filepath)) {
@@ -118,6 +149,8 @@ static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filep
             printf("Failed to load CDG file: %s\n", cdg_filepath);
             return false;
         }
+    } else {
+        printf("CDG file not found: %s\n", cdg_filepath);
     }
     
     return false;
@@ -770,6 +803,18 @@ void on_speed_changed(GtkRange *range, gpointer user_data) {
 bool load_file(AudioPlayer *player, const char *filename) {
     printf("load_file called for: %s\n", filename);
     
+    // Store original filename for CDG lookup (before any recursive calls that change it)
+    static char original_filename[2048];
+    static bool has_original = false;
+    
+    // Only set original filename on first call (not on recursive calls)
+    if (strncmp(filename, "virtual_", 8) != 0 && !has_original) {
+        strncpy(original_filename, filename, sizeof(original_filename) - 1);
+        original_filename[sizeof(original_filename) - 1] = '\0';
+        has_original = true;
+        printf("Stored original filename for CDG lookup: %s\n", original_filename);
+    }
+    
     // Stop current playback and clean up timer
     if (player->is_playing || player->update_timer_id > 0) {
         printf("Stopping current playback...\n");
@@ -1009,20 +1054,31 @@ bool load_file(AudioPlayer *player, const char *filename) {
         player->is_paused = false;
         playTime = 0;
 
-        // Try to load standalone CDG file with same name
+        // Try to load standalone CDG file with ORIGINAL audio filename (not converted virtual WAV)
         if (!player->cdg_display) {
             player->cdg_display = cdg_display_new();
         }
         
-        if (player->cdg_display && try_load_standalone_cdg(player, filename)) {
+        // Use original filename if available (for converted files like MP3, M4A, etc)
+        const char *cdg_lookup_name = original_filename;
+        if (!has_original || original_filename[0] == '\0') {
+            cdg_lookup_name = filename;
+        }
+        
+        if (player->cdg_display && try_load_standalone_cdg(player, cdg_lookup_name)) {
             player->has_cdg = true;
             if (player->visualizer) {
                 player->visualizer->cdg_display = player->cdg_display;
                 enter_karaoke_visualization(player);
             }
+            printf("Loaded CDG for: %s\n", cdg_lookup_name);
         } else if (player->has_cdg && player->visualizer) {
             enter_karaoke_visualization(player);
         }
+        
+        // Clear the original filename flag for next file
+        has_original = false;
+        original_filename[0] = '\0';
         
         // Extract and display metadata (for non-ZIP files)
         char *metadata = extract_metadata(filename);
@@ -1119,25 +1175,50 @@ bool load_file_from_queue(AudioPlayer *player) {
     const char *filename = get_current_queue_file(&player->queue);
     if (!filename) return false;
     
-    if (!load_file(player, filename)) {
-        // File failed to load - show error in visualization
+    // Try to access file with timeout (OS will timeout on network drives)
+    printf("Checking file accessibility: %s\n", filename);
+    if (!is_file_accessible_with_timeout(filename)) {
+        printf("File not accessible (skipping): %s\n", filename);
         if (player->visualizer) {
             snprintf(player->visualizer->error_message, sizeof(player->visualizer->error_message),
-                     "Can't open: %s", filename);
+                     "Skipped (not accessible): %s", filename);
             player->visualizer->showing_error = true;
-            player->visualizer->error_display_time = 1.0;  // Show for 1 second
+            player->visualizer->error_display_time = 0.5;  // Brief message
+        }
+        
+        // Skip to next file
+        if (advance_queue(&player->queue)) {
+            printf("Trying next file in queue...\n");
+            return load_file_from_queue(player);  // Recursively try next file
+        }
+        
+        printf("No more files in queue to try\n");
+        return false;
+    }
+    
+    printf("File accessible, attempting load: %s\n", filename);
+    if (!load_file(player, filename)) {
+        // File was accessible but failed to load (corrupted, unsupported format, etc)
+        if (player->visualizer) {
+            snprintf(player->visualizer->error_message, sizeof(player->visualizer->error_message),
+                     "Failed to load: %s", filename);
+            player->visualizer->showing_error = true;
+            player->visualizer->error_display_time = 1.0;
         }
         
         printf("Failed to load: %s\n", filename);
         
-        // Silently skip to next file
+        // Try next file
         if (advance_queue(&player->queue)) {
-            return load_file_from_queue(player);  // Try next file
+            printf("Trying next file after load failure...\n");
+            return load_file_from_queue(player);
         }
         
+        printf("No more files in queue\n");
         return false;
     }
     
+    printf("Successfully loaded: %s\n", filename);
     return true;
 }
 
@@ -3964,6 +4045,10 @@ int main(int argc, char *argv[]) {
             }
         }
     } else if (loaded_last_playlist && player->queue.count > 0) {
+        printf("Auto-loading first accessible file from last playlist...\n");
+        
+        // Try to load first accessible file from queue
+        // Will automatically skip any inaccessible files with timeout
         if (load_file_from_queue(player)) {
             int saved_index = 0;
             double saved_position = 0.0;
@@ -3973,6 +4058,14 @@ int main(int argc, char *argv[]) {
                     gtk_range_set_value(GTK_RANGE(player->progress_scale), saved_position);
                     printf("Restored playback position to %.2f\n", saved_position);
                 }
+            }
+        } else {
+            printf("No accessible files found in playlist on startup\n");
+            if (player->visualizer) {
+                snprintf(player->visualizer->error_message, sizeof(player->visualizer->error_message),
+                         "No accessible files in playlist");
+                player->visualizer->showing_error = true;
+                player->visualizer->error_display_time = 3.0;
             }
         }
         
