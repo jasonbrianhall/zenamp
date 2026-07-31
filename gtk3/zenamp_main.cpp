@@ -38,6 +38,54 @@
 #include "zip_support.h"
 #include "karafun.h"
 
+// ============================================================================
+// Directory Scanner - Integrated Music Import
+// ============================================================================
+
+#include <vector>
+#include <string>
+#include <functional>
+#include <algorithm>
+#include <thread>
+#include <atomic>
+#include <dirent.h>
+
+// Supported music file extensions
+static const std::vector<std::string> SUPPORTED_FORMATS = {
+    ".flac", ".alac", ".ape", ".wv", ".tta",
+    ".mp3", ".aac", ".ogg", ".opus", ".m4a", ".wma",
+    ".wav", ".aiff", ".aif",
+    ".mid", ".midi", ".xm", ".mod", ".s3m", ".it",
+    ".mp4", ".mkv", ".webm",
+    ".cdg", ".kfn", ".kar", ".kok",
+    ".m3u", ".m3u8", ".pls", ".cue"
+};
+
+struct ScanProgressState {
+    GtkWidget *dialog;
+    GtkWidget *label;
+    GtkWidget *counter_label;
+    GtkWidget *file_tree;
+    GtkListStore *file_store;
+    std::atomic<bool> cancel_requested{false};
+    std::atomic<int> total_files{0};
+};
+
+static ScanProgressState *g_scan_state = nullptr;
+static std::string g_to_lower(const std::string& str);
+static std::string g_get_file_extension(const std::string& filepath);
+static bool g_is_supported_music_file(const std::string& filepath);
+static std::vector<std::string> g_scan_directory_recursive(const std::string& path);
+static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results);
+static gboolean g_on_scan_progress_update(gpointer user_data);
+static void g_scan_progress_callback(const std::string& current_file, int total_scanned);
+static gint g_on_scan_progress_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data);
+static void g_on_scan_cancel_clicked(GtkButton *button, gpointer user_data);
+static void g_create_and_show_scan_dialog(const std::string& directory, bool recursive);
+static gpointer g_scan_thread_func(gpointer user_data);
+static void g_on_import_directory_response(GtkDialog *dialog, gint response_id, gpointer user_data);
+static void g_on_import_directory_clicked(GtkWidget *widget, gpointer user_data);
+
 extern double playTime;
 extern bool isPlaying;
 extern bool paused;
@@ -155,6 +203,312 @@ static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filep
     
     return false;
 }
+
+// ============================================================================
+// Directory Scanner Implementation
+// ============================================================================
+
+static std::string g_to_lower(const std::string& str) {
+    std::string lower = str;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return lower;
+}
+
+static std::string g_get_file_extension(const std::string& filepath) {
+    size_t dot_pos = filepath.find_last_of('.');
+    if (dot_pos == std::string::npos) {
+        return "";
+    }
+    return g_to_lower(filepath.substr(dot_pos));
+}
+
+static bool g_is_supported_music_file(const std::string& filepath) {
+    std::string ext = g_get_file_extension(filepath);
+    if (ext.empty()) return false;
+    return std::find(SUPPORTED_FORMATS.begin(), SUPPORTED_FORMATS.end(), ext) != SUPPORTED_FORMATS.end();
+}
+
+static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results) {
+    DIR* dir = opendir(directory_path.c_str());
+    if (!dir) {
+        fprintf(stderr, "Failed to open directory: %s\n", directory_path.c_str());
+        return;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        std::string full_path = directory_path + "/" + entry->d_name;
+        struct stat st;
+
+        if (stat(full_path.c_str(), &st) == -1) {
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            if (recursive) {
+                g_scan_directory_impl(full_path, recursive, results);
+            }
+        } else if (S_ISREG(st.st_mode)) {
+            if (g_is_supported_music_file(full_path)) {
+                results.push_back(full_path);
+                g_scan_progress_callback(full_path, results.size());
+            }
+        }
+    }
+
+    closedir(dir);
+}
+
+struct UpdateUIData {
+    std::string current_file;
+    int total_scanned;
+};
+
+static gboolean g_on_scan_progress_update(gpointer user_data) {
+    UpdateUIData *data = static_cast<UpdateUIData *>(user_data);
+    
+    if (!g_scan_state || !g_scan_state->dialog) {
+        delete data;
+        return FALSE;
+    }
+
+    size_t last_slash = data->current_file.find_last_of("/\\");
+    std::string filename = (last_slash != std::string::npos)
+        ? data->current_file.substr(last_slash + 1)
+        : data->current_file;
+
+    gtk_label_set_text(GTK_LABEL(g_scan_state->label), filename.c_str());
+
+    char counter_text[64];
+    snprintf(counter_text, sizeof(counter_text), "Found: %d files", data->total_scanned);
+    gtk_label_set_text(GTK_LABEL(g_scan_state->counter_label), counter_text);
+
+    GtkTreeIter iter;
+    gtk_list_store_append(g_scan_state->file_store, &iter);
+    gtk_list_store_set(g_scan_state->file_store, &iter, 0, filename.c_str(), -1);
+
+    g_scan_state->total_files = data->total_scanned;
+
+    delete data;
+    return FALSE;
+}
+
+static void g_scan_progress_callback(const std::string& current_file, int total_scanned) {
+    if (!g_scan_state) return;
+
+    if (g_scan_state->cancel_requested) {
+        return;
+    }
+
+    UpdateUIData *data = new UpdateUIData{current_file, total_scanned};
+    g_idle_add(g_on_scan_progress_update, data);
+    g_usleep(1000);
+}
+
+struct ScanThreadData {
+    std::string directory;
+    bool recursive;
+    std::vector<std::string> results;
+};
+
+static gpointer g_scan_thread_func(gpointer user_data) {
+    ScanThreadData *data = static_cast<ScanThreadData *>(user_data);
+
+    printf("Scan thread started for: %s\n", data->directory.c_str());
+
+    g_scan_directory_impl(data->directory, data->recursive, data->results);
+
+    printf("Scan thread complete: found %zu files\n", data->results.size());
+
+    g_idle_add([](gpointer ud) -> gboolean {
+        ScanThreadData *scan_data = static_cast<ScanThreadData *>(ud);
+
+        if (g_scan_state && g_scan_state->dialog) {
+            gtk_widget_destroy(g_scan_state->dialog);
+            g_scan_state->dialog = nullptr;
+        }
+
+        if (scan_data->results.size() > 0) {
+            int added_count = 0;
+            for (const auto& file : scan_data->results) {
+                add_to_queue(&player->queue, file.c_str());
+                added_count++;
+            }
+
+            printf("Added %d files to queue\n", added_count);
+
+            update_queue_display_with_filter(player);
+            update_gui_state(player);
+
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Successfully imported %zu music files", scan_data->results.size());
+            GtkWidget *completion_dialog = gtk_message_dialog_new(
+                GTK_WINDOW(player->window),
+                GTK_DIALOG_MODAL,
+                GTK_MESSAGE_INFO,
+                GTK_BUTTONS_OK,
+                msg
+            );
+            gtk_dialog_run(GTK_DIALOG(completion_dialog));
+            gtk_widget_destroy(completion_dialog);
+        } else {
+            GtkWidget *msg_dialog = gtk_message_dialog_new(
+                GTK_WINDOW(player->window),
+                GTK_DIALOG_MODAL,
+                GTK_MESSAGE_INFO,
+                GTK_BUTTONS_OK,
+                "No music files found in directory"
+            );
+            gtk_dialog_run(GTK_DIALOG(msg_dialog));
+            gtk_widget_destroy(msg_dialog);
+        }
+
+        delete scan_data;
+        if (g_scan_state) {
+            delete g_scan_state;
+            g_scan_state = nullptr;
+        }
+
+        return FALSE;
+    }, data);
+
+    return nullptr;
+}
+
+static gint g_on_scan_progress_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
+    if (g_scan_state) {
+        g_scan_state->cancel_requested = true;
+    }
+    return TRUE;
+}
+
+static void g_on_scan_cancel_clicked(GtkButton *button, gpointer user_data) {
+    if (g_scan_state) {
+        g_scan_state->cancel_requested = true;
+    }
+}
+
+static void g_create_and_show_scan_dialog(const std::string& directory, bool recursive) {
+    g_scan_state = new ScanProgressState();
+
+    g_scan_state->dialog = gtk_dialog_new_with_buttons(
+        "Scanning Directory...",
+        GTK_WINDOW(player->window),
+        GTK_DIALOG_MODAL,
+        "_Cancel",
+        GTK_RESPONSE_CANCEL,
+        nullptr
+    );
+
+    gtk_window_set_default_size(GTK_WINDOW(g_scan_state->dialog), 500, 400);
+
+    GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(g_scan_state->dialog));
+    gtk_box_set_spacing(GTK_BOX(content), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(content), 15);
+
+    g_scan_state->label = gtk_label_new("Initializing scan...");
+    PangoAttrList *attrs = pango_attr_list_new();
+    pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    gtk_label_set_attributes(GTK_LABEL(g_scan_state->label), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_box_pack_start(GTK_BOX(content), g_scan_state->label, FALSE, FALSE, 0);
+
+    g_scan_state->counter_label = gtk_label_new("Found: 0 files");
+    gtk_box_pack_start(GTK_BOX(content), g_scan_state->counter_label, FALSE, FALSE, 0);
+
+    GtkWidget *progress = gtk_progress_bar_new();
+    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(progress));
+    gtk_box_pack_start(GTK_BOX(content), progress, FALSE, FALSE, 0);
+
+    GtkWidget *scrolled = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+
+    g_scan_state->file_store = gtk_list_store_new(1, G_TYPE_STRING);
+    g_scan_state->file_tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(g_scan_state->file_store));
+
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    GtkTreeViewColumn *column = gtk_tree_view_column_new_with_attributes(
+        "Files Found",
+        renderer,
+        "text", 0,
+        nullptr
+    );
+    gtk_tree_view_append_column(GTK_TREE_VIEW(g_scan_state->file_tree), column);
+
+    gtk_container_add(GTK_CONTAINER(scrolled), g_scan_state->file_tree);
+    gtk_box_pack_start(GTK_BOX(content), scrolled, TRUE, TRUE, 0);
+
+    gtk_widget_show_all(content);
+
+    g_signal_connect(g_scan_state->dialog, "delete-event",
+                     G_CALLBACK(g_on_scan_progress_delete), nullptr);
+    g_signal_connect(g_scan_state->dialog, "response",
+                     G_CALLBACK(g_on_scan_cancel_clicked), nullptr);
+
+    gtk_widget_show(g_scan_state->dialog);
+
+    ScanThreadData *scan_data = new ScanThreadData{directory, recursive, {}};
+    std::thread scan_thread(g_scan_thread_func, scan_data);
+    scan_thread.detach();
+
+    g_timeout_add(100, [](gpointer data) -> gboolean {
+        if (g_scan_state && g_scan_state->dialog && GTK_IS_WIDGET(g_scan_state->dialog)) {
+            GList *children = gtk_container_get_children(GTK_CONTAINER(
+                gtk_dialog_get_content_area(GTK_DIALOG(g_scan_state->dialog))
+            ));
+
+            for (GList *l = children; l; l = l->next) {
+                if (GTK_IS_PROGRESS_BAR(l->data)) {
+                    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(l->data));
+                    break;
+                }
+            }
+            g_list_free(children);
+            return TRUE;
+        }
+        return FALSE;
+    }, nullptr);
+}
+
+static void g_on_import_directory_response(GtkDialog *dialog, gint response_id, gpointer user_data) {
+    if (response_id == GTK_RESPONSE_ACCEPT) {
+        gchar *folder_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+
+        if (folder_path) {
+            printf("Starting import from: %s\n", folder_path);
+            g_create_and_show_scan_dialog(folder_path, true);
+            g_free(folder_path);
+        }
+    }
+
+    gtk_widget_destroy(GTK_WIDGET(dialog));
+}
+
+static void g_on_import_directory_clicked(GtkWidget *widget, gpointer user_data) {
+    GtkWidget *dialog = gtk_file_chooser_dialog_new(
+        "Import Music Directory",
+        GTK_WINDOW(player->window),
+        GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Import", GTK_RESPONSE_ACCEPT,
+        nullptr
+    );
+
+    gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), g_get_home_dir());
+
+    g_signal_connect(dialog, "response", G_CALLBACK(g_on_import_directory_response), nullptr);
+    gtk_widget_show_all(dialog);
+}
+
+// ============================================================================
+// End Directory Scanner
+// ============================================================================
 
 // Remembers whatever visualization type was active before we auto-switched
 // into karaoke mode (for a .kfn, CDG zip, or LRC-generated karaoke load),
@@ -1175,6 +1529,16 @@ bool load_file_from_queue(AudioPlayer *player) {
     const char *filename = get_current_queue_file(&player->queue);
     if (!filename) return false;
     
+    // Guard against infinite loops: track starting position to detect when we've cycled through all files
+    static int attempted_start_index = -1;
+    static int attempted_count = 0;
+    
+    // Initialize on first call
+    if (attempted_start_index == -1) {
+        attempted_start_index = player->queue.current_index;
+        attempted_count = 0;
+    }
+    
     // Try to access file with timeout (OS will timeout on network drives)
     printf("Checking file accessibility: %s\n", filename);
     if (!is_file_accessible_with_timeout(filename)) {
@@ -1188,13 +1552,29 @@ bool load_file_from_queue(AudioPlayer *player) {
         
         // Skip to next file
         if (advance_queue(&player->queue)) {
-            printf("Trying next file in queue...\n");
+            attempted_count++;
+            
+            // Prevent infinite loop: if we've cycled back to start after checking all files, stop
+            if (attempted_count >= player->queue.count) {
+                printf("All files in queue are inaccessible\n");
+                attempted_start_index = -1;
+                attempted_count = 0;
+                return false;
+            }
+            
+            printf("Trying next file in queue (attempt %d/%d)...\n", attempted_count, player->queue.count);
             return load_file_from_queue(player);  // Recursively try next file
         }
         
         printf("No more files in queue to try\n");
+        attempted_start_index = -1;
+        attempted_count = 0;
         return false;
     }
+    
+    // Reset static variables on successful accessibility check
+    attempted_start_index = -1;
+    attempted_count = 0;
     
     printf("File accessible, attempting load: %s\n", filename);
     if (!load_file(player, filename)) {
@@ -2367,6 +2747,55 @@ void on_repeat_queue_toggled(GtkToggleButton *button, gpointer user_data) {
 }
 
 // Menu callbacks
+void on_menu_import_directory(GtkMenuItem *menuitem, gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    g_on_import_directory_clicked(nullptr, nullptr);
+}
+
+static void integrate_import_menu(GtkWidget *window) {
+    GtkWidget *menu_bar = nullptr;
+    
+    // Find the menu bar in the window
+    GList *children = gtk_container_get_children(GTK_CONTAINER(window));
+    for (GList *l = children; l; l = l->next) {
+        if (GTK_IS_MENU_BAR(l->data)) {
+            menu_bar = GTK_WIDGET(l->data);
+            break;
+        }
+    }
+    g_list_free(children);
+
+    if (!menu_bar) return;
+
+    // Find the File menu
+    GList *menu_items = gtk_container_get_children(GTK_CONTAINER(menu_bar));
+    for (GList *l = menu_items; l; l = l->next) {
+        if (!GTK_IS_MENU_ITEM(l->data)) continue;
+
+        GtkWidget *label = gtk_bin_get_child(GTK_BIN(l->data));
+        if (!label || !GTK_IS_LABEL(label)) continue;
+
+        const gchar *text = gtk_label_get_text(GTK_LABEL(label));
+        if (text && g_strcmp0(text, "File") == 0) {
+            GtkWidget *file_menu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(l->data));
+            if (file_menu) {
+                // Add separator
+                GtkWidget *separator = gtk_separator_menu_item_new();
+                gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);
+                gtk_widget_show(separator);
+
+                // Add Import Directory item
+                GtkWidget *import_item = gtk_menu_item_new_with_label("Import Directory...");
+                g_signal_connect(import_item, "activate", G_CALLBACK(on_menu_import_directory), player);
+                gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), import_item);
+                gtk_widget_show(import_item);
+            }
+            break;
+        }
+    }
+    g_list_free(menu_items);
+}
+
 void on_menu_open(GtkMenuItem *menuitem, gpointer user_data) {
     AudioPlayer *player = (AudioPlayer*)user_data;
     
@@ -3795,6 +4224,7 @@ int main(int argc, char *argv[]) {
     player->has_cdg = false;
     
     create_main_window(player);
+    integrate_import_menu(player->window);
     update_gui_state(player);
     gtk_widget_show_all(player->window);
     
