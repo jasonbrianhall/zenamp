@@ -2753,6 +2753,11 @@ void on_menu_import_directory(GtkMenuItem *menuitem, gpointer user_data) {
 }
 
 static void integrate_import_menu(GtkWidget *window) {
+    if (!window || !GTK_IS_WINDOW(window)) {
+        printf("ERROR: integrate_import_menu - window is invalid\n");
+        return;
+    }
+    
     GtkWidget *menu_bar = nullptr;
     
     // Find the menu bar in the window
@@ -2760,15 +2765,21 @@ static void integrate_import_menu(GtkWidget *window) {
     for (GList *l = children; l; l = l->next) {
         if (GTK_IS_MENU_BAR(l->data)) {
             menu_bar = GTK_WIDGET(l->data);
+            printf("DEBUG: Found menu bar\n");
             break;
         }
     }
     g_list_free(children);
 
-    if (!menu_bar) return;
+    if (!menu_bar) {
+        printf("ERROR: No menu bar found in window\n");
+        return;
+    }
 
     // Find the File menu
     GList *menu_items = gtk_container_get_children(GTK_CONTAINER(menu_bar));
+    gboolean found_file_menu = FALSE;
+    
     for (GList *l = menu_items; l; l = l->next) {
         if (!GTK_IS_MENU_ITEM(l->data)) continue;
 
@@ -2777,8 +2788,9 @@ static void integrate_import_menu(GtkWidget *window) {
 
         const gchar *text = gtk_label_get_text(GTK_LABEL(label));
         if (text && g_strcmp0(text, "File") == 0) {
+            printf("DEBUG: Found File menu item\n");
             GtkWidget *file_menu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(l->data));
-            if (file_menu) {
+            if (file_menu && GTK_IS_MENU(file_menu)) {
                 // Add separator
                 GtkWidget *separator = gtk_separator_menu_item_new();
                 gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);
@@ -2789,10 +2801,28 @@ static void integrate_import_menu(GtkWidget *window) {
                 g_signal_connect(import_item, "activate", G_CALLBACK(on_menu_import_directory), player);
                 gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), import_item);
                 gtk_widget_show(import_item);
+                printf("DEBUG: Successfully added Import Directory menu item\n");
+                found_file_menu = TRUE;
+            } else {
+                printf("ERROR: File menu item has no submenu\n");
             }
             break;
         }
     }
+    
+    if (!found_file_menu) {
+        printf("ERROR: Could not find File menu to add Import Directory item\n");
+        // List what menus we did find
+        for (GList *l = menu_items; l; l = l->next) {
+            if (GTK_IS_MENU_ITEM(l->data)) {
+                GtkWidget *label = gtk_bin_get_child(GTK_BIN(l->data));
+                if (label && GTK_IS_LABEL(label)) {
+                    printf("DEBUG: Found menu: %s\n", gtk_label_get_text(GTK_LABEL(label)));
+                }
+            }
+        }
+    }
+    
     g_list_free(menu_items);
 }
 
@@ -4224,9 +4254,14 @@ int main(int argc, char *argv[]) {
     player->has_cdg = false;
     
     create_main_window(player);
-    integrate_import_menu(player->window);
     update_gui_state(player);
     gtk_widget_show_all(player->window);
+    
+    // Integrate import menu after UI is fully shown
+    g_timeout_add(100, [](gpointer data) -> gboolean {
+        integrate_import_menu((GtkWidget*)data);
+        return FALSE;  // Run only once
+    }, player->window);
     
 #ifdef _WIN32
     // Setup Windows single instance AFTER window is shown

@@ -109,7 +109,7 @@ CXXFLAGS_WIN_DEBUG = $(CXXFLAGS_WIN) $(DEBUG_FLAGS)
 CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Common source files
-SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp main.cpp midiplayer.cpp \
+SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main.cpp midiplayer.cpp \
 	instruments.cpp virtual_mixer.cpp wav_converter.cpp audioconverter.cpp \
 	convertmidi.cpp convertoggtowav.cpp convertopustowav.cpp convertmp3towav.cpp \
 	convertflactowav.cpp vfs.cpp cache.cpp aiff.cpp keyboard.cpp \
@@ -127,7 +127,7 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp main.cpp midiplayer.cpp \
 	cometbuster_boss.cpp cometbuster_render.cpp beatchess_draw.cpp \
 	cometbuster_util.cpp cometbuster_starboss.cpp cometbuster_bombs.cpp \
 	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp karafun.cpp \
-	kfn.cpp monkey.cpp
+	kfn.cpp monkey.cpp directory_scanner.cpp
 
 # Platform-specific source files
 SOURCES_CPP_LINUX = $(SOURCES_CPP_COMMON) \
