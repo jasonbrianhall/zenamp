@@ -2492,7 +2492,7 @@ void previous_song(AudioPlayer *player) {
             if (matches) {
                 player->queue.current_index = check_index;
                 if (load_file_from_queue(player)) {
-                    update_queue_display_with_filter(player);
+                    update_queue_display_minimal(player);
                     update_gui_state(player);
                     start_playback(player);
                 }
@@ -2513,7 +2513,7 @@ void previous_song(AudioPlayer *player) {
         printf("No tree view in previous_song, using simple previous\n");
         if (previous_queue(&player->queue)) {
             if (load_file_from_queue(player)) {
-                update_queue_display_with_filter(player);
+                update_queue_display_minimal(player);
                 update_gui_state(player);
                 start_playback(player);
             }
