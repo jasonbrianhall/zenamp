@@ -1,4 +1,4 @@
-#include "directory_scanner.hpp"
+#include "directory_scanner.h"
 #include <algorithm>
 #include <cctype>
 #include <dirent.h>
