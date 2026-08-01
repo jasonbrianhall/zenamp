@@ -800,6 +800,176 @@ void on_queue_delete_item(GtkMenuItem *menuitem, gpointer user_data) {
     }
 }
 
+// Rename a file on disk, handling .cdg paired files for karaoke
+static bool rename_file_on_disk(const char *old_path, const char *new_filename) {
+    if (!old_path || !new_filename || !new_filename[0]) {
+        return false;
+    }
+    
+    // Get directory and build new path
+    char *dir = g_path_get_dirname(old_path);
+    char *new_path = g_build_filename(dir, new_filename, NULL);
+    g_free(dir);
+    
+    // Attempt to rename the file
+    if (rename(old_path, new_path) != 0) {
+        g_free(new_path);
+        return false;
+    }
+    
+    // If it's an audio file, check for matching .cdg file
+    const char *old_ext = strrchr(old_path, '.');
+    if (old_ext) {
+        std::string lower_ext = old_ext;
+        for (auto &c : lower_ext) c = tolower((unsigned char)c);
+        bool is_audio = (lower_ext == ".ogg" || lower_ext == ".mp3" || lower_ext == ".wav" ||
+                         lower_ext == ".m4a" || lower_ext == ".aac" || lower_ext == ".flac");
+        
+        if (is_audio) {
+            // Build path to old .cdg file
+            std::string old_cdg_path = old_path;
+            size_t pos = old_cdg_path.rfind(old_ext);
+            if (pos != std::string::npos) {
+                old_cdg_path.replace(pos, strlen(old_ext), ".cdg");
+                
+                // Check if .cdg file exists
+                if (fs::exists(old_cdg_path)) {
+                    // Build path to new .cdg file
+                    const char *new_ext = strrchr(new_filename, '.');
+                    std::string new_cdg_filename = new_filename;
+                    if (new_ext) {
+                        size_t ext_pos = new_cdg_filename.rfind(new_ext);
+                        if (ext_pos != std::string::npos) {
+                            new_cdg_filename.replace(ext_pos, strlen(new_ext), ".cdg");
+                        }
+                    } else {
+                        new_cdg_filename += ".cdg";
+                    }
+                    
+                    char *dir2 = g_path_get_dirname(old_cdg_path.c_str());
+                    char *new_cdg_path = g_build_filename(dir2, new_cdg_filename.c_str(), NULL);
+                    g_free(dir2);
+                    
+                    // Rename the .cdg file
+                    if (rename(old_cdg_path.c_str(), new_cdg_path) != 0) {
+                        printf("Warning: Could not rename .cdg file from %s to %s\n", 
+                               old_cdg_path.c_str(), new_cdg_path);
+                    }
+                    
+                    g_free(new_cdg_path);
+                }
+            }
+        }
+    }
+    
+    g_free(new_path);
+    return true;
+}
+
+// Dialog response handler for rename
+static void on_rename_response(GtkDialog *dialog, gint response_id, gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    
+    if (response_id == GTK_RESPONSE_OK) {
+        GtkEntry *entry = GTK_ENTRY(g_object_get_data(G_OBJECT(dialog), "name_entry"));
+        const char *old_path = (const char*)g_object_get_data(G_OBJECT(dialog), "old_path");
+        
+        const char *new_filename = gtk_entry_get_text(entry);
+        
+        if (new_filename && new_filename[0]) {
+            if (rename_file_on_disk(old_path, new_filename)) {
+                // Update queue with new path
+                char *dir = g_path_get_dirname(old_path);
+                char *new_path = g_build_filename(dir, new_filename, NULL);
+                
+                // Find and update the queue entry
+                for (int i = 0; i < player->queue.count; i++) {
+                    if (strcmp(player->queue.files[i], old_path) == 0) {
+                        g_free(player->queue.files[i]);
+                        player->queue.files[i] = g_strdup(new_path);
+                        break;
+                    }
+                }
+                
+                g_free(dir);
+                g_free(new_path);
+                
+                // Refresh display
+                update_queue_display_with_filter(player, false);
+                printf("File renamed successfully\n");
+            } else {
+                GtkWidget *error_dialog = gtk_message_dialog_new(
+                    GTK_WINDOW(dialog),
+                    GTK_DIALOG_MODAL,
+                    GTK_MESSAGE_ERROR,
+                    GTK_BUTTONS_OK,
+                    "Failed to rename file. Check that the file exists and you have permission."
+                );
+                gtk_dialog_run(GTK_DIALOG(error_dialog));
+                gtk_widget_destroy(error_dialog);
+            }
+        }
+    }
+    
+    gtk_widget_destroy(GTK_WIDGET(dialog));
+}
+
+void on_queue_rename_item(GtkMenuItem *menuitem, gpointer user_data) {
+    (void)menuitem;
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    
+    GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(player->queue_tree_view));
+    GtkTreeModel *model;
+    GtkTreeIter iter;
+    
+    if (!gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        return;
+    }
+    
+    char *filepath = NULL;
+    gtk_tree_model_get(model, &iter, COL_FILEPATH, &filepath, -1);
+    
+    if (!filepath) {
+        return;
+    }
+    
+    // Extract just the filename for display
+    char *basename = g_path_get_basename(filepath);
+    
+    // Create dialog
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        "Rename File",
+        GTK_WINDOW(player->window),
+        GTK_DIALOG_MODAL,
+        "Cancel", GTK_RESPONSE_CANCEL,
+        "Rename", GTK_RESPONSE_OK,
+        NULL
+    );
+    
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    
+    GtkWidget *label = gtk_label_new("New filename:");
+    gtk_box_pack_start(GTK_BOX(content_area), label, FALSE, FALSE, 5);
+    
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry), basename);
+    gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);  // Select all text
+    gtk_box_pack_start(GTK_BOX(content_area), entry, FALSE, FALSE, 5);
+    
+    // Store data in dialog for handler
+    g_object_set_data(G_OBJECT(dialog), "name_entry", entry);
+    g_object_set_data(G_OBJECT(dialog), "old_path", filepath);
+    
+    gtk_widget_show_all(content_area);
+    
+    g_signal_connect(dialog, "response", G_CALLBACK(on_rename_response), player);
+    
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    
+    g_free(filepath);
+    g_free(basename);
+}
+
 gboolean on_queue_context_menu(GtkWidget *widget, GdkEventButton *event, gpointer user_data) {
     AudioPlayer *player = (AudioPlayer*)user_data;
     
@@ -919,6 +1089,12 @@ gboolean on_queue_context_menu(GtkWidget *widget, GdkEventButton *event, gpointe
             g_signal_connect(move_down_item, "activate", G_CALLBACK(on_queue_move_down), player);
             gtk_widget_set_sensitive(move_down_item, index < player->queue.count - 1);
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), move_down_item);
+            
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+            
+            GtkWidget *rename_item = gtk_menu_item_new_with_label("Rename File...");
+            g_signal_connect(rename_item, "activate", G_CALLBACK(on_queue_rename_item), player);
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), rename_item);
             
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
             
