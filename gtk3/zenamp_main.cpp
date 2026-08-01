@@ -667,10 +667,22 @@ static guint queue_update_timeout_id = 0;
 static int last_queue_index = -1;  // Track last updated index to detect changes
 
 // Minimal fast update - only updates the "▶" playing indicator without metadata extraction
-static void update_queue_display_minimal(AudioPlayer *player) {
+void update_queue_display_minimal(AudioPlayer *player) {
     if (!player || !player->queue_store) return;
 
-    // Simply iterate through visible items and update the playing indicator
+    // Check if a filter is active
+    const char *filter = player->queue_filter_text;
+    bool has_filter = (filter && filter[0] != '\0');
+
+    // If a filter is active, we need to use the full update
+    // because we can't determine if items match without extracting metadata
+    if (has_filter) {
+        printf("Filter active, using full update instead of minimal\n");
+        update_queue_display_with_filter(player);
+        return;
+    }
+
+    // No filter active - just update the "▶" playing indicator
     GtkTreeIter iter;
     gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(player->queue_store), &iter);
 
