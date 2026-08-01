@@ -587,7 +587,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
     player->queue.current_index = queue_index;
     
     if (load_file_from_queue(player)) {
-        update_queue_display_minimal(player);  // Performance: minimal update for double-click play
+        update_queue_display_with_filter(player);  // Preserves karaoke checkmarks
         update_gui_state(player);
         start_playback(player);
         printf("Started playing: %s\n", get_current_queue_file(&player->queue));
@@ -1104,8 +1104,8 @@ static void on_queue_search_icon_press(GtkEntry *entry, GtkEntryIconPosition ico
             player->queue_filter_timeout_id = 0;
         }
         
-        // Use minimal update - it will detect no filter and show all items
-        update_queue_display_minimal(player);
+        // Full update to refresh all items with checkmarks
+        update_queue_display_with_filter(player);
     }
 }
 

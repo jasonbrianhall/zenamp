@@ -56,8 +56,8 @@ static const std::vector<std::string> SUPPORTED_FORMATS = {
     ".mp3", ".aac", ".ogg", ".opus", ".m4a", ".wma",
     ".wav", ".aiff", ".aif",
     ".mid", ".midi", ".xm", ".mod", ".s3m", ".it",
-    ".mp4", ".mkv", ".webm", ".mp2"
-    ".kfn", ".kar", ".kok",
+    ".mp4", ".mkv", ".webm", ".mp2",
+    ".kfn", ".kar", ".kok", ".zip",
     ".m3u", ".m3u8"
 };
 
