@@ -1472,7 +1472,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
     if (strcmp(ext_lower, ".wav") == 0) {
         printf("Loading WAV file: %s\n", filename);
         success = load_wav_file(player, filename);
-    } else if (strcmp(ext_lower, ".mid") == 0 || strcmp(ext_lower, ".midi") == 0) {
+    } else if (strcmp(ext_lower, ".mid") == 0 || strcmp(ext_lower, ".midi") == 0 || strcmp(ext_lower, ".kar") == 0) {
         printf("Loading MIDI file: %s\n", filename);
         if (convert_midi_to_wav(player, filename)) {
             printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
@@ -2746,6 +2746,7 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
             
             return (strcmp(ext_lower, ".mid") == 0 || 
                     strcmp(ext_lower, ".midi") == 0 ||
+                    strcmp(ext_lower, ".kar") == 0 ||
                     strcmp(ext_lower, ".wav") == 0 ||
                     strcmp(ext_lower, ".mp3") == 0 ||
                     strcmp(ext_lower, ".m4a") == 0 ||
@@ -2842,6 +2843,7 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
     gtk_file_filter_set_name(all_filter, "All Supported Files");
     gtk_file_filter_add_pattern(all_filter, "*.mid");
     gtk_file_filter_add_pattern(all_filter, "*.midi");
+    gtk_file_filter_add_pattern(all_filter, "*.kar");
     gtk_file_filter_add_pattern(all_filter, "*.wav");
     gtk_file_filter_add_pattern(all_filter, "*.mp3");
     gtk_file_filter_add_pattern(all_filter, "*.m4a");
@@ -2858,9 +2860,10 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_filter);
     
     GtkFileFilter *midi_filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(midi_filter, "MIDI Files (*.mid, *.midi)");
+    gtk_file_filter_set_name(midi_filter, "MIDI Files (*.mid, *.midi, *.kar)");
     gtk_file_filter_add_pattern(midi_filter, "*.mid");
     gtk_file_filter_add_pattern(midi_filter, "*.midi");
+    gtk_file_filter_add_pattern(midi_filter, "*.kar");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), midi_filter);
     
     GtkFileFilter *wav_filter = gtk_file_filter_new();
@@ -3036,6 +3039,7 @@ void on_menu_open(GtkMenuItem *menuitem, gpointer user_data) {
     gtk_file_filter_set_name(all_filter, "All Supported Files");
     gtk_file_filter_add_pattern(all_filter, "*.mid");
     gtk_file_filter_add_pattern(all_filter, "*.midi");
+    gtk_file_filter_add_pattern(all_filter, "*.kar");
     gtk_file_filter_add_pattern(all_filter, "*.wav");
     gtk_file_filter_add_pattern(all_filter, "*.mp3");
     gtk_file_filter_add_pattern(all_filter, "*.ogg");
@@ -3053,9 +3057,11 @@ void on_menu_open(GtkMenuItem *menuitem, gpointer user_data) {
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_filter);
     
     GtkFileFilter *midi_filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(midi_filter, "MIDI Files (*.mid, *.midi)");
+    gtk_file_filter_set_name(midi_filter, "MIDI Files (*.mid, *.midi, *.kar)");
     gtk_file_filter_add_pattern(midi_filter, "*.mid");
     gtk_file_filter_add_pattern(midi_filter, "*.midi");
+    gtk_file_filter_add_pattern(midi_filter, "*.kar");
+
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), midi_filter);
     
     GtkFileFilter *wav_filter = gtk_file_filter_new();
