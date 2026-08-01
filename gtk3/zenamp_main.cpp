@@ -445,6 +445,9 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 
                 printf("Deduplication thread started. Checking %d files for duplicates...\n", p->queue.count);
                 
+                // Lock the queue for the entire operation
+                pthread_mutex_lock(&p->audio_mutex);
+                
                 // Use a simple hash set to track seen basenames
                 GHashTable *seen_basenames = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
                 std::vector<int> duplicates_to_remove;
@@ -490,7 +493,10 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 
                 printf("Deduplication complete: removed %d duplicates. Queue now has %d files.\n", removed, p->queue.count);
                 
-                // Update UI after dedup
+                // Unlock the queue
+                pthread_mutex_unlock(&p->audio_mutex);
+                
+                // Update UI after dedup (no lock needed for UI update)
                 g_idle_add([](gpointer data) -> gboolean {
                     AudioPlayer *p = (AudioPlayer*)data;
                     if (p) {
@@ -656,6 +662,53 @@ static void g_on_import_directory_clicked(GtkWidget *widget, gpointer user_data)
 // ============================================================================
 // End Directory Scanner
 // ============================================================================
+
+static guint queue_update_timeout_id = 0;
+static int last_queue_index = -1;  // Track last updated index to detect changes
+
+// Minimal fast update - only updates the "▶" playing indicator without metadata extraction
+static void update_queue_display_minimal(AudioPlayer *player) {
+    if (!player || !player->queue_store) return;
+
+    // Simply iterate through visible items and update the playing indicator
+    GtkTreeIter iter;
+    gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(player->queue_store), &iter);
+
+    while (valid) {
+        int queue_index = -1;
+        gtk_tree_model_get(GTK_TREE_MODEL(player->queue_store), &iter,
+                           COL_QUEUE_INDEX, &queue_index, -1);
+
+        const char *indicator = (queue_index == player->queue.current_index) ? "▶" : "";
+        gtk_list_store_set(player->queue_store, &iter, COL_PLAYING, indicator, -1);
+
+        valid = gtk_tree_model_iter_next(GTK_TREE_MODEL(player->queue_store), &iter);
+    }
+}
+
+static gboolean queue_update_debounce_callback(gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    queue_update_timeout_id = 0;
+    // Do a full update after debounce
+    update_queue_display_with_filter(player);
+    return FALSE;
+}
+
+// Debounced version - only does full update after a delay
+static void update_queue_display_debounced(AudioPlayer *player) {
+    if (!player) return;
+    
+    // Always do a minimal update immediately
+    update_queue_display_minimal(player);
+    
+    // Schedule full update after 500ms debounce
+    if (queue_update_timeout_id) {
+        g_source_remove(queue_update_timeout_id);
+    }
+    queue_update_timeout_id = g_timeout_add(500, queue_update_debounce_callback, player);
+}
+
+// Remembers whatever visualization type was active before we auto-switched
 
 // Remembers whatever visualization type was active before we auto-switched
 // into karaoke mode (for a .kfn, CDG zip, or LRC-generated karaoke load),
