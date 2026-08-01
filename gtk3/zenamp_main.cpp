@@ -57,7 +57,7 @@ static const std::vector<std::string> SUPPORTED_FORMATS = {
     ".wav", ".aiff", ".aif",
     ".mid", ".midi", ".xm", ".mod", ".s3m", ".it",
     ".mp4", ".mkv", ".webm", ".mp2",
-    ".kfn", ".kar", ".kok",
+    ".kfn", ".kar",
     ".m3u", ".m3u8"
 };
 
