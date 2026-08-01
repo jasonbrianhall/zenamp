@@ -320,6 +320,8 @@ void on_queue_model_row_inserted(GtkTreeModel *model, GtkTreePath *path, GtkTree
 void cleanup_queue_filter(AudioPlayer *player);
 GtkWidget* create_queue_search_bar(AudioPlayer *player);
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current = true);
+void update_queue_display_minimal(AudioPlayer *player);
+void update_queue_display_debounced(AudioPlayer *player);
 bool matches_filter(const char *text, const char *filter);
 bool filename_exists_in_queue(PlayQueue *queue, const char *filepath);
 void on_toggle_queue_panel(GtkCheckMenuItem *check_item, gpointer user_data);

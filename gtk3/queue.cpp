@@ -1070,7 +1070,7 @@ static gboolean apply_queue_filter_delayed(gpointer user_data) {
     if (model) {
         // If we have a filter, we need to rebuild with filtering
         // For now, let's just update the display
-        update_queue_display_with_filter(player);
+        update_queue_display_minimal(player);  // Performance: minimal update
     }
     
     return G_SOURCE_REMOVE;
@@ -1105,7 +1105,7 @@ static void on_queue_search_icon_press(GtkEntry *entry, GtkEntryIconPosition ico
         }
         
         // Immediately update display to show all items
-        update_queue_display_with_filter(player);
+        update_queue_display_minimal(player);  // Performance: minimal update
     }
 }
 

@@ -2261,7 +2261,7 @@ void next_song(AudioPlayer *player) {
             if (matches) {
                 player->queue.current_index = check_index;
                 if (load_file_from_queue(player)) {
-                    update_queue_display_with_filter(player);
+                    update_queue_display_minimal(player);  // Performance: minimal update for song switch
                     update_gui_state(player);
                     start_playback(player);
                 }
@@ -2282,7 +2282,7 @@ void next_song(AudioPlayer *player) {
         printf("No tree view in next_song, using simple next\n");
         if (advance_queue(&player->queue)) {
             if (load_file_from_queue(player)) {
-                update_queue_display_with_filter(player);
+                update_queue_display_minimal(player);  // Performance: minimal update for song switch
                 update_gui_state(player);
                 start_playback(player);
             }
@@ -2344,7 +2344,7 @@ void next_song(AudioPlayer *player) {
             // If we successfully found and set next track
             if (found_next) {
                 if (load_file_from_queue(player)) {
-                    update_queue_display_with_filter(player);
+                    update_queue_display_minimal(player);  // Performance: minimal update for song switch
                     update_gui_state(player);
                     start_playback(player);
                 }
@@ -2356,7 +2356,7 @@ void next_song(AudioPlayer *player) {
     // Fall back to normal unsorted next
     if (advance_queue(&player->queue)) {
         if (load_file_from_queue(player)) {
-            update_queue_display_with_filter(player);
+            update_queue_display_minimal(player);  // Performance: minimal update for song switch
             update_gui_state(player);
             start_playback(player);
         }
@@ -2563,7 +2563,7 @@ void next_song_filtered(AudioPlayer *player) {
             player->queue.current_index = check_index;
             
             if (load_file_from_queue(player)) {
-                update_queue_display_with_filter(player);
+                update_queue_display_minimal(player);  // Performance: minimal update for song switch
                 update_gui_state(player);
                 start_playback(player);
                 printf("Next filtered song: %s (index %d)\n", 
@@ -2634,7 +2634,7 @@ void previous_song_filtered(AudioPlayer *player) {
             player->queue.current_index = check_index;
             
             if (load_file_from_queue(player)) {
-                update_queue_display_with_filter(player);
+                update_queue_display_minimal(player);  // Performance: minimal update for song switch
                 update_gui_state(player);
                 start_playback(player);
                 printf("Previous filtered song: %s (index %d)\n", 
