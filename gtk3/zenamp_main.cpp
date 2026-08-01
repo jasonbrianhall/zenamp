@@ -56,8 +56,8 @@ static const std::vector<std::string> SUPPORTED_FORMATS = {
     ".mp3", ".aac", ".ogg", ".opus", ".m4a", ".wma",
     ".wav", ".aiff", ".aif",
     ".mid", ".midi", ".xm", ".mod", ".s3m", ".it",
-    ".mp4", ".mkv", ".webm", ".mp2",
-    ".kfn", ".kar", ".kok", ".zip",
+    ".mp4", ".mkv", ".webm", ".mp2"
+    ".kfn", ".kar", ".kok",
     ".m3u", ".m3u8"
 };
 
@@ -674,88 +674,24 @@ void update_queue_display_minimal(AudioPlayer *player) {
     const char *filter = player->queue_filter_text;
     bool has_filter = (filter && filter[0] != '\0');
 
-    // If a filter is active, use optimized background filtering
+    // If a filter is active, just update the play indicator without refiltering
     if (has_filter) {
-        printf("Filter active ('%s'), using optimized background filter\n", filter);
+        printf("Filter active ('%s'), updating play indicator only\n", filter);
         
-        // Clear the display - we'll only add matching items
-        gtk_list_store_clear(player->queue_store);
-        
-        // Extract metadata in background and only show matching files
-        std::thread([](AudioPlayer *p, std::string filter_str) {
-            printf("Background filter thread started, filtering with: '%s'\n", filter_str.c_str());
-            
-            std::vector<int> matching_indices;
-            
-            // First pass: find all matching files
-            for (int i = 0; i < p->queue.count; i++) {
-                const char *filepath = p->queue.files[i];
-                
-                // Extract metadata for this file
-                char *metadata = extract_metadata(filepath);
-                char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-                parse_metadata(metadata, title, artist, album, genre);
-                g_free(metadata);
-                
-                char *basename = g_path_get_basename(filepath);
-                
-                // Check if matches filter
-                bool matches = matches_filter(basename, filter_str.c_str()) ||
-                              matches_filter(title, filter_str.c_str()) ||
-                              matches_filter(artist, filter_str.c_str()) ||
-                              matches_filter(album, filter_str.c_str()) ||
-                              matches_filter(genre, filter_str.c_str());
-                
-                if (matches) {
-                    matching_indices.push_back(i);
-                    
-                    // Add matching row to display via main thread
-                    g_idle_add([](gpointer data) -> gboolean {
-                        auto *args = static_cast<std::tuple<AudioPlayer*, int, std::string, std::string, std::string, std::string, std::string>*>(data);
-                        AudioPlayer *p = std::get<0>(*args);
-                        int idx = std::get<1>(*args);
-                        
-                        const char *filepath = p->queue.files[idx];
-                        char *basename = g_path_get_basename(filepath);
-                        const char *ext = strrchr(filepath, '.');
-                        
-                        GtkTreeIter iter;
-                        gtk_list_store_append(p->queue_store, &iter);
-                        
-                        const char *indicator = (idx == p->queue.current_index) ? "▶" : "";
-                        const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
-                        
-                        gtk_list_store_set(p->queue_store, &iter,
-                            COL_FILEPATH, filepath,
-                            COL_PLAYING, indicator,
-                            COL_FILENAME, basename,
-                            COL_TITLE, std::get<3>(*args).c_str(),
-                            COL_ARTIST, std::get<4>(*args).c_str(),
-                            COL_ALBUM, std::get<5>(*args).c_str(),
-                            COL_GENRE, std::get<6>(*args).c_str(),
-                            COL_DURATION, "",
-                            COL_CDGK, cdgk_indicator,
-                            COL_QUEUE_INDEX, idx,
-                            -1);
-                        
-                        g_free(basename);
-                        delete args;
-                        return FALSE;
-                    }, new std::tuple<AudioPlayer*, int, std::string, std::string, std::string, std::string, std::string>(
-                        p, i, filter_str, title, artist, album, genre));
-                }
-                
-                g_free(basename);
-                
-                // Progress update
-                if ((i + 1) % 100 == 0) {
-                    printf("  Filtered %d / %d files...\n", i + 1, p->queue.count);
-                }
-            }
-            
-            printf("Background filter complete: found %zu matching files\n", matching_indices.size());
-        }, player, std::string(filter ? filter : "")).detach();
-        
+        // Just update the ▶ indicator, don't clear and refilter
+        GtkTreeIter iter;
+        gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(player->queue_store), &iter);
+
+        while (valid) {
+            int queue_index = -1;
+            gtk_tree_model_get(GTK_TREE_MODEL(player->queue_store), &iter,
+                               COL_QUEUE_INDEX, &queue_index, -1);
+
+            const char *indicator = (queue_index == player->queue.current_index) ? "▶" : "";
+            gtk_list_store_set(player->queue_store, &iter, COL_PLAYING, indicator, -1);
+
+            valid = gtk_tree_model_iter_next(GTK_TREE_MODEL(player->queue_store), &iter);
+        }
         return;
     }
 
