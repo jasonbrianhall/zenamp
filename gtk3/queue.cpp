@@ -587,7 +587,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
     player->queue.current_index = queue_index;
     
     if (load_file_from_queue(player)) {
-        update_queue_display_minimal(player);  // Performance: minimal update for manual track selection
+        update_queue_display_with_filter(player);  // Changed from update_queue_display
         update_gui_state(player);
         start_playback(player);
         printf("Started playing: %s\n", get_current_queue_file(&player->queue));
@@ -1070,7 +1070,7 @@ static gboolean apply_queue_filter_delayed(gpointer user_data) {
     if (model) {
         // If we have a filter, we need to rebuild with filtering
         // For now, let's just update the display
-        update_queue_display_minimal(player);  // Performance: minimal update
+        update_queue_display_with_filter(player);
     }
     
     return G_SOURCE_REMOVE;
@@ -1104,8 +1104,8 @@ static void on_queue_search_icon_press(GtkEntry *entry, GtkEntryIconPosition ico
             player->queue_filter_timeout_id = 0;
         }
         
-        // Immediately update display to show all items
-        update_queue_display_minimal(player);  // Performance: minimal update
+        // Use minimal update - it will detect no filter and show all items
+        update_queue_display_minimal(player);
     }
 }
 
