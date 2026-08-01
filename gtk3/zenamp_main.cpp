@@ -4654,8 +4654,26 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        update_queue_display_with_filter(player);
+        update_queue_display_minimal(player);  // Performance: minimal update on startup
         update_gui_state(player);
+        
+        // Start background thread to populate metadata (without blocking UI)
+        printf("Starting background queue population thread...\n");
+        std::thread([](AudioPlayer *p) {
+            printf("Queue population thread started\n");
+            
+            // Give UI a chance to render first
+            g_usleep(500000);  // 500ms
+            
+            // Now call the full update to extract metadata in background
+            g_idle_add([](gpointer data) -> gboolean {
+                AudioPlayer *p = (AudioPlayer*)data;
+                printf("Populating queue with metadata in background...\n");
+                update_queue_display_with_filter(p);
+                printf("Queue population complete\n");
+                return FALSE;
+            }, p);
+        }, player).detach();
     }
     
     // Setup signal handlers for graceful shutdown

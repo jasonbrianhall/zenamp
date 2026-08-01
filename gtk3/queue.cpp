@@ -587,7 +587,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
     player->queue.current_index = queue_index;
     
     if (load_file_from_queue(player)) {
-        update_queue_display_with_filter(player);  // Changed from update_queue_display
+        update_queue_display_minimal(player);  // Performance: minimal update for manual track selection
         update_gui_state(player);
         start_playback(player);
         printf("Started playing: %s\n", get_current_queue_file(&player->queue));

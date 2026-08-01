@@ -142,7 +142,7 @@ bool load_m3u_playlist(AudioPlayer *player, const char *m3u_path) {
         }
     }
     
-    update_queue_display_with_filter(player);
+    update_queue_display_minimal(player);  // Performance: minimal update when loading playlist
     update_gui_state(player);
     
     return added_count > 0;
