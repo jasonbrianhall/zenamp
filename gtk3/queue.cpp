@@ -1269,7 +1269,35 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
                 strcpy(duration_str, "");
             }
 
-            const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
+            // Check if file is karaoke: .kfn, .zip, or audio with associated .cdg
+            bool is_karaoke = false;
+            if (ext) {
+                if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0) {
+                    is_karaoke = true;
+                } else {
+                    // Check if it's an audio file with an associated .cdg
+                    std::string lower_ext = ext;
+                    for (auto &c : lower_ext) c = tolower((unsigned char)c);
+                    bool is_audio = (lower_ext == ".ogg" || lower_ext == ".mp3" || lower_ext == ".wav" ||
+                                     lower_ext == ".m4a" || lower_ext == ".aac" || lower_ext == ".flac");
+                    
+                    if (is_audio) {
+                        // Build the path to the corresponding .cdg file
+                        std::string cdg_path = filepath;
+                        size_t pos = cdg_path.rfind(ext);
+                        if (pos != std::string::npos) {
+                            cdg_path.replace(pos, strlen(ext), ".cdg");
+                            
+                            // Check if .cdg file exists
+                            if (fs::exists(cdg_path)) {
+                                is_karaoke = true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            const char *cdgk_indicator = is_karaoke ? "✓" : "";
             const char *indicator = (i == player->queue.current_index) ? "▶" : "";
             
             // NEW: Add visual indicator for inaccessible files

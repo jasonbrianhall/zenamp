@@ -56,7 +56,7 @@ static const std::vector<std::string> SUPPORTED_FORMATS = {
     ".mp3", ".aac", ".ogg", ".opus", ".m4a", ".wma",
     ".wav", ".aiff", ".aif",
     ".mid", ".midi", ".xm", ".mod", ".s3m", ".it",
-    ".mp4", ".mkv", ".webm", ".mp2"
+    ".mp4", ".mkv", ".webm", ".mp2",
     ".kfn", ".kar", ".kok",
     ".m3u", ".m3u8"
 };
@@ -2754,6 +2754,7 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
                     strcmp(ext_lower, ".aiff") == 0 ||
                     strcmp(ext_lower, ".opus") == 0 ||
                     strcmp(ext_lower, ".flac") == 0 ||
+                    strcmp(ext_lower, ".kfn") == 0 ||
                     strcmp(ext_lower, ".zip") == 0 ||
                     strcmp(ext_lower, ".wma") == 0);
         };
