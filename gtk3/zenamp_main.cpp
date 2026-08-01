@@ -334,19 +334,96 @@ static gpointer g_scan_thread_func(gpointer user_data) {
         }
 
         if (scan_data->results.size() > 0) {
-            int added_count = 0;
-            for (const auto& file : scan_data->results) {
-                add_to_queue(&player->queue, file.c_str());
-                added_count++;
+            printf("Adding %zu files to queue (bulk import)...\n", scan_data->results.size());
+            
+            // Directly add to queue array without any UI updates or duplicate checks
+            // This matches the pattern used in load_m3u_playlist
+            for (size_t idx = 0; idx < scan_data->results.size(); idx++) {
+                const auto& file = scan_data->results[idx];
+                
+                if (player->queue.count >= player->queue.capacity) {
+                    // Resize queue if needed
+                    // If capacity is 0, start with 256; otherwise double it
+                    int new_capacity = (player->queue.capacity == 0) ? 256 : (player->queue.capacity * 2);
+                    printf("  Resizing queue from %d to %d\n", player->queue.capacity, new_capacity);
+                    
+                    char **new_files = (player->queue.files == NULL) 
+                        ? (char**)malloc(new_capacity * sizeof(char*))
+                        : (char**)realloc(player->queue.files, new_capacity * sizeof(char*));
+                    
+                    if (!new_files) {
+                        printf("ERROR: Failed to resize queue\n");
+                        break;
+                    }
+                    player->queue.files = new_files;
+                    player->queue.capacity = new_capacity;
+                }
+                
+                // Directly allocate and add file path
+                player->queue.files[player->queue.count] = (char*)malloc(file.length() + 1);
+                if (player->queue.files[player->queue.count]) {
+                    strcpy(player->queue.files[player->queue.count], file.c_str());
+                    player->queue.count++;
+                    
+                    // Print progress every 1000 files
+                    if ((idx + 1) % 1000 == 0) {
+                        printf("  Added %zu / %zu files...\n", idx + 1, scan_data->results.size());
+                    }
+                }
             }
 
-            printf("Added %d files to queue\n", added_count);
-
-            update_queue_display_with_filter(player);
+            printf("Finished adding files to queue. Total: %d\n", player->queue.count);
+            printf("Starting display render...\n");
+            // For bulk imports, skip metadata extraction and just show filenames
+            if (player->queue_store) {
+                printf("Clearing queue store...\n");
+                gtk_list_store_clear(player->queue_store);
+                
+                printf("Rendering %d items to display...\n", player->queue.count);
+                for (int i = 0; i < player->queue.count; i++) {
+                    const char *filepath = player->queue.files[i];
+                    char *basename = g_path_get_basename(filepath);
+                    const char *ext = strrchr(filepath, '.');
+                    
+                    GtkTreeIter iter;
+                    gtk_list_store_append(player->queue_store, &iter);
+                    
+                    const char *indicator = (i == player->queue.current_index) ? "▶" : "";
+                    const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
+                    
+                    gtk_list_store_set(player->queue_store, &iter,
+                        COL_FILEPATH, filepath,
+                        COL_PLAYING, indicator,
+                        COL_FILENAME, basename,
+                        COL_TITLE, "(queued)",
+                        COL_ARTIST, "",
+                        COL_ALBUM, "",
+                        COL_GENRE, "",
+                        COL_DURATION, "",
+                        COL_CDGK, cdgk_indicator,
+                        COL_QUEUE_INDEX, i,
+                        -1);
+                    
+                    g_free(basename);
+                    
+                    // Keep UI responsive every 1000 items
+                    if ((i + 1) % 1000 == 0) {
+                        printf("  Rendered %d items...\n", i + 1);
+                        while (gtk_events_pending()) {
+                            gtk_main_iteration();
+                        }
+                    }
+                }
+                printf("Display rendering complete.\n");
+            }
+            
             update_gui_state(player);
+            printf("GUI state updated.\n");
 
             char msg[256];
-            snprintf(msg, sizeof(msg), "Successfully imported %zu music files", scan_data->results.size());
+            snprintf(msg, sizeof(msg), "Successfully imported %d music files", player->queue.count);
+            printf("Showing completion dialog: %s\n", msg);
+            
             GtkWidget *completion_dialog = gtk_message_dialog_new(
                 GTK_WINDOW(player->window),
                 GTK_DIALOG_MODAL,
@@ -356,6 +433,76 @@ static gpointer g_scan_thread_func(gpointer user_data) {
             );
             gtk_dialog_run(GTK_DIALOG(completion_dialog));
             gtk_widget_destroy(completion_dialog);
+            printf("Completion dialog closed.\n");
+            
+            // Start deduplication in background thread
+            printf("Starting deduplication thread...\n");
+            std::thread dedup_thread([](AudioPlayer *p) {
+                if (!p || !p->queue.files || p->queue.count <= 1) {
+                    printf("Deduplication skipped: queue too small or NULL\n");
+                    return;
+                }
+                
+                printf("Deduplication thread started. Checking %d files for duplicates...\n", p->queue.count);
+                
+                // Use a simple hash set to track seen basenames
+                GHashTable *seen_basenames = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+                std::vector<int> duplicates_to_remove;
+                
+                for (int i = 0; i < p->queue.count; i++) {
+                    const char *filepath = p->queue.files[i];
+                    if (!filepath) continue;
+                    
+                    char *basename = g_path_get_basename(filepath);
+                    
+                    if (g_hash_table_contains(seen_basenames, basename)) {
+                        printf("  Found duplicate: %s\n", basename);
+                        duplicates_to_remove.push_back(i);
+                    } else {
+                        g_hash_table_insert(seen_basenames, g_strdup(basename), GINT_TO_POINTER(1));
+                    }
+                    
+                    g_free(basename);
+                    
+                    // Progress update every 1000 files
+                    if ((i + 1) % 1000 == 0) {
+                        printf("  Checked %d / %d files...\n", i + 1, p->queue.count);
+                    }
+                }
+                
+                g_hash_table_destroy(seen_basenames);
+                
+                // Remove duplicates in reverse order (to maintain indices)
+                int removed = 0;
+                for (int i = (int)duplicates_to_remove.size() - 1; i >= 0; i--) {
+                    int index = duplicates_to_remove[i];
+                    if (index >= 0 && index < p->queue.count && p->queue.files[index]) {
+                        free(p->queue.files[index]);
+                        
+                        // Shift remaining files down
+                        for (int j = index; j < p->queue.count - 1; j++) {
+                            p->queue.files[j] = p->queue.files[j + 1];
+                        }
+                        p->queue.count--;
+                        removed++;
+                    }
+                }
+                
+                printf("Deduplication complete: removed %d duplicates. Queue now has %d files.\n", removed, p->queue.count);
+                
+                // Update UI after dedup
+                g_idle_add([](gpointer data) -> gboolean {
+                    AudioPlayer *p = (AudioPlayer*)data;
+                    if (p) {
+                        printf("Updating display after deduplication...\n");
+                        update_queue_display_with_filter(p);
+                        update_gui_state(p);
+                        printf("Display updated.\n");
+                    }
+                    return FALSE;
+                }, p);
+            }, player);
+            dedup_thread.detach();
         } else {
             GtkWidget *msg_dialog = gtk_message_dialog_new(
                 GTK_WINDOW(player->window),
@@ -2752,80 +2899,6 @@ void on_menu_import_directory(GtkMenuItem *menuitem, gpointer user_data) {
     g_on_import_directory_clicked(nullptr, nullptr);
 }
 
-static void integrate_import_menu(GtkWidget *window) {
-    if (!window || !GTK_IS_WINDOW(window)) {
-        printf("ERROR: integrate_import_menu - window is invalid\n");
-        return;
-    }
-    
-    GtkWidget *menu_bar = nullptr;
-    
-    // Find the menu bar in the window
-    GList *children = gtk_container_get_children(GTK_CONTAINER(window));
-    for (GList *l = children; l; l = l->next) {
-        if (GTK_IS_MENU_BAR(l->data)) {
-            menu_bar = GTK_WIDGET(l->data);
-            printf("DEBUG: Found menu bar\n");
-            break;
-        }
-    }
-    g_list_free(children);
-
-    if (!menu_bar) {
-        printf("ERROR: No menu bar found in window\n");
-        return;
-    }
-
-    // Find the File menu
-    GList *menu_items = gtk_container_get_children(GTK_CONTAINER(menu_bar));
-    gboolean found_file_menu = FALSE;
-    
-    for (GList *l = menu_items; l; l = l->next) {
-        if (!GTK_IS_MENU_ITEM(l->data)) continue;
-
-        GtkWidget *label = gtk_bin_get_child(GTK_BIN(l->data));
-        if (!label || !GTK_IS_LABEL(label)) continue;
-
-        const gchar *text = gtk_label_get_text(GTK_LABEL(label));
-        if (text && g_strcmp0(text, "File") == 0) {
-            printf("DEBUG: Found File menu item\n");
-            GtkWidget *file_menu = gtk_menu_item_get_submenu(GTK_MENU_ITEM(l->data));
-            if (file_menu && GTK_IS_MENU(file_menu)) {
-                // Add separator
-                GtkWidget *separator = gtk_separator_menu_item_new();
-                gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), separator);
-                gtk_widget_show(separator);
-
-                // Add Import Directory item
-                GtkWidget *import_item = gtk_menu_item_new_with_label("Import Directory...");
-                g_signal_connect(import_item, "activate", G_CALLBACK(on_menu_import_directory), player);
-                gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), import_item);
-                gtk_widget_show(import_item);
-                printf("DEBUG: Successfully added Import Directory menu item\n");
-                found_file_menu = TRUE;
-            } else {
-                printf("ERROR: File menu item has no submenu\n");
-            }
-            break;
-        }
-    }
-    
-    if (!found_file_menu) {
-        printf("ERROR: Could not find File menu to add Import Directory item\n");
-        // List what menus we did find
-        for (GList *l = menu_items; l; l = l->next) {
-            if (GTK_IS_MENU_ITEM(l->data)) {
-                GtkWidget *label = gtk_bin_get_child(GTK_BIN(l->data));
-                if (label && GTK_IS_LABEL(label)) {
-                    printf("DEBUG: Found menu: %s\n", gtk_label_get_text(GTK_LABEL(label)));
-                }
-            }
-        }
-    }
-    
-    g_list_free(menu_items);
-}
-
 void on_menu_open(GtkMenuItem *menuitem, gpointer user_data) {
     AudioPlayer *player = (AudioPlayer*)user_data;
     
@@ -4256,12 +4329,6 @@ int main(int argc, char *argv[]) {
     create_main_window(player);
     update_gui_state(player);
     gtk_widget_show_all(player->window);
-    
-    // Integrate import menu after UI is fully shown
-    g_timeout_add(100, [](gpointer data) -> gboolean {
-        integrate_import_menu((GtkWidget*)data);
-        return FALSE;  // Run only once
-    }, player->window);
     
 #ifdef _WIN32
     // Setup Windows single instance AFTER window is shown

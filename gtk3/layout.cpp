@@ -23,6 +23,7 @@
 #include "equalizer.h"
 
 extern IconAnimationState *g_icon_animation;
+extern void on_menu_import_directory(GtkMenuItem *menuitem, gpointer user_data);
 
 
 // Helper functions for layout management
@@ -137,6 +138,10 @@ static void create_menu_bar(AudioPlayer *player) {
     GtkWidget *open_item = gtk_menu_item_new_with_mnemonic("_Open File (Add & Play)");
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), open_item);
     g_signal_connect(open_item, "activate", G_CALLBACK(on_menu_open), player);
+
+    GtkWidget *import_dir_item = gtk_menu_item_new_with_mnemonic("_Import Directory...");
+    gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), import_dir_item);
+    g_signal_connect(import_dir_item, "activate", G_CALLBACK(on_menu_import_directory), player);
 
     GtkWidget *playlist_separator = gtk_separator_menu_item_new();
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), playlist_separator);
