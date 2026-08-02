@@ -1448,7 +1448,7 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
             // Check if file is karaoke: .kfn, .zip, or audio with associated .cdg
             bool is_karaoke = false;
             if (ext) {
-                if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0) {
+                if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0 || strcasecmp(ext, ".kar") == 0) {
                     is_karaoke = true;
                 } else {
                     // Check if it's an audio file with an associated .cdg
