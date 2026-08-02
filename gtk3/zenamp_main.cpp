@@ -507,21 +507,19 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     return FALSE;
                 }, p);
                 
-                // Heavy metadata population on background thread (don't block UI)
+                // Post display update to main thread (atomic operation, prevents conflicts)
                 std::thread([](AudioPlayer *p) {
-                    printf("Starting background metadata population thread...\n");
+                    printf("Starting background display update thread...\n");
                     g_usleep(200000);  // 200ms delay to let UI update first
                     
-                    printf("Populating metadata for %d files...\n", p->queue.count);
-                    update_queue_display_with_filter(p);  // Heavy work
-                    printf("Metadata population complete\n");
+                    printf("Posting queue display update (%d files)...\n", p->queue.count);
                     
-                    // Final UI sync
+                    // Post as atomic g_idle_add to main thread
                     g_idle_add([](gpointer data) -> gboolean {
                         AudioPlayer *p = (AudioPlayer*)data;
-                        if (p) {
-                            printf("Display updated.\n");
-                        }
+                        printf("Updating queue display on main thread\n");
+                        update_queue_display_with_filter(p);
+                        printf("Display update complete\n");
                         return FALSE;
                     }, p);
                 }, p).detach();
@@ -4730,15 +4728,23 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // Queue population happens asynchronously on background thread
+        // Queue population posted back to main thread (atomic operation)
         printf("Queuing background population of %d files...\n", player->queue.count);
         std::thread([](AudioPlayer *p) {
             printf("Background population thread started\n");
             g_usleep(100000);  // 100ms to ensure UI is fully rendered
             
             printf("Populating queue display (%d files)...\n", p->queue.count);
-            update_queue_display_with_filter(p);
-            printf("Queue display complete\n");
+            
+            // Post the entire update as atomic operation on main thread
+            // This prevents conflicts between concurrent imports
+            g_idle_add([](gpointer data) -> gboolean {
+                AudioPlayer *p = (AudioPlayer*)data;
+                printf("Queue update on main thread (%d files)\n", p->queue.count);
+                update_queue_display_with_filter(p);
+                printf("Queue display complete\n");
+                return FALSE;
+            }, p);
         }, player).detach();
     }
     
