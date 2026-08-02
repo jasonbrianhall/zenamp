@@ -127,7 +127,7 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main.cpp midiplayer.cpp 
 	cometbuster_boss.cpp cometbuster_render.cpp beatchess_draw.cpp \
 	cometbuster_util.cpp cometbuster_starboss.cpp cometbuster_bombs.cpp \
 	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp karafun.cpp \
-	kfn.cpp monkey.cpp directory_scanner.cpp
+	kfn.cpp monkey.cpp directory_scanner.cpp kar.cpp
 
 # Platform-specific source files
 SOURCES_CPP_LINUX = $(SOURCES_CPP_COMMON) \

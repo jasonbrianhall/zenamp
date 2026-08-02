@@ -28,10 +28,10 @@
 // convertm4atowav{lin,win}.cpp expose this but ship no shared header
 extern bool convertM4aToWavInMemory(const std::vector<uint8_t>& m4a_data, std::vector<uint8_t>& wav_data);
 
-static KarafunState g_karafun = {0};
+KarafunState g_karafun = {0};
 
 // See karafun_set_skip_background() / karafun.h.
-static bool g_karafun_skip_background = false;
+bool g_karafun_skip_background = false;
 
 void karafun_set_skip_background(bool skip) {
     g_karafun_skip_background = skip;

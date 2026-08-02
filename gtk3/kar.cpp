@@ -1,9 +1,10 @@
-// KAR (MIDI Karaoke) file support - integrated with Zenamp's karaoke system
+// KAR (MIDI Karaoke) file support - fully integrated with Zenamp
 // KAR files are standard MIDI files with embedded lyrics in text meta-events
-// Leverages the existing KarafunState and lyric display infrastructure
+// This is integrated into the main load_file() flow in zenamp_main.cpp
 
 #include "karafun.h"
 #include "audioconverter.h"
+#include "kar.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,12 +35,37 @@ static void delete_temp_file(const char *path) {
 #endif
 }
 
+static void cleanup_karafun_state(void) {
+    // Free existing words
+    if (g_karafun.words) {
+        for (int i = 0; i < g_karafun.word_count; i++) {
+            if (g_karafun.words[i]) free(g_karafun.words[i]);
+        }
+        free(g_karafun.words);
+        g_karafun.words = NULL;
+    }
+    g_karafun.word_count = 0;
+    
+    // Free sync times
+    if (g_karafun.sync_times_ms) {
+        free(g_karafun.sync_times_ms);
+        g_karafun.sync_times_ms = NULL;
+    }
+    g_karafun.sync_count = 0;
+    
+    // Free lines
+    if (g_karafun.lines) {
+        free(g_karafun.lines);
+        g_karafun.lines = NULL;
+    }
+    g_karafun.line_count = 0;
+}
+
 // ============================================================================
 // MIDI PARSING HELPERS
 // ============================================================================
 
 // Read a variable-length quantity from MIDI data
-// Returns the value and updates *pos to point after the data
 static uint32_t read_variable_length(const uint8_t *data, int data_len, int *pos) {
     uint32_t value = 0;
     int i = 0;
@@ -53,24 +79,124 @@ static uint32_t read_variable_length(const uint8_t *data, int data_len, int *pos
     return value;
 }
 
-// Extract timing information from a NOTE_ON event
-// Returns time in milliseconds
+// Extract timing information from delta time and tempo
 static int extract_note_time_ms(int delta_ticks, int ticks_per_quarter_note, double tempo_us_per_quarter) {
-    // tempo_us_per_quarter is microseconds per quarter note
-    // delta_ticks is the delta time in ticks
-    // Result in milliseconds
     double us = (delta_ticks * tempo_us_per_quarter) / ticks_per_quarter_note;
-    return (int)(us / 1000.0 + 0.5);  // Convert to ms and round
+    return (int)(us / 1000.0 + 0.5);
+}
+
+// Add a word to the g_karafun words array
+static bool add_word(const char *word, int sync_time_ms) {
+    if (!word || !word[0] || g_karafun.word_count >= 10000) {
+        return false;
+    }
+    
+    char **new_words = (char**)realloc(g_karafun.words,
+        sizeof(char*) * (g_karafun.word_count + 1));
+    int *new_times = (int*)realloc(g_karafun.sync_times_ms,
+        sizeof(int) * (g_karafun.sync_count + 1));
+    
+    if (!new_words || !new_times) {
+        free(new_words);
+        free(new_times);
+        return false;
+    }
+    
+    g_karafun.words = new_words;
+    g_karafun.sync_times_ms = new_times;
+    
+    char *word_dup = (char*)malloc(strlen(word) + 1);
+    if (!word_dup) {
+        return false;
+    }
+    
+    strcpy(word_dup, word);
+    g_karafun.words[g_karafun.word_count++] = word_dup;
+    g_karafun.sync_times_ms[g_karafun.sync_count++] = sync_time_ms;
+    
+    if (g_karafun.word_count <= 10) {
+        printf("KAR: Word %d @ %dms: '%s'\n", g_karafun.word_count - 1, sync_time_ms, word_dup);
+    }
+    
+    return true;
+}
+
+// Build lyric lines from the word array
+static void build_lyric_lines(void) {
+    if (g_karafun.word_count == 0) {
+        g_karafun.line_count = 0;
+        return;
+    }
+    
+    g_karafun.lines = (KarafunLyricLine*)malloc(
+        sizeof(KarafunLyricLine) * (g_karafun.word_count + 1));
+    
+    if (!g_karafun.lines) {
+        printf("KAR: Failed to allocate lyric lines\n");
+        return;
+    }
+    
+    int line_idx = 0;
+    int word_idx = 0;
+    
+    while (word_idx < g_karafun.word_count && line_idx <= g_karafun.word_count) {
+        int line_start = word_idx;
+        char display_text[2048] = {0};
+        int words_in_line = 0;
+        
+        // Group words into a line (heuristic: ~8-12 words per line, or until time gap)
+        const int WORDS_PER_LINE = 10;
+        const int MIN_TIME_GAP_MS = 500;
+        
+        while (word_idx < g_karafun.word_count && words_in_line < WORDS_PER_LINE) {
+            // Check for time gap
+            if (words_in_line > 0 && word_idx > 0) {
+                int time_gap = g_karafun.sync_times_ms[word_idx] - 
+                              g_karafun.sync_times_ms[word_idx - 1];
+                if (time_gap > MIN_TIME_GAP_MS) {
+                    break;
+                }
+            }
+            
+            // Add word to current line
+            if (words_in_line > 0) {
+                strcat(display_text, " ");
+            }
+            
+            size_t remaining = sizeof(display_text) - strlen(display_text) - 1;
+            strncat(display_text, g_karafun.words[word_idx], remaining);
+            
+            word_idx++;
+            words_in_line++;
+        }
+        
+        // Store line info
+        g_karafun.lines[line_idx].start_word_idx = line_start;
+        g_karafun.lines[line_idx].word_count = words_in_line;
+        strncpy(g_karafun.lines[line_idx].display_text, display_text,
+                sizeof(g_karafun.lines[line_idx].display_text) - 1);
+        
+        printf("KAR: Line %d (words %d-%d): '%s'\n", 
+               line_idx, line_start, word_idx - 1, display_text);
+        
+        line_idx++;
+    }
+    
+    g_karafun.line_count = line_idx;
 }
 
 // ============================================================================
-// KAR PARSING
+// KAR PARSING - Main Entry Point
 // ============================================================================
 
 bool kar_load(const char *kar_path) {
     if (!kar_path) return false;
     
     printf("KAR: Loading %s\n", kar_path);
+    
+    // Clean up any existing state
+    cleanup_karafun_state();
+    memset(&g_karafun, 0, sizeof(g_karafun));
     
     FILE *f = fopen(kar_path, "rb");
     if (!f) {
@@ -110,8 +236,8 @@ bool kar_load(const char *kar_path) {
     // Save converted WAV to temp file
     char temp_wav_path[256] = {0};
 #ifndef _WIN32
-    snprintf(temp_wav_path, sizeof(temp_wav_path), "/tmp/kar_XXXXXX");
-    int fd = mkstemp(temp_wav_path);
+    snprintf(temp_wav_path, sizeof(temp_wav_path), "/tmp/kar_XXXXXX.wav");
+    int fd = mkstemps(temp_wav_path, 4);  // 4 for ".wav"
     if (fd == -1) {
         printf("KAR: Failed to create temp WAV file\n");
         free(midi_data);
@@ -120,8 +246,21 @@ bool kar_load(const char *kar_path) {
     close(fd);
 #else
     char temp_dir[MAX_PATH];
-    GetTempPathA(MAX_PATH, temp_dir);
-    snprintf(temp_wav_path, sizeof(temp_wav_path), "%skar_XXXXXX.wav", temp_dir);
+    if (!GetTempPathA(MAX_PATH, temp_dir)) {
+        printf("KAR: Failed to get temp directory\n");
+        free(midi_data);
+        return false;
+    }
+    
+    char base[MAX_PATH];
+    if (!GetTempFileNameA(temp_dir, "kar", 0, base)) {
+        printf("KAR: Failed to get temp filename\n");
+        free(midi_data);
+        return false;
+    }
+    
+    snprintf(temp_wav_path, sizeof(temp_wav_path), "%s.wav", base);
+    DeleteFileA(base);
 #endif
     
     FILE *wav_file = fopen(temp_wav_path, "wb");
@@ -141,7 +280,7 @@ bool kar_load(const char *kar_path) {
     }
     fclose(wav_file);
     
-    printf("KAR: Converted to WAV: %s\n", temp_wav_path);
+    printf("KAR: Converted to WAV: %s (%zu bytes)\n", temp_wav_path, wav_data.size());
     strncpy(g_karafun.tmp_mixed_path, temp_wav_path, sizeof(g_karafun.tmp_mixed_path) - 1);
     
     // ============================================================================
@@ -158,10 +297,12 @@ bool kar_load(const char *kar_path) {
     }
     pos += 4;
     
-    // Header length (should be 6)
-    pos += 4;  // Skip header length field
+    // Header length
+    uint32_t header_len = (midi_data[pos] << 24) | (midi_data[pos+1] << 16) |
+                          (midi_data[pos+2] << 8) | midi_data[pos+3];
+    pos += 4;
     
-    // Format type (0, 1, or 2)
+    // Format type
     uint16_t format = (midi_data[pos] << 8) | midi_data[pos+1];
     pos += 2;
     
@@ -180,7 +321,7 @@ bool kar_load(const char *kar_path) {
     int cumulative_ms = 0;
     
     // ============================================================================
-    // Parse tracks looking for lyrics and title/artist
+    // Parse tracks looking for lyrics and metadata
     // ============================================================================
     
     for (int track_idx = 0; track_idx < track_count && pos < file_size; track_idx++) {
@@ -226,57 +367,28 @@ bool kar_load(const char *kar_path) {
                 
                 if (pos + meta_len > file_size) break;
                 
-                // Text meta event (0x01): lyrics or title
+                // Text Meta event (0x01) - lyrics or title/artist
                 if (meta_type == 0x01 && meta_len > 0) {
-                    char text[4096] = {0};
-                    int copy_len = meta_len < (int)sizeof(text) - 1 ? meta_len : (int)sizeof(text) - 1;
+                    char text[512] = {0};
+                    size_t copy_len = (meta_len < sizeof(text) - 1) ? meta_len : sizeof(text) - 1;
                     memcpy(text, &midi_data[pos], copy_len);
+                    text[copy_len] = '\0';
                     
-                    // KAR lyrics use special prefixes:
-                    // @T = Title
-                    // @A = Artist
-                    // @L = Language code (usually ignored)
-                    // No prefix = regular lyric syllable
-                    
-                    if (text[0] == '@' && meta_len >= 2) {
-                        if (text[1] == 'T' && meta_len > 2) {
-                            // Title
+                    // Check for @T (title), @AR (artist), @AL (album) directives
+                    if (text[0] == '@' && copy_len >= 2) {
+                        if (text[1] == 'T' && copy_len > 2) {
+                            // Title directive: @T<title>
                             strncpy(g_karafun.title, &text[2], sizeof(g_karafun.title) - 1);
-                            printf("KAR: Title = %s\n", g_karafun.title);
-                        } else if (text[1] == 'A' && meta_len > 2) {
-                            // Artist
-                            strncpy(g_karafun.artist, &text[2], sizeof(g_karafun.artist) - 1);
-                            printf("KAR: Artist = %s\n", g_karafun.artist);
+                            printf("KAR: Title: %s\n", g_karafun.title);
+                        } else if (text[1] == 'A' && text[2] == 'R' && copy_len > 3) {
+                            // Artist directive: @AR<artist>
+                            strncpy(g_karafun.artist, &text[3], sizeof(g_karafun.artist) - 1);
+                            printf("KAR: Artist: %s\n", g_karafun.artist);
                         }
-                        // Skip other @ directives (like @L, @I, etc.)
+                        // Skip other @ directives
                     } else if (text[0] && text[0] != '@') {
                         // Regular lyric syllable - add to words array
-                        // In KAR files, each text event is a syllable with associated timing
-                        if (g_karafun.word_count < 10000) {
-                            char **new_words = (char**)realloc(g_karafun.words,
-                                sizeof(char*) * (g_karafun.word_count + 1));
-                            int *new_times = (int*)realloc(g_karafun.sync_times_ms,
-                                sizeof(int) * (g_karafun.sync_count + 1));
-                            
-                            if (new_words && new_times) {
-                                g_karafun.words = new_words;
-                                g_karafun.sync_times_ms = new_times;
-                                
-                                char *word_dup = (char*)malloc(copy_len + 1);
-                                if (word_dup) {
-                                    strncpy(word_dup, text, copy_len);
-                                    word_dup[copy_len] = '\0';
-                                    
-                                    g_karafun.words[g_karafun.word_count++] = word_dup;
-                                    g_karafun.sync_times_ms[g_karafun.sync_count++] = cumulative_ms;
-                                    
-                                    if (g_karafun.word_count <= 5) {
-                                        printf("KAR: Word %d @ %dms: %s\n", 
-                                               g_karafun.word_count - 1, cumulative_ms, word_dup);
-                                    }
-                                }
-                            }
-                        }
+                        add_word(text, cumulative_ms);
                     }
                 }
                 // Set Tempo meta event (0x51)
@@ -312,14 +424,13 @@ bool kar_load(const char *kar_path) {
                     case 0xA0: // Polyphonic Pressure
                     case 0xB0: // Control Change
                     case 0xE0: // Pitch Bend
-                        pos += 2;  // 2 data bytes
+                        pos += 2;
                         break;
                     case 0xC0: // Program Change
                     case 0xD0: // Channel Pressure
-                        pos += 1;  // 1 data byte
+                        pos += 1;
                         break;
                     default:
-                        // Unknown event, try to skip it
                         break;
                 }
             }
@@ -340,70 +451,16 @@ bool kar_load(const char *kar_path) {
         return false;
     }
     
-    // ============================================================================
     // Build lyric lines from words
-    // ============================================================================
-    
-    // Group words into lines by tracking when times jump significantly
-    // or based on explicit line breaks (if implemented)
-    if (g_karafun.word_count > 0) {
-        g_karafun.lines = (KarafunLyricLine*)malloc(sizeof(KarafunLyricLine) * (g_karafun.word_count + 1));
-        if (g_karafun.lines) {
-            int line_start_idx = 0;
-            int current_line = 0;
-            
-            for (int i = 0; i < g_karafun.word_count; i++) {
-                // Simple heuristic: start a new line every N words (8-12 is reasonable)
-                // In practice, KAR files might have explicit breaks, but we'll keep it simple
-                bool start_new_line = (i > 0 && i % 10 == 0);
-                
-                if (start_new_line && current_line < g_karafun.word_count) {
-                    // Finalize previous line
-                    g_karafun.lines[current_line].start_word_idx = line_start_idx;
-                    g_karafun.lines[current_line].word_count = i - line_start_idx;
-                    
-                    // Build display text for line
-                    char display_text[2048] = {0};
-                    for (int j = line_start_idx; j < i; j++) {
-                        if (j > line_start_idx) strcat(display_text, " ");
-                        strncat(display_text, g_karafun.words[j], sizeof(display_text) - strlen(display_text) - 1);
-                    }
-                    strncpy(g_karafun.lines[current_line].display_text, display_text,
-                           sizeof(g_karafun.lines[0].display_text) - 1);
-                    
-                    printf("KAR: Line %d (words %d-%d): %s\n", 
-                           current_line, line_start_idx, i - 1, display_text);
-                    
-                    line_start_idx = i;
-                    current_line++;
-                }
-            }
-            
-            // Finalize last line
-            if (current_line < g_karafun.word_count) {
-                g_karafun.lines[current_line].start_word_idx = line_start_idx;
-                g_karafun.lines[current_line].word_count = g_karafun.word_count - line_start_idx;
-                
-                char display_text[2048] = {0};
-                for (int j = line_start_idx; j < g_karafun.word_count; j++) {
-                    if (j > line_start_idx) strcat(display_text, " ");
-                    strncat(display_text, g_karafun.words[j], sizeof(display_text) - strlen(display_text) - 1);
-                }
-                strncpy(g_karafun.lines[current_line].display_text, display_text,
-                       sizeof(g_karafun.lines[0].display_text) - 1);
-                
-                printf("KAR: Line %d (words %d-%d): %s\n", 
-                       current_line, line_start_idx, g_karafun.word_count - 1, display_text);
-                
-                current_line++;
-            }
-            
-            g_karafun.line_count = current_line;
-        }
-    }
+    build_lyric_lines();
     
     g_karafun.active = true;
-    printf("KAR: Successfully loaded with %d lines\n", g_karafun.line_count);
+    g_karafun.current_word_idx = 0;
+    g_karafun.has_backing_track = false;
+    g_karafun.backing_channel = -1;
+    
+    printf("KAR: Successfully loaded with %d words in %d lines\n", 
+           g_karafun.word_count, g_karafun.line_count);
     
     return true;
 }
@@ -416,13 +473,17 @@ void kar_update(double playback_position_seconds) {
     
     int playback_ms = (int)(playback_position_seconds * 1000.0);
     
-    // Find current word index based on sync times
+    // Binary search to find the current word index based on sync times
+    int left = 0, right = g_karafun.sync_count - 1;
     int word_idx = 0;
-    for (int i = 0; i < g_karafun.sync_count; i++) {
-        if (g_karafun.sync_times_ms[i] <= playback_ms) {
-            word_idx = i;
+    
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        if (g_karafun.sync_times_ms[mid] <= playback_ms) {
+            word_idx = mid;
+            left = mid + 1;
         } else {
-            break;
+            right = mid - 1;
         }
     }
     
@@ -434,29 +495,7 @@ void kar_stop(void) {
     if (!g_karafun.active) return;
     
     g_karafun.active = false;
-    g_karafun.current_word_idx = 0;
-    
-    // Clean up lyrics
-    if (g_karafun.words) {
-        for (int i = 0; i < g_karafun.word_count; i++) {
-            if (g_karafun.words[i]) free(g_karafun.words[i]);
-        }
-        free(g_karafun.words);
-        g_karafun.words = NULL;
-    }
-    g_karafun.word_count = 0;
-    
-    if (g_karafun.sync_times_ms) {
-        free(g_karafun.sync_times_ms);
-        g_karafun.sync_times_ms = NULL;
-    }
-    g_karafun.sync_count = 0;
-    
-    if (g_karafun.lines) {
-        free(g_karafun.lines);
-        g_karafun.lines = NULL;
-    }
-    g_karafun.line_count = 0;
+    cleanup_karafun_state();
     
     printf("KAR: Stopped\n");
 }
@@ -466,4 +505,9 @@ bool is_kar_ext(const char *filename) {
     const char *dot = strrchr(filename, '.');
     if (!dot) return false;
     return strcasecmp(dot, ".kar") == 0;
+}
+
+// Get the current KarafunState populated by kar_load()
+KarafunState* kar_get_state(void) {
+    return &g_karafun;
 }

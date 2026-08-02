@@ -37,6 +37,7 @@
 #include "equalizer.h"
 #include "zip_support.h"
 #include "karafun.h"
+#include "kar.h"
 
 // ============================================================================
 // Directory Scanner - Integrated Music Import
@@ -1457,10 +1458,28 @@ bool load_file(AudioPlayer *player, const char *filename) {
         return success;
     }
 
-    // Any non-.kfn load means we're leaving karaoke-lyrics mode. Clear stale
+    // Check for KAR (Karaoke MIDI) files - Extract lyrics and convert audio
+    if (strcmp(ext_lower, ".kar") == 0) {
+        printf("Loading KAR file: %s\n", filename);
+        if (kar_load(filename)) {
+            KarafunState* kar_state = kar_get_state();
+            const char *mixed_path = karafun_get_mixed_path();
+            if (mixed_path && kar_state) {
+                printf("KAR loaded with %d words in %d lines, playing audio\n", 
+                       kar_state->word_count, kar_state->line_count);
+                success = load_file(player, mixed_path);
+                if (success && player->visualizer) {
+                    enter_karaoke_visualization(player);
+                }
+            }
+        }
+        return success;
+    }
+
+    // Any non-.kfn/.kar load means we're leaving karaoke-lyrics mode. Clear stale
     // karafun state (words/sync/lines, active flag, temp files) so the lyric
     // overlay stops rendering — but not when this call IS the recursive
-    // load of karafun's own mixed vocal+backing WAV right after karafun_load().
+    // load of karafun's own mixed vocal+backing WAV right after karafun_load() or kar_load().
     {
         const char *karafun_mixed = karafun_get_mixed_path();
         if (!(karafun_mixed && strcmp(filename, karafun_mixed) == 0)) {
@@ -1472,7 +1491,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
     if (strcmp(ext_lower, ".wav") == 0) {
         printf("Loading WAV file: %s\n", filename);
         success = load_wav_file(player, filename);
-    } else if (strcmp(ext_lower, ".mid") == 0 || strcmp(ext_lower, ".midi") == 0 || strcmp(ext_lower, ".kar") == 0) {
+    } else if (strcmp(ext_lower, ".mid") == 0 || strcmp(ext_lower, ".midi") == 0) {
         printf("Loading MIDI file: %s\n", filename);
         if (convert_midi_to_wav(player, filename)) {
             printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
@@ -1907,6 +1926,9 @@ void start_playback(AudioPlayer *player) {
             if (currently_playing && p->audio_buffer.data && p->sample_rate > 0 && p->channels > 0) {
                 double samples_per_second = (double)(p->sample_rate * p->channels);
                 playTime = (double)p->audio_buffer.position / samples_per_second;
+                
+                // Update KAR lyrics synchronization
+                kar_update(playTime);
             }
             
             pthread_mutex_unlock(&p->audio_mutex);
