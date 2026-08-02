@@ -54,7 +54,7 @@ bool convertMidiToWavInMemory(const std::vector<uint8_t>& midiData, std::vector<
     close(wavfd); // We just need the filename, close the descriptor
     
     // Use the existing convertMidiToWav function
-    bool conversionSuccess = convertMidiToWav(tempMidiPath, tempWavPath, 1000);
+    bool conversionSuccess = convertMidiToWav(tempMidiPath, tempWavPath, 100);
     
     if (!conversionSuccess) {
         std::cerr << "MIDI to WAV conversion failed" << std::endl;
@@ -205,7 +205,7 @@ bool convertMidiToWavInMemory(const std::vector<uint8_t>& midiData, std::vector<
     fclose(tempMidi);
     
     // Use the existing convertMidiToWav function
-    bool conversionSuccess = convertMidiToWav(tempMidiPath, tempWavPath, 1000);
+    bool conversionSuccess = convertMidiToWav(tempMidiPath, tempWavPath, 100);
     
     if (!conversionSuccess) {
         std::cerr << "MIDI to WAV conversion failed" << std::endl;

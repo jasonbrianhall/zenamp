@@ -121,69 +121,83 @@ static bool add_word(const char *word, int sync_time_ms) {
     return true;
 }
 
+// Remove '/' and '\' from a word
+static void sanitize_word(const char *src, char *dst, size_t dst_size) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] != '\0' && j < dst_size - 1; i++) {
+        if (src[i] == '/' || src[i] == '\\')
+            continue; // skip these characters
+        dst[j++] = src[i];
+    }
+    dst[j] = '\0';
+}
+
 // Build lyric lines from the word array
 static void build_lyric_lines(void) {
     if (g_karafun.word_count == 0) {
         g_karafun.line_count = 0;
         return;
     }
-    
+
     g_karafun.lines = (KarafunLyricLine*)malloc(
         sizeof(KarafunLyricLine) * (g_karafun.word_count + 1));
-    
+
     if (!g_karafun.lines) {
         printf("KAR: Failed to allocate lyric lines\n");
         return;
     }
-    
+
     int line_idx = 0;
     int word_idx = 0;
-    
+
     while (word_idx < g_karafun.word_count && line_idx <= g_karafun.word_count) {
         int line_start = word_idx;
         char display_text[2048] = {0};
         int words_in_line = 0;
-        
-        // Group words into a line (heuristic: ~8-12 words per line, or until time gap)
+
         const int WORDS_PER_LINE = 10;
         const int MIN_TIME_GAP_MS = 500;
-        
+
         while (word_idx < g_karafun.word_count && words_in_line < WORDS_PER_LINE) {
-            // Check for time gap
             if (words_in_line > 0 && word_idx > 0) {
-                int time_gap = g_karafun.sync_times_ms[word_idx] - 
-                              g_karafun.sync_times_ms[word_idx - 1];
+                int time_gap = g_karafun.sync_times_ms[word_idx] -
+                               g_karafun.sync_times_ms[word_idx - 1];
                 if (time_gap > MIN_TIME_GAP_MS) {
                     break;
                 }
             }
-            
-            // Add word to current line
+
+            // Sanitize the word before adding it
+            char clean_word[512];
+            sanitize_word(g_karafun.words[word_idx], clean_word, sizeof(clean_word));
+
             if (words_in_line > 0) {
                 strcat(display_text, " ");
             }
-            
+
             size_t remaining = sizeof(display_text) - strlen(display_text) - 1;
-            strncat(display_text, g_karafun.words[word_idx], remaining);
-            
+            strncat(display_text, clean_word, remaining);
+
             word_idx++;
             words_in_line++;
         }
-        
-        // Store line info
+
         g_karafun.lines[line_idx].start_word_idx = line_start;
         g_karafun.lines[line_idx].word_count = words_in_line;
-        strncpy(g_karafun.lines[line_idx].display_text, display_text,
+
+        strncpy(g_karafun.lines[line_idx].display_text,
+                display_text,
                 sizeof(g_karafun.lines[line_idx].display_text) - 1);
-        
-        printf("KAR: Line %d (words %d-%d): '%s'\n", 
+
+        printf("KAR: Line %d (words %d-%d): '%s'\n",
                line_idx, line_start, word_idx - 1, display_text);
-        
+
         line_idx++;
     }
-    
+
     g_karafun.line_count = line_idx;
 }
+
 
 // ============================================================================
 // KAR PARSING - Main Entry Point
