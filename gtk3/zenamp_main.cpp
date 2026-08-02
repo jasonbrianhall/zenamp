@@ -497,17 +497,34 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 // Unlock the queue
                 pthread_mutex_unlock(&p->audio_mutex);
                 
-                // Update UI after dedup (no lock needed for UI update)
+                // Quick UI update on main thread (just refresh counts/state)
                 g_idle_add([](gpointer data) -> gboolean {
                     AudioPlayer *p = (AudioPlayer*)data;
                     if (p) {
-                        printf("Updating display after deduplication...\n");
-                        update_queue_display_with_filter(p);
-                        update_gui_state(p);
-                        printf("Display updated.\n");
+                        printf("Quick UI update after deduplication...\n");
+                        update_gui_state(p);  // Quick update only
                     }
                     return FALSE;
                 }, p);
+                
+                // Heavy metadata population on background thread (don't block UI)
+                std::thread([](AudioPlayer *p) {
+                    printf("Starting background metadata population thread...\n");
+                    g_usleep(200000);  // 200ms delay to let UI update first
+                    
+                    printf("Populating metadata for %d files...\n", p->queue.count);
+                    update_queue_display_with_filter(p);  // Heavy work
+                    printf("Metadata population complete\n");
+                    
+                    // Final UI sync
+                    g_idle_add([](gpointer data) -> gboolean {
+                        AudioPlayer *p = (AudioPlayer*)data;
+                        if (p) {
+                            printf("Display updated.\n");
+                        }
+                        return FALSE;
+                    }, p);
+                }, p).detach();
             }, player);
             dedup_thread.detach();
         } else {
@@ -4437,6 +4454,11 @@ int main(int argc, char *argv[]) {
     update_gui_state(player);
     gtk_widget_show_all(player->window);
     
+    // Force UI to render immediately before any blocking operations
+    while (gtk_events_pending()) {
+        gtk_main_iteration();
+    }
+    
 #ifdef _WIN32
     // Setup Windows single instance AFTER window is shown
     HANDLE single_instance_mutex = CreateMutexA(NULL, TRUE, ZENAMP_MUTEX_NAME);
@@ -4708,25 +4730,15 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        update_queue_display_minimal(player);  // Performance: minimal update on startup
-        update_gui_state(player);
-        
-        // Start background thread to populate metadata (without blocking UI)
-        printf("Starting background queue population thread...\n");
+        // Queue population happens asynchronously on background thread
+        printf("Queuing background population of %d files...\n", player->queue.count);
         std::thread([](AudioPlayer *p) {
-            printf("Queue population thread started\n");
+            printf("Background population thread started\n");
+            g_usleep(100000);  // 100ms to ensure UI is fully rendered
             
-            // Give UI a chance to render first
-            g_usleep(500000);  // 500ms
-            
-            // Now call the full update to extract metadata in background
-            g_idle_add([](gpointer data) -> gboolean {
-                AudioPlayer *p = (AudioPlayer*)data;
-                printf("Populating queue with metadata in background...\n");
-                update_queue_display_with_filter(p);
-                printf("Queue population complete\n");
-                return FALSE;
-            }, p);
+            printf("Populating queue display (%d files)...\n", p->queue.count);
+            update_queue_display_with_filter(p);
+            printf("Queue display complete\n");
         }, player).detach();
     }
     
