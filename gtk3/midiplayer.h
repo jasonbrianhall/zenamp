@@ -47,10 +47,28 @@ struct FMInstrument {
     unsigned char percNote;
 };
 
+// Lyric event structure
+typedef struct {
+    double timestamp;      // in seconds
+    char* text;            // lyric text
+    int syllableIndex;     // sequence number
+} LyricEvent;
+
+typedef struct {
+    LyricEvent* events;
+    int count;
+    int capacity;
+    char* title;
+    char* artist;
+    char* album;
+    char* language;
+} LyricData;
+
 // Global variable declarations
 extern struct FMInstrument adl[181];
 extern VirtualMixer* g_midi_mixer;
 extern int g_midi_mixer_channel;
+extern LyricData* g_lyrics;  // Global lyrics data
 
 // FM Synthesis Emulator
 typedef struct {
@@ -97,5 +115,21 @@ void handleEvents();
 void updateVolume(int change);
 void toggleNormalization();
 void generateAudio(void* userdata, Uint8* stream, int len);
+
+// Helper functions
+unsigned long readVarLen(FILE* f);
+int readString(FILE* f, int len, char* str);
+unsigned long convertInteger(char* str, int len);
+double ticksToSeconds(uint32_t ticks, uint32_t ticksPerBeat, int tempo);
+void parseLyricText(const char* text, int len, LyricData* lyrics, double timestamp);
+
+// Lyric extraction functions
+LyricData* extractLyricsFromKar(const char* filename);
+void exportToLrc(LyricData* lyrics, const char* outputFile);
+LyricEvent* getLyricAtTime(LyricData* lyrics, double currentTime);
+LyricEvent** getNextLyrics(LyricData* lyrics, double currentTime, int maxCount, int* count);
+void freeLyrics(LyricData* lyrics);
+void printLyrics(LyricData* lyrics);
+void displayCurrentLyric(double currentTime);
 
 #endif // MIDIPLAYER_H

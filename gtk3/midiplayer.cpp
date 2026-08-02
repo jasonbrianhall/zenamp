@@ -21,6 +21,7 @@
 
 VirtualMixer* g_midi_mixer = NULL;
 int g_midi_mixer_channel = -1;
+LyricData* g_lyrics = nullptr;
 
 #ifndef _WIN32
 struct termios old_tio;
@@ -151,6 +152,227 @@ bool initSDL() {
     return true;
 }
 
+// Extract lyrics from KAR file
+LyricData* extractLyricsFromKar(const char* filename) {
+    LyricData* lyrics = new LyricData();
+    lyrics->events = new LyricEvent[1000];
+    lyrics->count = 0;
+    lyrics->capacity = 1000;
+    lyrics->title = nullptr;
+    lyrics->artist = nullptr;
+    lyrics->album = nullptr;
+    lyrics->language = nullptr;
+    
+    FILE* file = fopen(filename, "rb");
+    if (!file) {
+        fprintf(stderr, "Error: Cannot open file %s\n", filename);
+        return lyrics;
+    }
+    
+    // Read MIDI header
+    char header[4];
+    if (fread(header, 1, 4, file) != 4 || strncmp(header, "MThd", 4) != 0) {
+        fprintf(stderr, "Error: Not a valid MIDI file\n");
+        fclose(file);
+        return lyrics;
+    }
+    
+    // Read header length
+    char buffer[4];
+    fread(buffer, 1, 4, file);
+    (void)convertInteger(buffer, 4);  // Read header length but not used for validation
+    
+    // Read format type, track count, ticks per beat
+    fread(buffer, 1, 2, file);
+    uint16_t formatType = (uint16_t)convertInteger(buffer, 2);
+    
+    fread(buffer, 1, 2, file);
+    uint16_t trackCount = (uint16_t)convertInteger(buffer, 2);
+    
+    fread(buffer, 1, 2, file);
+    uint16_t ticksPerBeat = (uint16_t)convertInteger(buffer, 2);
+    
+    printf("KAR Extraction - Format: %d, Tracks: %d, Ticks/Beat: %d\n", formatType, trackCount, ticksPerBeat);
+    
+    int currentTempo = 500000;  // Default 120 BPM in microseconds per beat
+    uint32_t trackTime = 0;
+    
+    // Process each track
+    for (int track = 0; track < trackCount; track++) {
+        if (fread(header, 1, 4, file) != 4 || strncmp(header, "MTrk", 4) != 0) {
+            fprintf(stderr, "Warning: Invalid track header\n");
+            break;
+        }
+        
+        fread(buffer, 1, 4, file);
+        uint32_t trackLen = convertInteger(buffer, 4);
+        
+        long trackStart = ftell(file);
+        trackTime = 0;
+        
+        // Parse track events
+        while (ftell(file) < trackStart + (long)trackLen) {
+            uint32_t deltaTime = readVarLen(file);
+            trackTime += deltaTime;
+            
+            unsigned char status = fgetc(file);
+            
+            if (status == 0xFF) {  // Meta event
+                unsigned char metaType = fgetc(file);
+                uint32_t length = readVarLen(file);
+                
+                if (metaType == 0x51) {  // Tempo event
+                    if (length >= 3) {
+                        unsigned char b1 = fgetc(file);
+                        unsigned char b2 = fgetc(file);
+                        unsigned char b3 = fgetc(file);
+                        currentTempo = (b1 << 16) | (b2 << 8) | b3;
+                    }
+                }
+                else if (metaType == 0x01) {  // Text meta event (lyrics)
+                    char* textData = (char*)malloc(length + 1);
+                    fread(textData, 1, length, file);
+                    textData[length] = '\0';
+                    
+                    double timestamp = ticksToSeconds(trackTime, ticksPerBeat, currentTempo);
+                    
+                    parseLyricText(textData, length, lyrics, timestamp);
+                    free(textData);
+                    continue;
+                }
+                else {
+                    fseek(file, length, SEEK_CUR);
+                }
+            }
+            else if ((status & 0xF0) == 0xF0) {
+                uint32_t length = readVarLen(file);
+                fseek(file, length, SEEK_CUR);
+            }
+            else {
+                unsigned char param1 = fgetc(file);
+                (void)param1;  // Avoid unused variable warning
+                if ((status & 0xF0) != 0xC0 && (status & 0xF0) != 0xD0) {
+                    unsigned char param2 = fgetc(file);
+                    (void)param2;  // Avoid unused variable warning
+                }
+            }
+        }
+    }
+    
+    fclose(file);
+    printf("Extracted %d lyric events\n", lyrics->count);
+    return lyrics;
+}
+
+// Export to .lrc format
+void exportToLrc(LyricData* lyrics, const char* outputFile) {
+    if (!lyrics) return;
+    
+    FILE* out = fopen(outputFile, "w");
+    if (!out) {
+        fprintf(stderr, "Error: Cannot create output file %s\n", outputFile);
+        return;
+    }
+    
+    fprintf(out, "[ti:]\n[ar:]\n[al:]\n\n");
+    
+    for (int i = 0; i < lyrics->count; i++) {
+        int minutes = (int)lyrics->events[i].timestamp / 60;
+        int seconds = (int)lyrics->events[i].timestamp % 60;
+        int centiseconds = (int)((lyrics->events[i].timestamp - (int)lyrics->events[i].timestamp) * 100);
+        
+        fprintf(out, "[%02d:%02d.%02d]%s\n", minutes, seconds, centiseconds, lyrics->events[i].text);
+    }
+    
+    fclose(out);
+    printf("Lyrics exported to %s\n", outputFile);
+}
+
+// Get lyric at current playback time
+LyricEvent* getLyricAtTime(LyricData* lyrics, double currentTime) {
+    if (!lyrics || lyrics->count == 0) return NULL;
+    
+    for (int i = 0; i < lyrics->count; i++) {
+        if (lyrics->events[i].timestamp >= currentTime) {
+            return &lyrics->events[i];
+        }
+    }
+    
+    return &lyrics->events[lyrics->count - 1];
+}
+
+// Get next N lyrics from current time
+LyricEvent** getNextLyrics(LyricData* lyrics, double currentTime, int maxCount, int* count) {
+    if (!lyrics || lyrics->count == 0) {
+        *count = 0;
+        return NULL;
+    }
+    
+    LyricEvent** result = (LyricEvent**)malloc(sizeof(LyricEvent*) * maxCount);
+    int resultCount = 0;
+    
+    for (int i = 0; i < lyrics->count && resultCount < maxCount; i++) {
+        if (lyrics->events[i].timestamp >= currentTime) {
+            result[resultCount++] = &lyrics->events[i];
+        }
+    }
+    
+    *count = resultCount;
+    if (resultCount == 0) {
+        free(result);
+        return NULL;
+    }
+    
+    return result;
+}
+
+// Print all extracted lyrics
+void printLyrics(LyricData* lyrics) {
+    if (!lyrics) return;
+    
+    printf("\n=== KAR FILE METADATA ===\n");
+    if (lyrics->title) printf("Title: %s\n", lyrics->title);
+    if (lyrics->artist) printf("Artist: %s\n", lyrics->artist);
+    if (lyrics->album) printf("Album: %s\n", lyrics->album);
+    if (lyrics->language) printf("Language: %s\n", lyrics->language);
+    printf("Total Lyrics: %d\n", lyrics->count);
+    printf("\n=== LYRICS WITH TIMING ===\n");
+    
+    for (int i = 0; i < lyrics->count; i++) {
+        printf("[%.3f] %s\n", lyrics->events[i].timestamp, lyrics->events[i].text);
+    }
+}
+
+// Cleanup lyrics
+void freeLyrics(LyricData* lyrics) {
+    if (!lyrics) return;
+    
+    for (int i = 0; i < lyrics->count; i++) {
+        delete[] lyrics->events[i].text;
+    }
+    delete[] lyrics->events;
+    
+    if (lyrics->title) delete[] lyrics->title;
+    if (lyrics->artist) delete[] lyrics->artist;
+    if (lyrics->album) delete[] lyrics->album;
+    if (lyrics->language) delete[] lyrics->language;
+    
+    delete lyrics;
+}
+
+// Display current lyric during playback
+void displayCurrentLyric(double currentTime) {
+    if (!g_lyrics || g_lyrics->count == 0) return;
+    
+    LyricEvent* current = getLyricAtTime(g_lyrics, currentTime);
+    if (current) {
+        // Only print if text is not empty and not a screen break
+        if (current->text && strlen(current->text) > 0 && strcmp(current->text, "\n") != 0) {
+            printf("[%.2f] %s\n", current->timestamp, current->text);
+        }
+    }
+}
+
 // Cleanup when shutting down
 void cleanup() {
     SDL_CloseAudioDevice(audioDevice);
@@ -162,6 +384,11 @@ void cleanup() {
     if (midiFile) {
         fclose(midiFile);
         midiFile = NULL;
+    }
+    
+    if (g_lyrics) {
+        freeLyrics(g_lyrics);
+        g_lyrics = nullptr;
     }
 }
 
@@ -196,6 +423,144 @@ unsigned long convertInteger(char* str, int len) {
         value = value * 256 + (unsigned char)str[i];
     }
     return value;
+}
+
+// Helper: Convert MIDI ticks to seconds
+double ticksToSeconds(uint32_t ticks, uint32_t ticksPerBeat, int tempo) {
+    double secondsPerBeat = tempo / 1000000.0;
+    double secondsPerTick = secondsPerBeat / ticksPerBeat;
+    return ticks * secondsPerTick;
+}
+
+// Parse text event and extract lyrics/metadata
+void parseLyricText(const char* text, int len, LyricData* lyrics, double timestamp) {
+    if (len == 0) return;
+    if (!lyrics) return;
+    
+    // Check for metadata headers
+    if (text[0] == '@') {
+        // Extract metadata
+        if (strncmp(text, "@T", 2) == 0 && !lyrics->title) {
+            // Title
+            int metaLen = len - 2;
+            lyrics->title = new char[metaLen + 1];
+            strncpy(lyrics->title, text + 2, metaLen);
+            lyrics->title[metaLen] = '\0';
+            printf("[KAR] Title: %s\n", lyrics->title);
+        }
+        else if (strncmp(text, "@AR", 3) == 0 && !lyrics->artist) {
+            // Artist
+            int metaLen = len - 3;
+            lyrics->artist = new char[metaLen + 1];
+            strncpy(lyrics->artist, text + 3, metaLen);
+            lyrics->artist[metaLen] = '\0';
+            printf("[KAR] Artist: %s\n", lyrics->artist);
+        }
+        else if (strncmp(text, "@AL", 3) == 0 && !lyrics->album) {
+            // Album
+            int metaLen = len - 3;
+            lyrics->album = new char[metaLen + 1];
+            strncpy(lyrics->album, text + 3, metaLen);
+            lyrics->album[metaLen] = '\0';
+            printf("[KAR] Album: %s\n", lyrics->album);
+        }
+        else if (strncmp(text, "@L", 2) == 0 && !lyrics->language) {
+            // Language
+            int metaLen = len - 2;
+            lyrics->language = new char[metaLen + 1];
+            strncpy(lyrics->language, text + 2, metaLen);
+            lyrics->language[metaLen] = '\0';
+            printf("[KAR] Language: %s\n", lyrics->language);
+        }
+        return;
+    }
+    
+    char buffer[512] = {0};
+    int bufPos = 0;
+    
+    for (int i = 0; i < len; i++) {
+        char c = text[i];
+        
+        if (c == '\\') {
+            // Backslash = end of lyric line
+            if (bufPos > 0) {
+                buffer[bufPos] = '\0';
+                
+                if (lyrics->count >= lyrics->capacity) {
+                    lyrics->capacity *= 2;
+                    LyricEvent* newEvents = new LyricEvent[lyrics->capacity];
+                    for (int j = 0; j < lyrics->count; j++) {
+                        newEvents[j] = lyrics->events[j];
+                    }
+                    delete[] lyrics->events;
+                    lyrics->events = newEvents;
+                }
+                
+                lyrics->events[lyrics->count].timestamp = timestamp;
+                lyrics->events[lyrics->count].text = new char[bufPos + 1];
+                strcpy(lyrics->events[lyrics->count].text, buffer);
+                lyrics->events[lyrics->count].syllableIndex = lyrics->count;
+                lyrics->count++;
+                bufPos = 0;
+            }
+        }
+        else if (c == '/') {
+            // Forward slash = paragraph/screen break
+            if (bufPos > 0) {
+                buffer[bufPos] = '\0';
+                
+                if (lyrics->count >= lyrics->capacity) {
+                    lyrics->capacity *= 2;
+                    LyricEvent* newEvents = new LyricEvent[lyrics->capacity];
+                    for (int j = 0; j < lyrics->count; j++) {
+                        newEvents[j] = lyrics->events[j];
+                    }
+                    delete[] lyrics->events;
+                    lyrics->events = newEvents;
+                }
+                
+                lyrics->events[lyrics->count].timestamp = timestamp;
+                lyrics->events[lyrics->count].text = new char[bufPos + 1];
+                strcpy(lyrics->events[lyrics->count].text, buffer);
+                lyrics->events[lyrics->count].syllableIndex = lyrics->count;
+                lyrics->count++;
+                bufPos = 0;
+            }
+            // Add screen break marker
+            if (lyrics->count < lyrics->capacity) {
+                lyrics->events[lyrics->count].timestamp = timestamp;
+                lyrics->events[lyrics->count].text = new char[2];
+                strcpy(lyrics->events[lyrics->count].text, "\n");
+                lyrics->count++;
+            }
+        }
+        else if (c != '\0') {
+            if (bufPos < (int)sizeof(buffer) - 1) {
+                buffer[bufPos++] = c;
+            }
+        }
+    }
+    
+    // Handle remaining text
+    if (bufPos > 0) {
+        buffer[bufPos] = '\0';
+        
+        if (lyrics->count >= lyrics->capacity) {
+            lyrics->capacity *= 2;
+            LyricEvent* newEvents = new LyricEvent[lyrics->capacity];
+            for (int j = 0; j < lyrics->count; j++) {
+                newEvents[j] = lyrics->events[j];
+            }
+            delete[] lyrics->events;
+            lyrics->events = newEvents;
+        }
+        
+        lyrics->events[lyrics->count].timestamp = timestamp;
+        lyrics->events[lyrics->count].text = new char[bufPos + 1];
+        strcpy(lyrics->events[lyrics->count].text, buffer);
+        lyrics->events[lyrics->count].syllableIndex = lyrics->count;
+        lyrics->count++;
+    }
 }
 
 // Load and parse MIDI file
@@ -276,6 +641,37 @@ bool loadMidiFile(const char* filename) {
     
     printf("MIDI file loaded: %s\n", filename);
     printf("Format: %d, Tracks: %d, Time Division: %d\n", format, TrackCount, DeltaTicks);
+    
+    // Try to load lyrics if file is .kar
+    if (strstr(filename, ".kar") || strstr(filename, ".KAR")) {
+        LyricData* newLyrics = extractLyricsFromKar(filename);
+        if (newLyrics && newLyrics->count > 0) {
+            // Free old lyrics safely before replacing
+            if (g_lyrics) {
+                freeLyrics(g_lyrics);
+            }
+            g_lyrics = newLyrics;
+            printf("Loaded %d lyric events from KAR file\n", g_lyrics->count);
+            printf("\n=== KAR LYRICS ===\n");
+            printLyrics(g_lyrics);
+            printf("=== END LYRICS ===\n\n");
+        } else {
+            // Extraction failed, free the empty result and clear g_lyrics
+            if (newLyrics) {
+                freeLyrics(newLyrics);
+            }
+            if (g_lyrics) {
+                freeLyrics(g_lyrics);
+                g_lyrics = nullptr;
+            }
+        }
+    } else {
+        // Clear lyrics for non-KAR files
+        if (g_lyrics) {
+            freeLyrics(g_lyrics);
+            g_lyrics = NULL;
+        }
+    }
     
     return true;
 }
