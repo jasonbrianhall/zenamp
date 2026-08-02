@@ -110,15 +110,15 @@ CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Common source files
 SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main.cpp midiplayer.cpp \
-	instruments.cpp virtual_mixer.cpp wav_converter.cpp audioconverter.cpp \
+	bubbles.cpp matrix.cpp fireworks.cpp dna.cpp dna2.cpp visualization.cpp \
+	cdg.cpp karaoke.cpp zip_support.cpp metadata.cpp parrot.cpp sauron.cpp \
 	convertmidi.cpp convertoggtowav.cpp convertopustowav.cpp convertmp3towav.cpp \
 	convertflactowav.cpp vfs.cpp cache.cpp aiff.cpp keyboard.cpp \
-	bubbles.cpp matrix.cpp fireworks.cpp dna.cpp dna2.cpp visualization.cpp \
+	instruments.cpp virtual_mixer.cpp wav_converter.cpp audioconverter.cpp \
 	equalizer.cpp m3u.cpp help.cpp layout.cpp sudoku.cpp generatepuzzle.cpp \
 	fourier.cpp ripples.cpp kaleidoscope.cpp bouncyball.cpp clock.cpp \
-	robotchaser.cpp radialwave.cpp volume_meter.cpp drawbars.cpp \
 	drawoscilloscope.cpp drawwaveform.cpp drawcircle.cpp blockstack.cpp \
-	cdg.cpp karaoke.cpp zip_support.cpp metadata.cpp parrot.cpp sauron.cpp \
+	robotchaser.cpp radialwave.cpp volume_meter.cpp drawbars.cpp \
 	hanoi.cpp beatchess.cpp beatcheckers.cpp queue.cpp drawfractalbloom.cpp \
 	drawsymmetrycascade.cpp lrc2cdg.cpp drawtrippy.cpp drawwormhole.cpp \
 	drawbd.cpp drawrabbithare.cpp audio_cache.cpp maze3d.cpp drawradialbars.cpp \
