@@ -3266,7 +3266,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
     int queue_width = scale_size(base_queue_width, screen_width, ref_width);
     int queue_height = scale_size(base_queue_height, screen_height, ref_height);
 
-    int scale = gtk_widget_get_scale_factor(player->window);
+    int scale = gtk_widget_get_scale_factor(widget);
     if (scale>1) {
         window_width/=scale;
         window_height/=scale;
