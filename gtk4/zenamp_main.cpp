@@ -1,4 +1,4 @@
-// Zenamp (c) Jason Hall 2026 - Main GTK3 File
+// Zenamp (c) Jason Hall 2026 - Main GTK4 File
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
