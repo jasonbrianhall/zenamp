@@ -2177,6 +2177,31 @@ static void gtk4_reparent_add_child(GtkWidget *parent, GtkWidget *child) {
     }
 }
 
+// Symmetric counterpart to gtk4_reparent_add_child(): detaches `child` from
+// `parent`. This must NOT just be a blind gtk_widget_unparent() call.
+// Single-child containers like GtkWindow (and GtkScrolledWindow, GtkButton,
+// etc.) keep their own private "child" pointer/property alongside the
+// generic widget-tree links; gtk_widget_unparent() only updates the generic
+// links, so a GtkWindow that had its child detached this way still believes
+// it owns that widget. If the child then gets reparented somewhere else and
+// the window is destroyed, the window's teardown reaches in through that
+// stale pointer and corrupts a widget it no longer actually owns - which is
+// exactly what was happening here: exiting visualizer fullscreen would
+// intermittently free the Visualizer mid-session (via its
+// g_object_set_data_full() GDestroyNotify) and corrupt the heap, because
+// vis_fullscreen_window's stale child pointer got touched by
+// gtk_window_destroy() after the drawing area had already been reparented
+// back into the normal layout. Route single-child containers through their
+// own child-clearing API; only fall back to gtk_widget_unparent() for
+// containers (like GtkBox) that don't keep that kind of private pointer.
+static void gtk4_reparent_remove_child(GtkWidget *parent, GtkWidget *child) {
+    if (GTK_IS_WINDOW(parent)) {
+        gtk_window_set_child(GTK_WINDOW(parent), NULL);
+    } else {
+        gtk_widget_unparent(child);
+    }
+}
+
 void toggle_vis_fullscreen(AudioPlayer *player) {
     if (!player->visualizer || !player->visualizer->drawing_area) {
         printf("No visualizer available for fullscreen mode\n");
@@ -2225,7 +2250,7 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
         // the parent's type.
         if (original_vis_parent) {
             g_object_ref(player->visualizer->drawing_area);
-            gtk_widget_unparent(player->visualizer->drawing_area);
+            gtk4_reparent_remove_child(original_vis_parent, player->visualizer->drawing_area);
         }
         
         gtk4_reparent_add_child(vis_fullscreen_window, player->visualizer->drawing_area);
@@ -2289,7 +2314,7 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
         if (vis_fullscreen_window && player->visualizer && player->visualizer->drawing_area) {
             // Reparent visualization back to original location
             g_object_ref(player->visualizer->drawing_area);
-            gtk_widget_unparent(player->visualizer->drawing_area);
+            gtk4_reparent_remove_child(vis_fullscreen_window, player->visualizer->drawing_area);
             
             if (original_vis_parent) {
                 gtk4_reparent_add_child(original_vis_parent, player->visualizer->drawing_area);
