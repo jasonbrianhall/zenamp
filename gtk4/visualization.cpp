@@ -776,9 +776,9 @@ void on_vis_type_changed(GtkComboBox *combo, gpointer user_data) {
     visualizer_set_type(vis, (VisualizationType)active);
 }
 
-void on_vis_enabled_toggled(GtkToggleButton *button, gpointer user_data) {
+void on_vis_enabled_toggled(GtkCheckButton *button, gpointer user_data) {
     Visualizer *vis = (Visualizer*)user_data;
-    gboolean enabled = gtk_toggle_button_get_active(button);
+    gboolean enabled = gtk_check_button_get_active(button);
     visualizer_set_enabled(vis, enabled);
 }
 
@@ -826,7 +826,12 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     
     // Enable/disable checkbox
     GtkWidget *enable_check = gtk_check_button_new_with_label("Enable");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(enable_check), vis->enabled);
+    // NOTE(gtk4): GtkCheckButton no longer inherits from GtkToggleButton in
+    // GTK4 (it's its own direct GtkWidget subclass now) - GTK_TOGGLE_BUTTON()
+    // on it is an invalid cast that fails GTK_IS_TOGGLE_BUTTON() and just
+    // warns instead of actually reading/writing the state, which is why the
+    // checkbox toggling looked broken. Use the GtkCheckButton-specific API.
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(enable_check), vis->enabled);
     gtk_widget_set_tooltip_text(enable_check, "Enable/disable visualization");
     g_signal_connect(enable_check, "toggled", G_CALLBACK(on_vis_enabled_toggled), vis);
     gtk_box_append(GTK_BOX(controls_box), enable_check);

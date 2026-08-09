@@ -480,6 +480,14 @@ static void create_player_controls(AudioPlayer *player) {
     GtkWidget *volume_label = gtk_label_new("Volume:");
     player->volume_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.0, 5.0, 0.1);
     gtk_range_set_value(GTK_RANGE(player->volume_scale), (double)globalVolume / 100.0);
+    // NOTE(gtk4): GtkScale's draw-value defaults to TRUE in GTK3 but FALSE in
+    // GTK4, so these silently stopped showing their numeric value in the
+    // port (the equalizer's bass/mid/treble scales already set this
+    // explicitly, which is why those still show a number). Without it
+    // there's no way to see the current value while dragging, which makes it
+    // hard to tell exactly when speed is back at 1.0.
+    gtk_scale_set_draw_value(GTK_SCALE(player->volume_scale), TRUE);
+    gtk_scale_set_digits(GTK_SCALE(player->volume_scale), 1);
     gtk_widget_set_tooltip_text(player->volume_scale, "App volume (↑/↓ arrows) - independent of system volume");
     gtk_widget_set_can_focus(player->volume_scale, TRUE);
     gtk_widget_set_hexpand(player->volume_scale, TRUE);
@@ -490,6 +498,7 @@ static void create_player_controls(AudioPlayer *player) {
     gtk_widget_set_margin_start(speed_label, 5);
     player->speed_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.1, 4.0, 0.5);
     gtk_range_set_value(GTK_RANGE(player->speed_scale), 1.0);
+    gtk_scale_set_draw_value(GTK_SCALE(player->speed_scale), TRUE);
     gtk_scale_set_digits(GTK_SCALE(player->speed_scale), 1);
     gtk_widget_set_tooltip_text(player->speed_scale, "Playback speed (0.1x to 4.0x)");
     gtk_widget_set_can_focus(player->speed_scale, TRUE);
@@ -512,7 +521,7 @@ static void create_queue_controls_compact(AudioPlayer *player) {
     player->add_to_queue_button = gtk_button_new_with_label("Add");
     player->clear_queue_button = gtk_button_new_with_label("Clear");
     player->repeat_queue_button = gtk_check_button_new_with_label("Repeat");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(player->repeat_queue_button), TRUE);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), TRUE);
     
     gtk_widget_set_can_focus(player->add_to_queue_button, TRUE);
     gtk_widget_set_can_focus(player->clear_queue_button, TRUE);
@@ -543,7 +552,7 @@ static void create_queue_controls_regular(AudioPlayer *player) {
     player->add_to_queue_button = gtk_button_new_with_label("Add to Queue");
     player->clear_queue_button = gtk_button_new_with_label("Clear Queue");
     player->repeat_queue_button = gtk_check_button_new_with_label("Repeat Queue");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(player->repeat_queue_button), TRUE);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), TRUE);
     
     gtk_widget_set_can_focus(player->add_to_queue_button, TRUE);
     gtk_widget_set_can_focus(player->clear_queue_button, TRUE);

@@ -3139,9 +3139,9 @@ void on_clear_queue_clicked(GtkButton *button, gpointer user_data) {
     gtk_label_set_text(GTK_LABEL(player->file_label), "No file loaded");
 }
 
-void on_repeat_queue_toggled(GtkToggleButton *button, gpointer user_data) {
+void on_repeat_queue_toggled(GtkCheckButton *button, gpointer user_data) {
     AudioPlayer *player = (AudioPlayer*)user_data;
-    player->queue.repeat_queue = gtk_toggle_button_get_active(button);
+    player->queue.repeat_queue = gtk_check_button_get_active(button);
     
     printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
 }

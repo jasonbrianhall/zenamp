@@ -325,7 +325,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
         case GDK_KEY_r:
             if (!ctrl_pressed) {
                 player->queue.repeat_queue = !player->queue.repeat_queue;
-                gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(player->repeat_queue_button), 
+                gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), 
                                            player->queue.repeat_queue);
                 printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
                 return TRUE;
@@ -533,7 +533,7 @@ gboolean on_vis_fullscreen_key_press(GtkEventControllerKey *controller, guint ke
         case GDK_KEY_r:
             if (!ctrl_pressed) {
                 player->queue.repeat_queue = !player->queue.repeat_queue;
-                gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(player->repeat_queue_button), 
+                gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), 
                                            player->queue.repeat_queue);
                 printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
                 return TRUE;

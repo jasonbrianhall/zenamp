@@ -423,7 +423,7 @@ void previous_song_filtered(AudioPlayer *player);
 void on_progress_scale_value_changed(GtkRange *range, gpointer user_data);
 void on_add_to_queue_clicked(GtkButton *button, gpointer user_data);
 void on_clear_queue_clicked(GtkButton *button, gpointer user_data);
-void on_repeat_queue_toggled(GtkToggleButton *button, gpointer user_data);
+void on_repeat_queue_toggled(GtkCheckButton *button, gpointer user_data);
 void on_menu_open(GtkWidget *menuitem, gpointer user_data);
 void on_menu_quit(GtkWidget *menuitem, gpointer user_data);
 void on_menu_about(GtkWidget *menuitem, gpointer user_data);
