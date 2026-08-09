@@ -20,7 +20,7 @@
 #include <sys/types.h>
 #else
 #include <shlobj.h>
-#include <gdk/gdkwin32.h>
+#include <gdk/win32/gdkwin32.h>
 #include <windows.h>
 #endif
 
@@ -4471,12 +4471,13 @@ void setup_windows_single_instance(AudioPlayer *player) {
     player->single_instance_mutex = CreateMutexA(NULL, TRUE, ZENAMP_MUTEX_NAME);
     
     // Hook into GTK window's Win32 HWND.
-    // GTK4 renames GdkWindow to GdkSurface (only reachable via GtkNative), and
-    // the win32-backend accessor renames to match:
-    // gdk_win32_window_get_handle() -> gdk_win32_surface_get_handle().
+    // GTK4 renames GdkWindow to GdkSurface (only reachable via GtkNative).
+    // gdk_win32_surface_get_handle() takes a GdkWin32Surface*, not a plain
+    // GdkSurface*, so it must go through the GDK_WIN32_SURFACE() cast macro,
+    // and it returns an integer handle that needs casting to HWND.
     GdkSurface *gdk_surface = gtk_native_get_surface(GTK_NATIVE(player->window));
-    if (gdk_surface) {
-        HWND hwnd = (HWND)gdk_win32_surface_get_handle(gdk_surface);
+    if (gdk_surface && GDK_IS_WIN32_SURFACE(gdk_surface)) {
+        HWND hwnd = (HWND)gdk_win32_surface_get_handle(GDK_WIN32_SURFACE(gdk_surface));
         SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)player);
         
         // Subclass window to receive WM_COPYDATA
@@ -4640,8 +4641,8 @@ int main(int argc, char *argv[]) {
     player->single_instance_mutex = single_instance_mutex;
     
     GdkSurface *gdk_surface = gtk_native_get_surface(GTK_NATIVE(player->window));
-    if (gdk_surface) {
-        HWND hwnd = (HWND)gdk_win32_surface_get_handle(gdk_surface);
+    if (gdk_surface && GDK_IS_WIN32_SURFACE(gdk_surface)) {
+        HWND hwnd = (HWND)gdk_win32_surface_get_handle(GDK_WIN32_SURFACE(gdk_surface));
         if (hwnd) {
             // Set a window property to identify this as Zenamp
             SetPropA(hwnd, "ZenampInstance", (HANDLE)1);
