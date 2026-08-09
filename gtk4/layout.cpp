@@ -97,7 +97,11 @@ static GtkWidget* menu_add_submenu(GtkWidget *popover, const char *label, GtkWid
     gtk_menu_button_set_label(GTK_MENU_BUTTON(button), label);
     gtk_menu_button_set_use_underline(GTK_MENU_BUTTON(button), TRUE);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(button), submenu_popover);
-    gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
+    // NOTE(gtk4): GtkMenuButton is its own widget in GTK4, not a GtkButton
+    // subclass - gtk_button_set_has_frame(GTK_BUTTON(button), ...) here was
+    // an invalid cast that silently did nothing, so the frame never came
+    // off. Use GtkMenuButton's own has-frame accessor instead.
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(button), FALSE);
     gtk_widget_set_halign(button, GTK_ALIGN_FILL);
     gtk_box_append(GTK_BOX(box), button);
     return button;
@@ -108,7 +112,9 @@ static GtkWidget* menu_button_new(const char *label, GtkWidget *popover) {
     gtk_menu_button_set_label(GTK_MENU_BUTTON(button), label);
     gtk_menu_button_set_use_underline(GTK_MENU_BUTTON(button), TRUE);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(button), popover);
-    gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
+    // See note above - this needs the GtkMenuButton-specific setter, not a
+    // GTK_BUTTON() cast, or the frame never actually comes off.
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(button), FALSE);
     return button;
 }
 
@@ -290,6 +296,9 @@ static void create_menu_bar(AudioPlayer *player) {
     // menu bar is built from GtkMenuButton+GtkPopover dropdowns instead (see
     // the menu_* helpers above).
     GtkWidget *menubar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    // Themed as a menu bar (background/spacing/hover states matching the
+    // rest of the app's chrome) rather than a bare row of buttons.
+    gtk_widget_add_css_class(menubar, "menubar");
 
     // File menu
     GtkWidget *file_popover = menu_popover_new();
@@ -690,7 +699,16 @@ void create_queue_treeview(AudioPlayer *player) {
     // Note: COL_QUEUE_INDEX is not displayed as a column, it's just stored in the model
     
     // Enable sorting
-    gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree_view), TRUE);
+    // NOTE: enable_search is intentionally OFF. GtkTreeView's built-in
+    // interactive search intercepts printable key presses (letters/digits)
+    // whenever this tree view has keyboard focus, opening its own search
+    // popup and swallowing the event before it can bubble up to the
+    // window-level key controller in keyboard.cpp - this is what was
+    // eating the 'Q'/'A' visualization-switch shortcuts (and any other
+    // single-letter shortcut) whenever the queue list had focus. The app
+    // already has its own dedicated filter entry above the queue for
+    // searching, so the built-in one is redundant as well as conflicting.
+    gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree_view), FALSE);
     gtk_tree_view_set_search_column(GTK_TREE_VIEW(tree_view), COL_FILENAME);
     
     // Connect click handler for double-click
