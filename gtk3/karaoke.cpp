@@ -183,19 +183,28 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
     int render_width = CDG_WIDTH * 2;
     int render_height = CDG_HEIGHT * 2;
     
-    if (!vis->cdg_surface || 
-        cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
-        cairo_image_surface_get_height(vis->cdg_surface) != render_height) {
-        
-        if (vis->cdg_surface) {
-            cairo_surface_destroy(vis->cdg_surface);
-        }
-        vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
-        vis->cdg_last_packet = -1;
-    }
+    bool size_mismatch = vis->cdg_surface &&
+        (cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
+         cairo_image_surface_get_height(vis->cdg_surface) != render_height);
     
-    // Update surface only when packets have changed
-    if (vis->cdg_last_packet != cdg->current_packet) {
+    // Update surface only when packets have changed (or it doesn't exist/fit yet)
+    if (!vis->cdg_surface || size_mismatch || vis->cdg_last_packet != cdg->current_packet) {
+        // IMPORTANT: always build a FRESH surface here rather than reusing
+        // and mutating vis->cdg_surface in place. GTK4's drawing-area
+        // rendering backs `cr` with a surface that can defer compositing
+        // (recorded for later replay), so painting from vis->cdg_surface
+        // makes Cairo take an internal snapshot of it to preserve those
+        // pixels for that deferred replay. Since CDG packets change on
+        // essentially every frame during playback, calling
+        // cairo_surface_mark_dirty() again on that SAME surface object
+        // (while a prior snapshot may still be outstanding) is exactly what
+        // triggers "! _cairo_surface_has_snapshots(surface)" and aborts the
+        // app. A brand-new surface has no snapshots taken against it yet,
+        // so there's nothing to violate; the old one - and whatever
+        // snapshot Cairo/GTK is still holding of it - is simply dropped.
+        cairo_surface_t *old_surface = vis->cdg_surface;
+        
+        vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
         unsigned char *data = cairo_image_surface_get_data(vis->cdg_surface);
         int stride = cairo_image_surface_get_stride(vis->cdg_surface);
         
@@ -230,8 +239,12 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr) {
         // Apply smoothing filter for anti-aliasing
         apply_smooth_filter(data, render_width, render_height, stride);
         
-        cairo_surface_mark_dirty(vis->cdg_surface);
+        cairo_surface_mark_dirty(vis->cdg_surface); // safe: brand-new surface, never painted from yet
         vis->cdg_last_packet = cdg->current_packet;
+        
+        if (old_surface) {
+            cairo_surface_destroy(old_surface);
+        }
     }
     
     // Draw black background
@@ -267,18 +280,17 @@ void draw_cdg_overlay(Visualizer *vis, cairo_t *cr) {
     int render_width = CDG_WIDTH * 2;
     int render_height = CDG_HEIGHT * 2;
 
-    if (!vis->cdg_surface ||
-        cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
-        cairo_image_surface_get_height(vis->cdg_surface) != render_height) {
+    bool size_mismatch = vis->cdg_surface &&
+        (cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
+         cairo_image_surface_get_height(vis->cdg_surface) != render_height);
 
-        if (vis->cdg_surface) {
-            cairo_surface_destroy(vis->cdg_surface);
-        }
+    if (!vis->cdg_surface || size_mismatch || vis->cdg_last_packet != cdg->current_packet) {
+        // See draw_karaoke_boring() above for why this must be a fresh
+        // surface each time rather than a mutate-in-place update of the
+        // existing vis->cdg_surface.
+        cairo_surface_t *old_surface = vis->cdg_surface;
+
         vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
-        vis->cdg_last_packet = -1;
-    }
-
-    if (vis->cdg_last_packet != cdg->current_packet) {
         unsigned char *data = cairo_image_surface_get_data(vis->cdg_surface);
         int stride = cairo_image_surface_get_stride(vis->cdg_surface);
 
@@ -317,8 +329,12 @@ void draw_cdg_overlay(Visualizer *vis, cairo_t *cr) {
 
         apply_smooth_filter(data, render_width, render_height, stride);
 
-        cairo_surface_mark_dirty(vis->cdg_surface);
+        cairo_surface_mark_dirty(vis->cdg_surface); // safe: brand-new surface, never painted from yet
         vis->cdg_last_packet = cdg->current_packet;
+
+        if (old_surface) {
+            cairo_surface_destroy(old_surface);
+        }
     }
 
     double scale_x = vis->width / (double)render_width;
@@ -381,18 +397,17 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
     int render_width = CDG_WIDTH * 2;
     int render_height = CDG_HEIGHT * 2;
     
-    if (!vis->cdg_surface || 
-        cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
-        cairo_image_surface_get_height(vis->cdg_surface) != render_height) {
-        
-        if (vis->cdg_surface) {
-            cairo_surface_destroy(vis->cdg_surface);
-        }
-        vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
-        vis->cdg_last_packet = -1;
-    }
+    bool size_mismatch = vis->cdg_surface && 
+        (cairo_image_surface_get_width(vis->cdg_surface) != render_width ||
+         cairo_image_surface_get_height(vis->cdg_surface) != render_height);
     
-    if (vis->cdg_last_packet != cdg->current_packet) {
+    if (!vis->cdg_surface || size_mismatch || vis->cdg_last_packet != cdg->current_packet) {
+        // See draw_karaoke_boring() above for why this must be a fresh
+        // surface each time rather than a mutate-in-place update of the
+        // existing vis->cdg_surface.
+        cairo_surface_t *old_surface = vis->cdg_surface;
+        
+        vis->cdg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, render_width, render_height);
         unsigned char *data = cairo_image_surface_get_data(vis->cdg_surface);
         int stride = cairo_image_surface_get_stride(vis->cdg_surface);
         
@@ -427,8 +442,12 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
         
         apply_smooth_filter(data, render_width, render_height, stride);
         
-        cairo_surface_mark_dirty(vis->cdg_surface);
+        cairo_surface_mark_dirty(vis->cdg_surface); // safe: brand-new surface, never painted from yet
         vis->cdg_last_packet = cdg->current_packet;
+        
+        if (old_surface) {
+            cairo_surface_destroy(old_surface);
+        }
     }
     
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
