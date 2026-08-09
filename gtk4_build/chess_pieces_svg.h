@@ -1,0 +1,1 @@
+beatchess/chess_pieces_svg.h
