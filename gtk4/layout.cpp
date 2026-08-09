@@ -881,7 +881,16 @@ void create_main_window(AudioPlayer *player) {
     //create_queue_controls_compact(player);
     create_queue_controls_regular(player);
     
-    //create_icon_section(player);
+    // NOTE(gtk4): this was commented out during the port. It builds the
+    // animated click-to-dance icon AND player->metadata_label (the label
+    // that sits beside it) - the original app never called the separate
+    // create_metadata_section() below; this is the one real call site.
+    // Losing this call silently dropped the dancing icon feature entirely,
+    // and left player->metadata_label NULL for the whole app's life
+    // (AudioPlayer is zero-initialized via g_malloc0), which is why every
+    // gtk_label_set_markup(GTK_LABEL(player->metadata_label), ...) call
+    // elsewhere was hitting "assertion 'GTK_IS_LABEL (self)' failed".
+    create_icon_section(player);
     
     // Right side: queue at top, equalizer at bottom (handled in create_queue_display)
     create_queue_display(player);
