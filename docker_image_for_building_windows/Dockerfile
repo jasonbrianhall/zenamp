@@ -37,7 +37,6 @@ RUN dnf -y install gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
         taglib-devel \
         rpm-build rpmdevtools
 
-
 RUN dnf -y install \
         # MinGW cross toolchain
         mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
@@ -51,8 +50,12 @@ RUN dnf -y install \
         mingw64-SDL2 mingw64-SDL2_mixer \
         mingw64-libvorbis mingw64-flac \
         mingw64-opus mingw64-opusfile \
-        mingw64-taglib.noarch && \
-    dnf clean all
+        mingw64-taglib.noarch
+
+RUN dnf -y install \
+       rsync
+
+RUN dnf clean all
 
 # Rootless podman user
 RUN useradd -u 1000 builder && \
