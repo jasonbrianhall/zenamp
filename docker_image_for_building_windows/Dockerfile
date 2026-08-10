@@ -9,19 +9,23 @@ RUN dnf -y install \
         autoconf automake libtool \
         cmake ninja-build \
         git which findutils \
-        zip unzip \
+        zip unzip
+
         # Podman stack
-        podman buildah skopeo fuse-overlayfs shadow-utils \
+RUN dnf -y install  podman buildah skopeo fuse-overlayfs shadow-utils \
         # Native GTK4/SDL2 (for pkg-config introspection)
         gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
-        SDL2-devel SDL2_image-devel SDL2_ttf-devel SDL2_mixer-devel \
+        SDL2-devel SDL2_image-devel SDL2_ttf-devel SDL2_mixer-devel
+
+RUN dnf -y install \
         # MinGW cross toolchain
         mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
         mingw64-crt mingw64-headers \
         mingw64-gtk4 \
         mingw64-SDL2 mingw64-SDL2_image mingw64-SDL2_ttf mingw64-SDL2_mixer \
         bash \
-        mingw64-taglib && \
+        mingw64-taglib \
+        mingw64-openssl && \
     dnf clean all
 
 # Rootless podman user
