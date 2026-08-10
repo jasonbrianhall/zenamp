@@ -88,8 +88,69 @@ gtk-icon-theme-name = hicolor
 gtk-font-name = Segoe UI 9
 EOF
 
-# Get initial dependencies
-echo "Analyzing dependencies for $(basename "$EXE_PATH")..."
+# ============================================================================
+# GDK-PIXBUF LOADER MODULES (svg, png, jpeg, etc.)
+# ============================================================================
+# These are discovered by gdk-pixbuf at runtime via loaders.cache and loaded
+# with dlopen()/LoadLibrary() - NOT through the exe's PE import table - so
+# the objdump-based dependency walk above can never find them no matter how
+# deep it recurses. Same root cause as the ANGLE DLLs earlier. Without this,
+# gdk_pixbuf_loader_new_with_type("svg", NULL) (used for the chess piece
+# sprites, among other things) returns NULL at runtime with no error set -
+# it just silently fails. The "mkdir -p .../lib/gdk-pixbuf-2.0" above only
+# ever created the parent folder; nothing was actually copying the loaders
+# into it.
+echo "Copying gdk-pixbuf loader modules..."
+GDK_PIXBUF_DIR=$(find "$GTK_DIR/lib/gdk-pixbuf-2.0" -maxdepth 1 -type d -regex '.*/[0-9.]+' 2>/dev/null | sort -V | tail -1)
+
+if [ -n "$GDK_PIXBUF_DIR" ] && [ -d "$GDK_PIXBUF_DIR/loaders" ]; then
+    GDK_PIXBUF_VERSION=$(basename "$GDK_PIXBUF_DIR")
+    OUTPUT_LOADERS_DIR="$OUTPUT_DIR/lib/gdk-pixbuf-2.0/$GDK_PIXBUF_VERSION/loaders"
+    mkdir -p "$OUTPUT_LOADERS_DIR"
+
+    for loader_dll in "$GDK_PIXBUF_DIR"/loaders/*.dll; do
+        [ -f "$loader_dll" ] || continue
+        cp "$loader_dll" "$OUTPUT_LOADERS_DIR/"
+        echo "  Copied loader: $(basename "$loader_dll")"
+
+        # Unlike the loader modules themselves, THEIR dependencies (e.g.
+        # librsvg-2-2.dll for the SVG loader, libpng16-16.dll for the PNG
+        # loader) are statically imported, so objdump *can* find these -
+        # feed them into the existing flat-bin-dir processing queue so the
+        # normal recursive walk picks up everything underneath them too.
+        for subdep in $(get_dependencies "$loader_dll"); do
+            if [ "${processed_dlls[$subdep]}" != "1" ]; then
+                if dll_exists "$subdep"; then
+                    dlls_to_process+=("$subdep")
+                else
+                    if [[ ! " ${missing_dlls[@]} " =~ " ${subdep} " ]]; then
+                        missing_dlls+=("$subdep")
+                    fi
+                fi
+            fi
+        done
+    done
+
+    # loaders.cache tells gdk-pixbuf which physical path to LoadLibrary()
+    # for each format - the build machine's cache has the sysroot's
+    # absolute path baked in, which doesn't exist on the deployed Windows
+    # machine. Rewrite each module path to be relative to the exe, matching
+    # the tree just built above. This assumes the app is launched with its
+    # own directory as the working directory (true for double-click and for
+    # the zenamp_test-style layout used so far) - see the runtime env-var
+    # fallback in main() for the case where that assumption doesn't hold.
+    if [ -f "$GDK_PIXBUF_DIR/loaders.cache" ]; then
+        sed -E "s#\"[^\"]*/loaders/([^/\"]+)\"#\"lib/gdk-pixbuf-2.0/$GDK_PIXBUF_VERSION/loaders/\1\"#g" \
+            "$GDK_PIXBUF_DIR/loaders.cache" > "$OUTPUT_DIR/lib/gdk-pixbuf-2.0/$GDK_PIXBUF_VERSION/loaders.cache"
+        echo "  Rewrote loaders.cache for the deployed layout"
+    else
+        echo "  WARNING: no loaders.cache found at $GDK_PIXBUF_DIR - loader DLLs were copied but gdk-pixbuf has no cache telling it they exist, so SVG/PNG/etc. loading will likely still fail at runtime. Generate one with gdk-pixbuf-query-loaders (the mingw-targeted build of it, run under Wine) against $GDK_PIXBUF_DIR, or rely on the GDK_PIXBUF_MODULEDIR runtime fallback instead."
+    fi
+else
+    echo "  WARNING: no gdk-pixbuf-2.0/<version>/loaders directory found under $GTK_DIR - SVG piece sprites and any other pixbuf-loader-dependent image loading will fail at runtime on the deployed machine."
+fi
+
+
 initial_dlls=$(get_dependencies "$EXE_PATH")
 
 # Add initial DLLs to processing queue
