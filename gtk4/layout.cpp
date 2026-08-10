@@ -409,7 +409,7 @@ static void create_visualization_section(AudioPlayer *player) {
     player->vis_controls = create_visualization_controls(player->visualizer);
     gtk_box_append(GTK_BOX(vis_vbox), player->vis_controls);
     
-    printf("Double-click handler added to visualizer (toggles fullscreen)\n");
+    SDL_Log("Double-click handler added to visualizer (toggles fullscreen)");
 }
 
 static void create_player_controls(AudioPlayer *player) {
@@ -513,7 +513,7 @@ static void create_player_controls(AudioPlayer *player) {
 }
 
 static void create_queue_controls_compact(AudioPlayer *player) {
-    printf("Creating compact queue controls layout\n");
+    SDL_Log("Creating compact queue controls layout");
     
     player->layout.compact.bottom_controls_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_box_append(GTK_BOX(player->layout.content_vbox), player->layout.compact.bottom_controls_hbox);
@@ -544,7 +544,7 @@ static void create_queue_controls_compact(AudioPlayer *player) {
 
 
 static void create_queue_controls_regular(AudioPlayer *player) {
-    printf("Creating regular queue controls layout\n");
+    SDL_Log("Creating regular queue controls layout");
     
     player->layout.regular.queue_button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(player->layout.content_vbox), player->layout.regular.queue_button_box);
@@ -607,7 +607,7 @@ static void create_icon_section(AudioPlayer *player) {
                 // Add to layout
                 gtk_box_append(GTK_BOX(player->layout.bottom_box), icon_image);
                 
-                printf("✓ Animated icon initialized (click to play animation)\n");
+                SDL_Log("✓ Animated icon initialized (click to play animation)");
             } else {
                 // Fallback if animation initialization fails
                 GtkWidget *icon_image_fallback = gtk_image_new_from_pixbuf(scaled_icon);
@@ -816,7 +816,7 @@ void create_main_window(AudioPlayer *player) {
     // Mark for Windows single instance detection
     // The actual property will be set after gtk_widget_show_all() in main()
     static bool zenamp_window_marker = true;
-    printf("Windows single instance marker prepared\n");
+    SDL_Log("Windows single instance marker prepared");
 #endif
     
     // Calculate layout configuration first
@@ -905,13 +905,13 @@ void create_main_window(AudioPlayer *player) {
     // Connect all signals
     connect_widget_signals(player);
     
-    printf("Created main window with %s layout (screen-based decision)\n", 
+    SDL_Log("Created main window with %s layout (screen-based decision)", 
            player->layout.config.is_compact ? "compact" : "regular");
 }
 
 void create_shared_equalizer(AudioPlayer *player) {
     if (!player->layout.shared_equalizer) {
-        printf("Creating shared equalizer widget\n");
+        SDL_Log("Creating shared equalizer widget");
         player->layout.shared_equalizer = create_equalizer_controls(player);
     }
 }
@@ -940,7 +940,7 @@ void add_to_recent_files(const char* filepath, const char* mime_type) {
         g_free(recent_data.display_name);
         g_free(uri);
         
-        printf("Added to recent files: %s\n", filepath);
+        SDL_Log("Added to recent files: %s", filepath);
     }
 }
 
@@ -955,7 +955,7 @@ void on_recent_playlist_activated(GtkWidget *widget, gpointer user_data) {
     if (uri) {
         gchar *filename = g_filename_from_uri(uri, NULL, NULL);
         if (filename) {
-            printf("Loading recent playlist: %s\n", filename);
+            SDL_Log("Loading recent playlist: %s", filename);
             
             if (load_m3u_playlist(player, filename)) {
                 update_queue_display_with_filter(player);
@@ -1103,10 +1103,10 @@ void on_toggle_queue_panel(GtkWidget *check_item, gpointer user_data) {
     
     if (show_queue) {
         gtk_widget_show(player->layout.queue_vbox);
-        printf("Queue panel shown\n");
+        SDL_Log("Queue panel shown");
     } else {
         gtk_widget_hide(player->layout.queue_vbox);
-        printf("Queue panel hidden\n");
+        SDL_Log("Queue panel hidden");
     }
 }
 
@@ -1135,18 +1135,18 @@ void on_visualizer_button_press(GtkGestureClick *gesture, gint n_press, gdouble 
     
     // Handle double-click for fullscreen toggle (only enter fullscreen, don't exit)
     if (n_press == 2 && button == 1) {
-        printf("Visualizer double-clicked\n");
+        SDL_Log("Visualizer double-clicked");
         
         // Check if visualizer is already in fullscreen mode
         extern bool is_visualizer_fullscreen();
         if (is_visualizer_fullscreen()) {
             // Already fullscreen, don't toggle to avoid interfering with games
-            printf("Visualizer already in fullscreen - ignoring double-click\n");
+            SDL_Log("Visualizer already in fullscreen - ignoring double-click");
             return;
         }
         
         // Not in fullscreen, so enable it
-        printf("Entering fullscreen mode\n");
+        SDL_Log("Entering fullscreen mode");
         extern void toggle_vis_fullscreen(AudioPlayer *player);
         toggle_vis_fullscreen(player);
         return;

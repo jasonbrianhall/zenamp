@@ -152,7 +152,7 @@ static bool is_file_accessible_with_timeout(const char *filepath) {
     // For local files, this returns instantly
     FILE *f = fopen(filepath, "rb");
     if (!f) {
-        printf("File inaccessible: %s (errno: %d)\n", filepath, errno);
+        SDL_Log("File inaccessible: %s (errno: %d)", filepath, errno);
         return false;
     }
     fclose(f);
@@ -184,12 +184,12 @@ static bool file_exists(const char *filepath) {
 // Returns true if CDG was found and loaded, false otherwise
 static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filepath) {
     if (!player || !player->cdg_display || !audio_filepath) {
-        printf("CDG load skipped: player=%p, cdg_display=%p, filepath=%p\n", 
+        SDL_Log("CDG load skipped: player=%p, cdg_display=%p, filepath=%p", 
                player, player ? player->cdg_display : NULL, audio_filepath);
         return false;
     }
     
-    printf("Attempting to load standalone CDG for: %s\n", audio_filepath);
+    SDL_Log("Attempting to load standalone CDG for: %s", audio_filepath);
     
     // Get directory of audio file
     char dir_path[4096];
@@ -212,32 +212,32 @@ static bool try_load_standalone_cdg(AudioPlayer *player, const char *audio_filep
         *last_sep = '\0';
     }
     
-    printf("CDG search directory: %s\n", dir_path);
+    SDL_Log("CDG search directory: %s", dir_path);
     
     // Get filename without extension
     char base_filename[256];
     get_filename_without_ext(audio_filepath, base_filename, sizeof(base_filename));
     
-    printf("CDG base filename: %s\n", base_filename);
+    SDL_Log("CDG base filename: %s", base_filename);
     
     // Construct CDG filepath
     char cdg_filepath[4096];
     snprintf(cdg_filepath, sizeof(cdg_filepath), "%s/%s.cdg", dir_path, base_filename);
     
-    printf("CDG full path: %s\n", cdg_filepath);
+    SDL_Log("CDG full path: %s", cdg_filepath);
     
     // Try to load it
     if (file_exists(cdg_filepath)) {
-        printf("Found standalone CDG file: %s\n", cdg_filepath);
+        SDL_Log("Found standalone CDG file: %s", cdg_filepath);
         if (cdg_load_file(player->cdg_display, cdg_filepath)) {
-            printf("Successfully loaded CDG from: %s\n", cdg_filepath);
+            SDL_Log("Successfully loaded CDG from: %s", cdg_filepath);
             return true;
         } else {
-            printf("Failed to load CDG file: %s\n", cdg_filepath);
+            SDL_Log("Failed to load CDG file: %s", cdg_filepath);
             return false;
         }
     } else {
-        printf("CDG file not found: %s\n", cdg_filepath);
+        SDL_Log("CDG file not found: %s", cdg_filepath);
     }
     
     return false;
@@ -358,11 +358,11 @@ struct ScanThreadData {
 static gpointer g_scan_thread_func(gpointer user_data) {
     ScanThreadData *data = static_cast<ScanThreadData *>(user_data);
 
-    printf("Scan thread started for: %s\n", data->directory.c_str());
+    SDL_Log("Scan thread started for: %s", data->directory.c_str());
 
     g_scan_directory_impl(data->directory, data->recursive, data->results);
 
-    printf("Scan thread complete: found %zu files\n", data->results.size());
+    SDL_Log("Scan thread complete: found %zu files", data->results.size());
 
     g_idle_add([](gpointer ud) -> gboolean {
         ScanThreadData *scan_data = static_cast<ScanThreadData *>(ud);
@@ -373,7 +373,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
         }
 
         if (scan_data->results.size() > 0) {
-            printf("Adding %zu files to queue (bulk import)...\n", scan_data->results.size());
+            SDL_Log("Adding %zu files to queue (bulk import)...", scan_data->results.size());
             
             // Directly add to queue array without any UI updates or duplicate checks
             // This matches the pattern used in load_m3u_playlist
@@ -384,14 +384,14 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     // Resize queue if needed
                     // If capacity is 0, start with 256; otherwise double it
                     int new_capacity = (player->queue.capacity == 0) ? 256 : (player->queue.capacity * 2);
-                    printf("  Resizing queue from %d to %d\n", player->queue.capacity, new_capacity);
+                    SDL_Log("  Resizing queue from %d to %d", player->queue.capacity, new_capacity);
                     
                     char **new_files = (player->queue.files == NULL) 
                         ? (char**)malloc(new_capacity * sizeof(char*))
                         : (char**)realloc(player->queue.files, new_capacity * sizeof(char*));
                     
                     if (!new_files) {
-                        printf("ERROR: Failed to resize queue\n");
+                        SDL_Log("ERROR: Failed to resize queue");
                         break;
                     }
                     player->queue.files = new_files;
@@ -406,19 +406,19 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     
                     // Print progress every 1000 files
                     if ((idx + 1) % 1000 == 0) {
-                        printf("  Added %zu / %zu files...\n", idx + 1, scan_data->results.size());
+                        SDL_Log("  Added %zu / %zu files...", idx + 1, scan_data->results.size());
                     }
                 }
             }
 
-            printf("Finished adding files to queue. Total: %d\n", player->queue.count);
-            printf("Starting display render...\n");
+            SDL_Log("Finished adding files to queue. Total: %d", player->queue.count);
+            SDL_Log("Starting display render...");
             // For bulk imports, skip metadata extraction and just show filenames
             if (player->queue_store) {
-                printf("Clearing queue store...\n");
+                SDL_Log("Clearing queue store...");
                 gtk_list_store_clear(player->queue_store);
                 
-                printf("Rendering %d items to display...\n", player->queue.count);
+                SDL_Log("Rendering %d items to display...", player->queue.count);
                 for (int i = 0; i < player->queue.count; i++) {
                     const char *filepath = player->queue.files[i];
                     char *basename = g_path_get_basename(filepath);
@@ -447,7 +447,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     
                     // Keep UI responsive every 1000 items
                     if ((i + 1) % 1000 == 0) {
-                        printf("  Rendered %d items...\n", i + 1);
+                        SDL_Log("  Rendered %d items...", i + 1);
                         // GTK4 removed gtk_events_pending()/gtk_main_iteration();
                         // pump the default GLib main context directly instead.
                         while (g_main_context_pending(NULL)) {
@@ -455,15 +455,15 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                         }
                     }
                 }
-                printf("Display rendering complete.\n");
+                SDL_Log("Display rendering complete.");
             }
             
             update_gui_state(player);
-            printf("GUI state updated.\n");
+            SDL_Log("GUI state updated.");
 
             char msg[256];
             snprintf(msg, sizeof(msg), "Successfully imported %d music files", player->queue.count);
-            printf("Showing completion dialog: %s\n", msg);
+            SDL_Log("Showing completion dialog: %s", msg);
             
             GtkWidget *completion_dialog = gtk_message_dialog_new(
                 GTK_WINDOW(player->window),
@@ -474,17 +474,17 @@ static gpointer g_scan_thread_func(gpointer user_data) {
             );
             g_signal_connect(completion_dialog, "response", G_CALLBACK(destroy_dialog_on_response), NULL);
             gtk_window_present(GTK_WINDOW(completion_dialog));
-            printf("Completion dialog shown.\n");
+            SDL_Log("Completion dialog shown.");
             
             // Start deduplication in background thread
-            printf("Starting deduplication thread...\n");
+            SDL_Log("Starting deduplication thread...");
             std::thread dedup_thread([](AudioPlayer *p) {
                 if (!p || !p->queue.files || p->queue.count <= 1) {
-                    printf("Deduplication skipped: queue too small or NULL\n");
+                    SDL_Log("Deduplication skipped: queue too small or NULL");
                     return;
                 }
                 
-                printf("Deduplication thread started. Checking %d files for duplicates...\n", p->queue.count);
+                SDL_Log("Deduplication thread started. Checking %d files for duplicates...", p->queue.count);
                 
                 // Lock the queue for the entire operation
                 pthread_mutex_lock(&p->audio_mutex);
@@ -500,7 +500,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     char *basename = g_path_get_basename(filepath);
                     
                     if (g_hash_table_contains(seen_basenames, basename)) {
-                        printf("  Found duplicate: %s\n", basename);
+                        SDL_Log("  Found duplicate: %s", basename);
                         duplicates_to_remove.push_back(i);
                     } else {
                         g_hash_table_insert(seen_basenames, g_strdup(basename), GINT_TO_POINTER(1));
@@ -510,7 +510,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     
                     // Progress update every 1000 files
                     if ((i + 1) % 1000 == 0) {
-                        printf("  Checked %d / %d files...\n", i + 1, p->queue.count);
+                        SDL_Log("  Checked %d / %d files...", i + 1, p->queue.count);
                     }
                 }
                 
@@ -532,7 +532,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     }
                 }
                 
-                printf("Deduplication complete: removed %d duplicates. Queue now has %d files.\n", removed, p->queue.count);
+                SDL_Log("Deduplication complete: removed %d duplicates. Queue now has %d files.", removed, p->queue.count);
                 
                 // Unlock the queue
                 pthread_mutex_unlock(&p->audio_mutex);
@@ -541,7 +541,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 g_idle_add([](gpointer data) -> gboolean {
                     AudioPlayer *p = (AudioPlayer*)data;
                     if (p) {
-                        printf("Quick UI update after deduplication...\n");
+                        SDL_Log("Quick UI update after deduplication...");
                         update_gui_state(p);  // Quick update only
                     }
                     return FALSE;
@@ -549,17 +549,17 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 
                 // Post display update to main thread (atomic operation, prevents conflicts)
                 std::thread([](AudioPlayer *p) {
-                    printf("Starting background display update thread...\n");
+                    SDL_Log("Starting background display update thread...");
                     g_usleep(200000);  // 200ms delay to let UI update first
                     
-                    printf("Posting queue display update (%d files)...\n", p->queue.count);
+                    SDL_Log("Posting queue display update (%d files)...", p->queue.count);
                     
                     // Post as atomic g_idle_add to main thread
                     g_idle_add([](gpointer data) -> gboolean {
                         AudioPlayer *p = (AudioPlayer*)data;
-                        printf("Updating queue display on main thread\n");
+                        SDL_Log("Updating queue display on main thread");
                         update_queue_display_with_filter(p);
-                        printf("Display update complete\n");
+                        SDL_Log("Display update complete");
                         return FALSE;
                     }, p);
                 }, p).detach();
@@ -690,7 +690,7 @@ static void g_on_import_directory_response(GtkDialog *dialog, gint response_id, 
         if (folder) {
             char *folder_path = g_file_get_path(folder);
             if (folder_path) {
-                printf("Starting import from: %s\n", folder_path);
+                SDL_Log("Starting import from: %s", folder_path);
                 g_create_and_show_scan_dialog(folder_path, true);
                 g_free(folder_path);
             }
@@ -737,7 +737,7 @@ void update_queue_display_minimal(AudioPlayer *player) {
 
     // If a filter is active, just update the play indicator without refiltering
     if (has_filter) {
-        printf("Filter active ('%s'), updating play indicator only\n", filter);
+        SDL_Log("Filter active ('%s'), updating play indicator only", filter);
         
         // Just update the ▶ indicator, don't clear and refilter
         GtkTreeIter iter;
@@ -823,7 +823,7 @@ static void leave_karaoke_visualization(AudioPlayer *p) {
 // Signal handler for graceful shutdown
 static void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
-        printf("\nReceived signal %d, initiating graceful shutdown...\n", sig);
+        SDL_Log("\nReceived signal %d, initiating graceful shutdown...", sig);
         
         if (player) {
             // Save current queue before exit
@@ -842,33 +842,33 @@ static void signal_handler(int sig) {
             cleanup_audio_cache(&player->audio_cache); 
             cleanup_virtual_filesystem();
             
-            printf("Cleaning up Audio\n");
+            SDL_Log("Cleaning up Audio");
             if (player->audio_buffer.data) free(player->audio_buffer.data);
 
             if (player->cdg_display) {
                 cdg_display_free(player->cdg_display);
             }    
 
-            printf("Closing SDL audio device\n");
+            SDL_Log("Closing SDL audio device");
             if (player->audio_device) SDL_CloseAudioDevice(player->audio_device);
 
-            printf("Cleaning Equalizer\n");
+            SDL_Log("Cleaning Equalizer");
             if (player->equalizer) {
                 equalizer_free(player->equalizer);
             }
             
-            printf("Destroying audio mutex\n");
+            SDL_Log("Destroying audio mutex");
             pthread_mutex_destroy(&player->audio_mutex);
 
-            printf("Freeing player\n");
+            SDL_Log("Freeing player");
             g_free(player);
             player = NULL;
         }
 
-        printf("Closing SDL\n");
+        SDL_Log("Closing SDL");
         SDL_Quit();
         
-        printf("Exiting application\n");
+        SDL_Log("Exiting application");
         exit(0);
     }
 }
@@ -1019,22 +1019,22 @@ bool open_windows_file_dialog(char* filename, size_t filename_size, bool multipl
     
     if (multiple) {
         ofn.Flags |= OFN_ALLOWMULTISELECT | OFN_EXPLORER;
-        printf("Opening Windows file dialog for multiple selection\n");
+        SDL_Log("Opening Windows file dialog for multiple selection");
     } else {
-        printf("Opening Windows file dialog for single selection\n");
+        SDL_Log("Opening Windows file dialog for single selection");
     }
     
     BOOL result = GetOpenFileName(&ofn);
     
     if (result) {
-        printf("File dialog returned successfully\n");
+        SDL_Log("File dialog returned successfully");
         return true;
     } else {
         DWORD error = CommDlgExtendedError();
         if (error != 0) {
-            printf("File dialog error: %lu\n", error);
+            SDL_Log("File dialog error: %lu", error);
         } else {
-            printf("File dialog cancelled by user\n");
+            SDL_Log("File dialog cancelled by user");
         }
         return false;
     }
@@ -1090,12 +1090,12 @@ const char* get_current_queue_file(PlayQueue *queue) {
 
 bool advance_queue(PlayQueue *queue) {
     if (queue->count == 0) {
-        printf("advance_queue: Empty queue\n");
+        SDL_Log("advance_queue: Empty queue");
         return false;
     }
     
     if (queue->count == 1) {
-        printf("advance_queue: Single song queue - %s repeat\n", 
+        SDL_Log("advance_queue: Single song queue - %s repeat", 
                queue->repeat_queue ? "restarting (repeat on)" : "stopping (repeat off)");
         if (queue->repeat_queue) {
             // For single song, just stay at index 0
@@ -1106,49 +1106,49 @@ bool advance_queue(PlayQueue *queue) {
         }
     }
     
-    printf("advance_queue: Before - index %d of %d\n", queue->current_index, queue->count);
+    SDL_Log("advance_queue: Before - index %d of %d", queue->current_index, queue->count);
     
     queue->current_index++;
     
     if (queue->current_index >= queue->count) {
         if (queue->repeat_queue) {
             queue->current_index = 0;
-            printf("advance_queue: Wrapped to beginning (repeat on)\n");
+            SDL_Log("advance_queue: Wrapped to beginning (repeat on)");
             return true;
         } else {
             queue->current_index = queue->count - 1; // Stay at last song
-            printf("advance_queue: At end, no repeat\n");
+            SDL_Log("advance_queue: At end, no repeat");
             return false;
         }
     }
     
-    printf("advance_queue: After - index %d of %d\n", queue->current_index, queue->count);
+    SDL_Log("advance_queue: After - index %d of %d", queue->current_index, queue->count);
     return true;
 }
 
 bool previous_queue(PlayQueue *queue) {
     if (queue->count == 0) {
-        printf("previous_queue: Empty queue\n");
+        SDL_Log("previous_queue: Empty queue");
         return false;
     }
     
-    printf("previous_queue: Before - index %d of %d\n", queue->current_index, queue->count);
+    SDL_Log("previous_queue: Before - index %d of %d", queue->current_index, queue->count);
     
     queue->current_index--;
     
     if (queue->current_index < 0) {
         if (queue->repeat_queue) {
             queue->current_index = queue->count - 1;
-            printf("previous_queue: Wrapped to end (repeat on)\n");
+            SDL_Log("previous_queue: Wrapped to end (repeat on)");
             return true;
         } else {
             queue->current_index = 0;
-            printf("previous_queue: At beginning, no repeat\n");
+            SDL_Log("previous_queue: At beginning, no repeat");
             return false;
         }
     }
     
-    printf("previous_queue: After - index %d of %d\n", queue->current_index, queue->count);
+    SDL_Log("previous_queue: After - index %d of %d", queue->current_index, queue->count);
     return true;
 }
 
@@ -1158,7 +1158,7 @@ void on_remove_from_queue_clicked(GtkButton *button, gpointer user_data) {
     int index = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "queue_index"));
     AudioPlayer *player = (AudioPlayer*)g_object_get_data(G_OBJECT(button), "player");
     
-    printf("Removing item %d from queue\n", index);
+    SDL_Log("Removing item %d from queue", index);
     
     bool was_current_playing = (index == player->queue.current_index && player->is_playing);
     bool queue_will_be_empty = (player->queue.count <= 1);
@@ -1177,7 +1177,7 @@ void on_remove_from_queue_clicked(GtkButton *button, gpointer user_data) {
                 start_playback(player);
             } else {
                 // Failed to load next file - ensure consistent UI state
-                printf("Failed to load next track after removal\n");
+                SDL_Log("Failed to load next track after removal");
                 player->is_loaded = false;
                 gtk_label_set_text(GTK_LABEL(player->file_label), "No file loaded");
                 update_gui_state(player);
@@ -1258,19 +1258,19 @@ bool init_audio(AudioPlayer *player, int sample_rate, int channels) {
     const char* drivers[] = {"directsound", "winmm", "wasapi", NULL};
     for (int i = 0; drivers[i]; i++) {
         if (SDL_SetHint(SDL_HINT_AUDIODRIVER, drivers[i])) {
-            printf("Trying SDL audio driver: %s\n", drivers[i]);
+            SDL_Log("Trying SDL audio driver: %s", drivers[i]);
             if (SDL_Init(SDL_INIT_AUDIO) == 0) {
-                printf("Successfully initialized with driver: %s\n", drivers[i]);
+                SDL_Log("Successfully initialized with driver: %s", drivers[i]);
                 break;
             } else {
-                printf("Failed with driver %s: %s\n", drivers[i], SDL_GetError());
+                SDL_Log("Failed with driver %s: %s", drivers[i], SDL_GetError());
                 SDL_Quit();
             }
         }
     }
 #else
     if (SDL_Init(SDL_INIT_AUDIO) < 0) {
-        printf("SDL initialization failed: %s\n", SDL_GetError());
+        SDL_Log("SDL initialization failed: %s", SDL_GetError());
         return false;
     }
 #endif
@@ -1291,15 +1291,15 @@ bool init_audio(AudioPlayer *player, int sample_rate, int channels) {
     
     player->audio_device = SDL_OpenAudioDevice(NULL, 0, &want, &player->audio_spec, SDL_AUDIO_ALLOW_FORMAT_CHANGE);
     if (player->audio_device == 0) {
-        printf("Audio device open failed: %s\n", SDL_GetError());
+        SDL_Log("Audio device open failed: %s", SDL_GetError());
         return false;
     }
     
-    printf("Audio: %d Hz, %d channels\n", player->audio_spec.freq, player->audio_spec.channels);
+    SDL_Log("Audio: %d Hz, %d channels", player->audio_spec.freq, player->audio_spec.channels);
     
     // Reinitialize equalizer with new sample rate if it exists
     if (player->equalizer && player->equalizer->sample_rate != sample_rate) {
-        printf("Reinitializing equalizer for new sample rate: %d Hz\n", sample_rate);
+        SDL_Log("Reinitializing equalizer for new sample rate: %d Hz", sample_rate);
         equalizer_free(player->equalizer);
         player->equalizer = equalizer_new(sample_rate);
     }
@@ -1332,28 +1332,28 @@ bool load_wav_file(AudioPlayer *player, const char* wav_path) {
         player->audio_buffer.position = 0;
         pthread_mutex_unlock(&player->audio_mutex);
         
-        printf("Loaded from cache: %zu samples\n", cached->length);
+        SDL_Log("Loaded from cache: %zu samples", cached->length);
         return true;
     }
     
     // Not in cache, load from file
     FILE* wav_file = fopen(wav_path, "rb");
     if (!wav_file) {
-        printf("Cannot open WAV file: %s\n", wav_path);
+        SDL_Log("Cannot open WAV file: %s", wav_path);
         return false;
     }
     
     // Read WAV header
     char header[44];
     if (fread(header, 1, 44, wav_file) != 44) {
-        printf("Cannot read WAV header\n");
+        SDL_Log("Cannot read WAV header");
         fclose(wav_file);
         return false;
     }
     
     // Verify WAV format
     if (strncmp(header, "RIFF", 4) != 0 || strncmp(header + 8, "WAVE", 4) != 0) {
-        printf("Invalid WAV format\n");
+        SDL_Log("Invalid WAV format");
         fclose(wav_file);
         return false;
     }
@@ -1363,11 +1363,11 @@ bool load_wav_file(AudioPlayer *player, const char* wav_path) {
     player->channels = *(short*)(header + 22);
     player->bits_per_sample = *(short*)(header + 34);
     
-    printf("WAV: %d Hz, %d channels, %d bits\n", player->sample_rate, player->channels, player->bits_per_sample);
+    SDL_Log("WAV: %d Hz, %d channels, %d bits", player->sample_rate, player->channels, player->bits_per_sample);
     
     // Reinitialize audio with the correct sample rate and channels
     if (!init_audio(player, player->sample_rate, player->channels)) {
-        printf("Failed to reinitialize audio for WAV format\n");
+        SDL_Log("Failed to reinitialize audio for WAV format");
         fclose(wav_file);
         return false;
     }
@@ -1378,19 +1378,19 @@ bool load_wav_file(AudioPlayer *player, const char* wav_path) {
     long data_size = file_size - 44;
     
     player->song_duration = data_size / (double)(player->sample_rate * player->channels * (player->bits_per_sample / 8));
-    printf("WAV duration: %.2f seconds\n", player->song_duration);
+    SDL_Log("WAV duration: %.2f seconds", player->song_duration);
     
     // Allocate and read audio data
     int16_t* wav_data = (int16_t*)malloc(data_size);
     if (!wav_data) {
-        printf("Memory allocation failed\n");
+        SDL_Log("Memory allocation failed");
         fclose(wav_file);
         return false;
     }
     
     fseek(wav_file, 44, SEEK_SET);
     if (fread(wav_data, 1, data_size, wav_file) != (size_t)data_size) {
-        printf("WAV data read failed\n");
+        SDL_Log("WAV data read failed");
         free(wav_data);
         fclose(wav_file);
         return false;
@@ -1416,7 +1416,7 @@ bool load_wav_file(AudioPlayer *player, const char* wav_path) {
     player->audio_buffer.position = 0;
     pthread_mutex_unlock(&player->audio_mutex);
     
-    printf("Loaded %zu samples\n", player->audio_buffer.length);
+    SDL_Log("Loaded %zu samples", player->audio_buffer.length);
     return true;
 }
 
@@ -1435,12 +1435,12 @@ void on_speed_changed(GtkRange *range, gpointer user_data) {
     snprintf(tooltip, sizeof(tooltip), "Playback speed: %.2fx", speed);
     gtk_widget_set_tooltip_text(GTK_WIDGET(range), tooltip);
     
-    printf("Speed changed to: %.2fx\n", speed);
+    SDL_Log("Speed changed to: %.2fx", speed);
 }
 
 
 bool load_file(AudioPlayer *player, const char *filename) {
-    printf("load_file called for: %s\n", filename);
+    SDL_Log("load_file called for: %s", filename);
     
     // Store original filename for CDG lookup (before any recursive calls that change it)
     static char original_filename[2048];
@@ -1451,12 +1451,12 @@ bool load_file(AudioPlayer *player, const char *filename) {
         strncpy(original_filename, filename, sizeof(original_filename) - 1);
         original_filename[sizeof(original_filename) - 1] = '\0';
         has_original = true;
-        printf("Stored original filename for CDG lookup: %s\n", original_filename);
+        SDL_Log("Stored original filename for CDG lookup: %s", original_filename);
     }
     
     // Stop current playback and clean up timer
     if (player->is_playing || player->update_timer_id > 0) {
-        printf("Stopping current playback...\n");
+        SDL_Log("Stopping current playback...");
         pthread_mutex_lock(&player->audio_mutex);
         player->is_playing = false;
         player->is_paused = false;
@@ -1466,7 +1466,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
         if (player->update_timer_id > 0) {
             g_source_remove(player->update_timer_id);
             player->update_timer_id = 0;
-            printf("Removed existing timer\n");
+            SDL_Log("Removed existing timer");
         }
     }
     
@@ -1479,14 +1479,14 @@ bool load_file(AudioPlayer *player, const char *filename) {
     
     // Check if this is a virtual file (starts with "virtual_")
     if (strncmp(filename, "virtual_", 8) == 0) {
-        printf("Loading virtual WAV file: %s\n", filename);
+        SDL_Log("Loading virtual WAV file: %s", filename);
         return load_virtual_wav_file(player, filename);
     }
     
     // Determine file type for regular files
     const char *ext = strrchr(filename, '.');
     if (!ext) {
-        printf("Unknown file type\n");
+        SDL_Log("Unknown file type");
         return false;
     }
     
@@ -1503,11 +1503,11 @@ bool load_file(AudioPlayer *player, const char *filename) {
     
     // Check for Karafun (.kfn) files FIRST
     if (strcmp(ext_lower, ".kfn") == 0) {
-        printf("Loading Karafun file: %s\n", filename);
+        SDL_Log("Loading Karafun file: %s", filename);
         if (karafun_load(filename)) {
             const char *mixed_path = karafun_get_mixed_path();
             if (mixed_path) {
-                printf("Karafun loaded, playing mixed vocal+backing track\n");
+                SDL_Log("Karafun loaded, playing mixed vocal+backing track");
                 success = load_file(player, mixed_path);
                 if (success && player->visualizer) {
                     enter_karaoke_visualization(player);
@@ -1519,12 +1519,12 @@ bool load_file(AudioPlayer *player, const char *filename) {
 
     // Check for KAR (Karaoke MIDI) files - Extract lyrics and convert audio
     if (strcmp(ext_lower, ".kar") == 0) {
-        printf("Loading KAR file: %s\n", filename);
+        SDL_Log("Loading KAR file: %s", filename);
         if (kar_load(filename)) {
             KarafunState* kar_state = kar_get_state();
             const char *mixed_path = karafun_get_mixed_path();
             if (mixed_path && kar_state) {
-                printf("KAR loaded with %d words in %d lines, playing audio\n", 
+                SDL_Log("KAR loaded with %d words in %d lines, playing audio", 
                        kar_state->word_count, kar_state->line_count);
                 success = load_file(player, mixed_path);
                 if (success && player->visualizer) {
@@ -1548,58 +1548,58 @@ bool load_file(AudioPlayer *player, const char *filename) {
     }
 
     if (strcmp(ext_lower, ".wav") == 0) {
-        printf("Loading WAV file: %s\n", filename);
+        SDL_Log("Loading WAV file: %s", filename);
         success = load_wav_file(player, filename);
     } else if (strcmp(ext_lower, ".mid") == 0 || strcmp(ext_lower, ".midi") == 0) {
-        printf("Loading MIDI file: %s\n", filename);
+        SDL_Log("Loading MIDI file: %s", filename);
         if (convert_midi_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".mp3") == 0) {
-        printf("Loading MP3 file: %s\n", filename);
+        SDL_Log("Loading MP3 file: %s", filename);
         if (convert_mp3_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".ogg") == 0) {
-        printf("Loading OGG file: %s\n", filename);
+        SDL_Log("Loading OGG file: %s", filename);
         if (convert_ogg_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".flac") == 0) {
-        printf("Loading FLAC file: %s\n", filename);
+        SDL_Log("Loading FLAC file: %s", filename);
         if (convert_flac_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".aif") == 0 || strcmp(ext_lower, ".aiff") == 0) {
-        printf("Loading AIFF file: %s\n", filename);
+        SDL_Log("Loading AIFF file: %s", filename);
         if (convert_aiff_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".opus") == 0) {
-        printf("Loading Opus file: %s\n", filename);
+        SDL_Log("Loading Opus file: %s", filename);
         if (convert_opus_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".m4a") == 0) {
-        printf("Loading M4A file: %s\n", filename);
+        SDL_Log("Loading M4A file: %s", filename);
         if (convert_m4a_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".wma") == 0) {
-        printf("Loading WMA file: %s\n", filename);
+        SDL_Log("Loading WMA file: %s", filename);
         if (convert_wma_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         }
     } else if (strcmp(ext_lower, ".lrc") == 0) {
-        printf("Generating karaoke ZIP from LRC: %s\n", filename);
+        SDL_Log("Generating karaoke ZIP from LRC: %s", filename);
         is_zip_file = true;
         // Generate ZIP from LRC and matching audio
         std::string zip_path;
@@ -1627,7 +1627,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
                     player->is_loading_cdg_from_zip = false;
 
                     if (success) {
-                        printf("Loaded karaoke ZIP successfully\n");
+                        SDL_Log("Loaded karaoke ZIP successfully");
                         strncpy(player->current_file, zip_path.c_str(), 1023);
                         player->current_file[1023] = '\0';
 
@@ -1635,21 +1635,21 @@ bool load_file(AudioPlayer *player, const char *filename) {
                         gtk_label_set_markup(GTK_LABEL(player->metadata_label), metadata);
                         g_free(metadata);
                     } else {
-                        printf("Failed to load audio from generated ZIP\n");
+                        SDL_Log("Failed to load audio from generated ZIP");
                         cleanup_karaoke_temp_files(&player->karaoke_temp_files);
                     }
                 } else {
-                    printf("Failed to load CDG from generated ZIP\n");
+                    SDL_Log("Failed to load CDG from generated ZIP");
                     cleanup_karaoke_temp_files(&zip_contents);
                 }
             } else {
-                printf("Failed to extract generated karaoke ZIP\n");
+                SDL_Log("Failed to extract generated karaoke ZIP");
             }
         } else {
-            printf("Failed to generate karaoke ZIP from LRC\n");
+            SDL_Log("Failed to generate karaoke ZIP from LRC");
         }
     } else if (strcmp(ext_lower, ".zip") == 0) {
-        printf("Loading karaoke ZIP file: %s\n", filename);
+        SDL_Log("Loading karaoke ZIP file: %s", filename);
         is_zip_file = true;
     
         KaraokeZipContents zip_contents;
@@ -1674,7 +1674,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
                 player->is_loading_cdg_from_zip = false;
             
                 if (success) {
-                    printf("Loaded karaoke ZIP successfully\n");
+                    SDL_Log("Loaded karaoke ZIP successfully");
                     strncpy(player->current_file, filename, 1023);
                     player->current_file[1023] = '\0';
                     
@@ -1683,23 +1683,23 @@ bool load_file(AudioPlayer *player, const char *filename) {
                     gtk_label_set_markup(GTK_LABEL(player->metadata_label), metadata);
                     g_free(metadata);
                 } else {
-                    printf("Failed to load audio from ZIP\n");
+                    SDL_Log("Failed to load audio from ZIP");
                     cleanup_karaoke_temp_files(&player->karaoke_temp_files);
                 }
             } else {
-                printf("Failed to load CDG from ZIP\n");
+                SDL_Log("Failed to load CDG from ZIP");
                 cleanup_karaoke_temp_files(&zip_contents);
             }
         } else {
-            printf("Failed to extract karaoke ZIP\n");
+            SDL_Log("Failed to extract karaoke ZIP");
         }
     } else {
-        printf("Trying to load unknown file: %s\n", filename);
+        SDL_Log("Trying to load unknown file: %s", filename);
         if (convert_audio_to_wav(player, filename)) {
-            printf("Now loading converted virtual WAV file: %s\n", player->temp_wav_file);
+            SDL_Log("Now loading converted virtual WAV file: %s", player->temp_wav_file);
             success = load_virtual_wav_file(player, player->temp_wav_file);
         } else {
-            printf("File isn't supported\n");
+            SDL_Log("File isn't supported");
         }
     }
     
@@ -1728,7 +1728,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
                 player->visualizer->cdg_display = player->cdg_display;
                 enter_karaoke_visualization(player);
             }
-            printf("Loaded CDG for: %s\n", cdg_lookup_name);
+            SDL_Log("Loaded CDG for: %s", cdg_lookup_name);
         } else if (player->has_cdg && player->visualizer) {
             enter_karaoke_visualization(player);
         }
@@ -1746,9 +1746,9 @@ bool load_file(AudioPlayer *player, const char *filename) {
         gtk_range_set_value(GTK_RANGE(player->progress_scale), 0.0);
         
         if (player->audio_buffer.length == 0 || player->song_duration <= 0.1) {
-            printf("Warning: File loaded but has no/minimal audio data (duration: %.2f, samples: %zu)\n", 
+            SDL_Log("Warning: File loaded but has no/minimal audio data (duration: %.2f, samples: %zu)", 
                    player->song_duration, player->audio_buffer.length);
-            printf("Skipping this file and advancing to next...\n");
+            SDL_Log("Skipping this file and advancing to next...");
             
             if (strncmp(player->temp_wav_file, "virtual_", 8) == 0) {
                 delete_virtual_file(player->temp_wav_file);
@@ -1759,7 +1759,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
             if (player->queue.count > 1) {
                 g_timeout_add(100, [](gpointer data) -> gboolean {
                     AudioPlayer *p = (AudioPlayer*)data;
-                    printf("Auto-advancing from invalid file...\n");
+                    SDL_Log("Auto-advancing from invalid file...");
                     if (advance_queue(&p->queue)) {
                         if (load_file_from_queue(p)) {
                             update_queue_display(p);
@@ -1773,7 +1773,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
             return true;
         }
         
-        printf("File successfully loaded (duration: %.2f, samples: %zu), auto-starting playback\n", 
+        SDL_Log("File successfully loaded (duration: %.2f, samples: %zu), auto-starting playback", 
                player->song_duration, player->audio_buffer.length);
         
         start_playback(player);
@@ -1789,9 +1789,9 @@ bool load_file(AudioPlayer *player, const char *filename) {
         gtk_range_set_value(GTK_RANGE(player->progress_scale), 0.0);
         
         if (player->audio_buffer.length == 0 || player->song_duration <= 0.1) {
-            printf("Warning: File loaded but has no/minimal audio data (duration: %.2f, samples: %zu)\n", 
+            SDL_Log("Warning: File loaded but has no/minimal audio data (duration: %.2f, samples: %zu)", 
                    player->song_duration, player->audio_buffer.length);
-            printf("Skipping this file and advancing to next...\n");
+            SDL_Log("Skipping this file and advancing to next...");
             
             if (strncmp(player->temp_wav_file, "virtual_", 8) == 0) {
                 delete_virtual_file(player->temp_wav_file);
@@ -1802,7 +1802,7 @@ bool load_file(AudioPlayer *player, const char *filename) {
             if (player->queue.count > 1) {
                 g_timeout_add(100, [](gpointer data) -> gboolean {
                     AudioPlayer *p = (AudioPlayer*)data;
-                    printf("Auto-advancing from invalid file...\n");
+                    SDL_Log("Auto-advancing from invalid file...");
                     if (advance_queue(&p->queue)) {
                         if (load_file_from_queue(p)) {
                             update_queue_display(p);
@@ -1816,13 +1816,13 @@ bool load_file(AudioPlayer *player, const char *filename) {
             return true;
         }
         
-        printf("File successfully loaded (duration: %.2f, samples: %zu), auto-starting playback\n", 
+        SDL_Log("File successfully loaded (duration: %.2f, samples: %zu), auto-starting playback", 
                player->song_duration, player->audio_buffer.length);
         
         start_playback(player);
         update_gui_state(player);
     } else {
-        printf("Failed to load file: %s\n", filename);
+        SDL_Log("Failed to load file: %s", filename);
     }
     
     return success;
@@ -1843,9 +1843,9 @@ bool load_file_from_queue(AudioPlayer *player) {
     }
     
     // Try to access file with timeout (OS will timeout on network drives)
-    printf("Checking file accessibility: %s\n", filename);
+    SDL_Log("Checking file accessibility: %s", filename);
     if (!is_file_accessible_with_timeout(filename)) {
-        printf("File not accessible (skipping): %s\n", filename);
+        SDL_Log("File not accessible (skipping): %s", filename);
         if (player->visualizer) {
             snprintf(player->visualizer->error_message, sizeof(player->visualizer->error_message),
                      "Skipped (not accessible): %s", filename);
@@ -1859,17 +1859,17 @@ bool load_file_from_queue(AudioPlayer *player) {
             
             // Prevent infinite loop: if we've cycled back to start after checking all files, stop
             if (attempted_count >= player->queue.count) {
-                printf("All files in queue are inaccessible\n");
+                SDL_Log("All files in queue are inaccessible");
                 attempted_start_index = -1;
                 attempted_count = 0;
                 return false;
             }
             
-            printf("Trying next file in queue (attempt %d/%d)...\n", attempted_count, player->queue.count);
+            SDL_Log("Trying next file in queue (attempt %d/%d)...", attempted_count, player->queue.count);
             return load_file_from_queue(player);  // Recursively try next file
         }
         
-        printf("No more files in queue to try\n");
+        SDL_Log("No more files in queue to try");
         attempted_start_index = -1;
         attempted_count = 0;
         return false;
@@ -1879,7 +1879,7 @@ bool load_file_from_queue(AudioPlayer *player) {
     attempted_start_index = -1;
     attempted_count = 0;
     
-    printf("File accessible, attempting load: %s\n", filename);
+    SDL_Log("File accessible, attempting load: %s", filename);
     if (!load_file(player, filename)) {
         // File was accessible but failed to load (corrupted, unsupported format, etc)
         if (player->visualizer) {
@@ -1889,19 +1889,19 @@ bool load_file_from_queue(AudioPlayer *player) {
             player->visualizer->error_display_time = 1.0;
         }
         
-        printf("Failed to load: %s\n", filename);
+        SDL_Log("Failed to load: %s", filename);
         
         // Try next file
         if (advance_queue(&player->queue)) {
-            printf("Trying next file after load failure...\n");
+            SDL_Log("Trying next file after load failure...");
             return load_file_from_queue(player);
         }
         
-        printf("No more files in queue\n");
+        SDL_Log("No more files in queue");
         return false;
     }
     
-    printf("Successfully loaded: %s\n", filename);
+    SDL_Log("Successfully loaded: %s", filename);
     return true;
 }
 
@@ -1933,11 +1933,11 @@ void seek_to_position(AudioPlayer *player, double position_seconds) {
 
 void start_playback(AudioPlayer *player) {
     if (!player->is_loaded || !player->audio_buffer.data) {
-        printf("Cannot start playback - no audio data loaded\n");
+        SDL_Log("Cannot start playback - no audio data loaded");
         return;
     }
     
-    printf("Starting WAV playback\n");
+    SDL_Log("Starting WAV playback");
     
     pthread_mutex_lock(&player->audio_mutex);
     // If we're at the end, restart from beginning
@@ -1971,13 +1971,13 @@ void start_playback(AudioPlayer *player) {
                         currently_playing = false;
                     }
                     song_finished = true;
-                    printf("Song finished - reached end of buffer (pos: %zu, len: %zu)\n", 
+                    SDL_Log("Song finished - reached end of buffer (pos: %zu, len: %zu)", 
                            p->audio_buffer.position, p->audio_buffer.length);
                 }
                 // Also check if is_playing was set to false by audio callback
                 else if (!currently_playing && p->audio_buffer.position > 0) {
                     song_finished = true;
-                    printf("Song finished - detected by audio callback\n");
+                    SDL_Log("Song finished - detected by audio callback");
                 }
             }
             
@@ -1994,7 +1994,7 @@ void start_playback(AudioPlayer *player) {
             
             // Handle song completion
             if (song_finished && p->queue.count > 0) {
-                printf("Song completed. Calling next_song()...\n");
+                SDL_Log("Song completed. Calling next_song()...");
                 
                 // Stop the current timer
                 p->update_timer_id = 0;
@@ -2053,7 +2053,7 @@ static bool karafun_toggle_track_and_reload(AudioPlayer *p, bool toggle_vocal) {
 
     bool ok = toggle_vocal ? karafun_toggle_vocal_mute() : karafun_toggle_backing_mute();
     if (!ok) {
-        printf("KARAFUN: Failed to toggle %s mute\n", toggle_vocal ? "vocal" : "backing");
+        SDL_Log("KARAFUN: Failed to toggle %s mute", toggle_vocal ? "vocal" : "backing");
         return false;
     }
 
@@ -2070,7 +2070,7 @@ static bool karafun_toggle_track_and_reload(AudioPlayer *p, bool toggle_vocal) {
         }
     }
 
-    printf("KARAFUN: %s track %s\n", toggle_vocal ? "Vocal" : "Backing",
+    SDL_Log("KARAFUN: %s track %s", toggle_vocal ? "Vocal" : "Backing",
            (toggle_vocal ? kfn->vocal_muted : kfn->backing_muted) ? "muted" : "unmuted");
     return true;
 }
@@ -2204,13 +2204,13 @@ static void gtk4_reparent_remove_child(GtkWidget *parent, GtkWidget *child) {
 
 void toggle_vis_fullscreen(AudioPlayer *player) {
     if (!player->visualizer || !player->visualizer->drawing_area) {
-        printf("No visualizer available for fullscreen mode\n");
+        SDL_Log("No visualizer available for fullscreen mode");
         return;
     }
     
     if (!is_vis_fullscreen) {
         // Enter visualization fullscreen mode
-        printf("Entering visualization fullscreen mode\n");
+        SDL_Log("Entering visualization fullscreen mode");
         
         // Store original parent and size
         original_vis_parent = gtk_widget_get_parent(player->visualizer->drawing_area);
@@ -2299,11 +2299,11 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
         reset_vis_cursor_timer();
         gtk_widget_set_tooltip_text(player->visualizer->drawing_area, NULL);
         gtk_widget_set_has_tooltip(player->visualizer->drawing_area, FALSE);
-        printf("Visualization fullscreen activated (F9 or Escape to exit)\n");
+        SDL_Log("Visualization fullscreen activated (F9 or Escape to exit)");
         
     } else {
         // Exit visualization fullscreen mode
-        printf("Exiting visualization fullscreen mode\n");
+        SDL_Log("Exiting visualization fullscreen mode");
         
         // Stop the cursor auto-hide timer before the window goes away
         if (vis_cursor_hide_timeout_id) {
@@ -2340,7 +2340,7 @@ void toggle_vis_fullscreen(AudioPlayer *player) {
             gtk_widget_set_has_tooltip(player->visualizer->drawing_area, TRUE);
         }
         
-        printf("Visualization returned to normal view\n");
+        SDL_Log("Visualization returned to normal view");
     }
 }
 
@@ -2391,7 +2391,7 @@ void rewind_5_seconds(AudioPlayer *player) {
     seek_to_position(player, new_time);
     gtk_range_set_value(GTK_RANGE(player->progress_scale), new_time);
     
-    printf("Rewinded 5 seconds to %.2f\n", new_time);
+    SDL_Log("Rewinded 5 seconds to %.2f", new_time);
 }
 
 void fast_forward_5_seconds(AudioPlayer *player) {
@@ -2404,7 +2404,7 @@ void fast_forward_5_seconds(AudioPlayer *player) {
     seek_to_position(player, new_time);
     gtk_range_set_value(GTK_RANGE(player->progress_scale), new_time);
     
-    printf("Fast forwarded 5 seconds to %.2f\n", new_time);
+    SDL_Log("Fast forwarded 5 seconds to %.2f", new_time);
 }
 
 void next_song(AudioPlayer *player) {
@@ -2462,7 +2462,7 @@ void next_song(AudioPlayer *player) {
     // No filter active, check for sorted display order
     // Check if queue_tree_view exists first
     if (!player->queue_tree_view) {
-        printf("No tree view in next_song, using simple next\n");
+        SDL_Log("No tree view in next_song, using simple next");
         if (advance_queue(&player->queue)) {
             if (load_file_from_queue(player)) {
                 update_queue_display_minimal(player);  // Performance: minimal update for song switch
@@ -2604,7 +2604,7 @@ void previous_song(AudioPlayer *player) {
     // No filter active, check for sorted display order
     // Check if queue_tree_view exists first
     if (!player->queue_tree_view) {
-        printf("No tree view in previous_song, using simple previous\n");
+        SDL_Log("No tree view in previous_song, using simple previous");
         if (previous_queue(&player->queue)) {
             if (load_file_from_queue(player)) {
                 update_queue_display_minimal(player);
@@ -2749,7 +2749,7 @@ void next_song_filtered(AudioPlayer *player) {
                 update_queue_display_minimal(player);  // Performance: minimal update for song switch
                 update_gui_state(player);
                 start_playback(player);
-                printf("Next filtered song: %s (index %d)\n", 
+                SDL_Log("Next filtered song: %s (index %d)", 
                        get_current_queue_file(&player->queue), check_index);
             }
             return;
@@ -2759,7 +2759,7 @@ void next_song_filtered(AudioPlayer *player) {
     }
     
     // No matching song found in filter
-    printf("No next song matches current filter\n");
+    SDL_Log("No next song matches current filter");
 }
 
 void previous_song_filtered(AudioPlayer *player) {
@@ -2820,7 +2820,7 @@ void previous_song_filtered(AudioPlayer *player) {
                 update_queue_display_minimal(player);  // Performance: minimal update for song switch
                 update_gui_state(player);
                 start_playback(player);
-                printf("Previous filtered song: %s (index %d)\n", 
+                SDL_Log("Previous filtered song: %s (index %d)", 
                        get_current_queue_file(&player->queue), check_index);
             }
             return;
@@ -2830,7 +2830,7 @@ void previous_song_filtered(AudioPlayer *player) {
     }
     
     // No matching song found in filter
-    printf("No previous song matches current filter\n");
+    SDL_Log("No previous song matches current filter");
 }
 
 void update_gui_state(AudioPlayer *player) {
@@ -2975,20 +2975,20 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
             directory[sizeof(directory) - 1] = '\0';
             ptr = after_first_null;
             
-            printf("Multiple files selected, directory: %s\n", directory);
+            SDL_Log("Multiple files selected, directory: %s", directory);
             
             // Add each file (with extension validation)
             while (*ptr) {
                 char full_path[2048];
                 snprintf(full_path, sizeof(full_path), "%s\\%s", directory, ptr);
                 
-                printf("Processing file: %s\n", full_path);
+                SDL_Log("Processing file: %s", full_path);
                 
                 if (is_supported_extension(full_path)) {
                     add_to_queue(&player->queue, full_path);
-                    printf("Added to queue: %s\n", full_path);
+                    SDL_Log("Added to queue: %s", full_path);
                 } else {
-                    printf("Skipping unsupported file: %s\n", full_path);
+                    SDL_Log("Skipping unsupported file: %s", full_path);
                 }
                 
                 // Move to next filename
@@ -2996,13 +2996,13 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
             }
         } else {
             // Single file (with extension validation)
-            printf("Single file selected: %s\n", filename);
+            SDL_Log("Single file selected: %s", filename);
             
             if (is_supported_extension(filename)) {
                 add_to_queue(&player->queue, filename);
-                printf("Added single file to queue: %s\n", filename);
+                SDL_Log("Added single file to queue: %s", filename);
             } else {
-                printf("Unsupported file type: %s\n", filename);
+                SDL_Log("Unsupported file type: %s", filename);
                 
                 // Show error message for unsupported single file
                 char error_msg[1024];
@@ -3022,7 +3022,7 @@ void on_add_to_queue_clicked(GtkButton *button, gpointer user_data) {
         update_queue_display_with_filter(player);
         update_gui_state(player);
         
-        printf("Total files in queue: %d\n", player->queue.count);
+        SDL_Log("Total files in queue: %d", player->queue.count);
     }
 #else
     // Your existing GTK file dialog code for Linux/Mac
@@ -3143,7 +3143,7 @@ void on_repeat_queue_toggled(GtkCheckButton *button, gpointer user_data) {
     AudioPlayer *player = (AudioPlayer*)user_data;
     player->queue.repeat_queue = gtk_check_button_get_active(button);
     
-    printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
+    SDL_Log("Queue repeat: %s", player->queue.repeat_queue ? "ON" : "OFF");
 }
 
 // Menu callbacks
@@ -3172,10 +3172,10 @@ static void on_menu_open_response(GtkDialog *dialog, gint response_id, gpointer 
 
             // If file already exists in queue, jump to it
             if (existing_index >= 0) {
-                printf("File already in queue at index %d, jumping to it\n", existing_index);
+                SDL_Log("File already in queue at index %d, jumping to it", existing_index);
                 player->queue.current_index = existing_index;
                 if (load_file_from_queue(player)) {
-                    printf("Jumped to: %s\n", filename);
+                    SDL_Log("Jumped to: %s", filename);
                     update_queue_display_with_filter(player);
                     update_gui_state(player);
                 }
@@ -3187,7 +3187,7 @@ static void on_menu_open_response(GtkDialog *dialog, gint response_id, gpointer 
                 if (was_empty_queue && player->queue.count > 0) {
                     player->queue.current_index = player->queue.count - 1;
                     if (load_file_from_queue(player)) {
-                        printf("Successfully loaded: %s\n", filename);
+                        SDL_Log("Successfully loaded: %s", filename);
                         update_queue_display_with_filter(player);
                         update_gui_state(player);
                     }
@@ -3195,7 +3195,7 @@ static void on_menu_open_response(GtkDialog *dialog, gint response_id, gpointer 
                     // Queue wasn't empty, just set to play this new file immediately
                     player->queue.current_index = player->queue.count - 1;
                     if (load_file_from_queue(player)) {
-                        printf("Successfully loaded: %s\n", filename);
+                        SDL_Log("Successfully loaded: %s", filename);
                         update_queue_display_with_filter(player);
                         update_gui_state(player);
                     }
@@ -3226,10 +3226,10 @@ void on_menu_open(GtkWidget *menuitem, gpointer user_data) {
         
         // If file already exists in queue, jump to it
         if (existing_index >= 0) {
-            printf("File already in queue at index %d, jumping to it\n", existing_index);
+            SDL_Log("File already in queue at index %d, jumping to it", existing_index);
             player->queue.current_index = existing_index;
             if (load_file_from_queue(player)) {
-                printf("Jumped to: %s\n", filename);
+                SDL_Log("Jumped to: %s", filename);
                 update_queue_display_with_filter(player);
                 update_gui_state(player);
             }
@@ -3241,7 +3241,7 @@ void on_menu_open(GtkWidget *menuitem, gpointer user_data) {
             if (was_empty_queue && player->queue.count > 0) {
                 player->queue.current_index = player->queue.count - 1;
                 if (load_file_from_queue(player)) {
-                    printf("Successfully loaded: %s\n", filename);
+                    SDL_Log("Successfully loaded: %s", filename);
                     update_queue_display_with_filter(player);
                     update_gui_state(player);
                 }
@@ -3249,7 +3249,7 @@ void on_menu_open(GtkWidget *menuitem, gpointer user_data) {
                 // Queue wasn't empty, just set to play this new file immediately
                 player->queue.current_index = player->queue.count - 1;
                 if (load_file_from_queue(player)) {
-                    printf("Successfully loaded: %s\n", filename);
+                    SDL_Log("Successfully loaded: %s", filename);
                     update_queue_display_with_filter(player);
                     update_gui_state(player);
                 }
@@ -3380,9 +3380,9 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
     }
     int screen_width = monitor_geom.width;
     int screen_height = monitor_geom.height;
-    //printf("Screen %i %i\n", screen_width, screen_height);
+    //SDL_Log("Screen %i %i", screen_width, screen_height);
 
-    //printf("Screen resolution: %dx%d\n", screen_width, screen_height);
+    //SDL_Log("Screen resolution: %dx%d", screen_width, screen_height);
 
     // Adaptive base sizes based on screen resolution category
     int base_window_width, base_window_height, base_player_width;
@@ -3397,7 +3397,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
         base_vis_height = 80;  // Much smaller visualization
         base_queue_width = 100;
         base_queue_height = 100;
-        //printf("Using very small screen base sizes\n");
+        //SDL_Log("Using very small screen base sizes");
     } else if (screen_width < 1200 || screen_height < 900) {
         // Medium screens (1024x768, etc.) - moderately smaller visualization
         base_window_width = 800;
@@ -3407,7 +3407,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
         base_vis_height = 120; // Smaller visualization
         base_queue_width = 250;
         base_queue_height = 350;
-        //printf("Using medium-screen base sizes\n");
+        //SDL_Log("Using medium-screen base sizes");
     } else {
         // Large screens (1920x1080+) - keep current size
         base_window_width = 900;
@@ -3417,7 +3417,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
         base_vis_height = 200;
         base_queue_width = 300;
         base_queue_height = 400;
-        //printf("Using large-screen base sizes\n");
+        //SDL_Log("Using large-screen base sizes");
     }
 
     // Use a more appropriate reference resolution based on screen category
@@ -3467,7 +3467,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
         queue_height = fmax(queue_height, 300);
     }
 
-    //printf("Final sizes: window=%dx%d, player=%d, vis=%dx%d, queue=%dx%d\n", window_width, window_height, player_width, vis_width, vis_height, queue_width, queue_height);
+    //SDL_Log("Final sizes: window=%dx%d, player=%d, vis=%dx%d, queue=%dx%d", window_width, window_height, player_width, vis_width, vis_height, queue_width, queue_height);
 
     // Resize window
     //gtk_window_resize(GTK_WINDOW(widget), window_width, window_height);
@@ -3486,7 +3486,7 @@ void on_window_resize(GtkWidget *widget, gpointer user_data) {
     // Adjust visualizer size
     if (player->visualizer && player->visualizer->drawing_area) {
         gtk_widget_set_size_request(player->visualizer->drawing_area, vis_width, vis_height);
-        //printf("Set visualizer size to: %dx%d\n", vis_width, vis_height);
+        //SDL_Log("Set visualizer size to: %dx%d", vis_width, vis_height);
     }
 
     // Adjust queue scrolled window
@@ -3543,7 +3543,7 @@ void on_menu_quit(GtkWidget *menuitem, gpointer user_data) {
     (void)menuitem;
     AudioPlayer *player = (AudioPlayer*)user_data;
     
-    printf("Menu quit selected - triggering cleanup\n");
+    SDL_Log("Menu quit selected - triggering cleanup");
     fflush(stdout);
     
     // Trigger the same cleanup as clicking the X button
@@ -3610,7 +3610,7 @@ gboolean on_window_delete_event(GtkWindow *window, gpointer user_data) {
     (void)window;
     AudioPlayer *player = (AudioPlayer*)user_data;
     
-    printf("Window close button pressed, cleaning up...\n");
+    SDL_Log("Window close button pressed, cleaning up...");
     
     // Save current queue before exit
     save_current_queue_on_exit(player);
@@ -3624,32 +3624,32 @@ gboolean on_window_delete_event(GtkWindow *window, gpointer user_data) {
     cleanup_audio_cache(&player->audio_cache); 
     cleanup_virtual_filesystem();
     
-    printf("Cleaing up Audio\n");
+    SDL_Log("Cleaing up Audio");
     if (player->audio_buffer.data) free(player->audio_buffer.data);
 
     if (player->cdg_display) {
         cdg_display_free(player->cdg_display);
     }    
 
-    printf("Closing  SDL 1\n");
+    SDL_Log("Closing  SDL 1");
     if (player->audio_device) SDL_CloseAudioDevice(player->audio_device);
 
-    printf("Cleaning Equalizer\n");
+    SDL_Log("Cleaning Equalizer");
     if (player->equalizer) {
         equalizer_free(player->equalizer);
     }
     
  
 
-    printf("Freeing player\n");
+    SDL_Log("Freeing player");
     if (player) {
         //delete player;
     }
 
-    printf("Closing  SDL\n");
+    SDL_Log("Closing  SDL");
     SDL_Quit();
     
-    printf("Closing main window\n");
+    SDL_Log("Closing main window");
     if (g_app_main_loop) {
         g_main_loop_quit(g_app_main_loop);
     }
@@ -3683,7 +3683,7 @@ static void on_menu_load_playlist_response(GtkDialog *dialog, gint response_id, 
                     save_last_playlist_path(filename);
                 }
             } else {
-                printf("Playlist appears empty or corrupted.");
+                SDL_Log("Playlist appears empty or corrupted.");
             }
             g_free(filename);
         }
@@ -3718,7 +3718,7 @@ void on_menu_load_playlist(GtkWidget *menuitem, gpointer user_data) {
                 add_to_recent_files(filename, "audio/x-mpegurl");
             }
         } else {
-            printf("Playlist appears empty or corrupted\n");
+            SDL_Log("Playlist appears empty or corrupted");
         }
     }
 #else
@@ -3742,7 +3742,7 @@ void on_menu_load_playlist(GtkWidget *menuitem, gpointer user_data) {
 
 bool save_current_queue_on_exit(AudioPlayer *player) {
     if (player->queue.count == 0) {
-        printf("No queue to save on exit\n");
+        SDL_Log("No queue to save on exit");
         return false;
     }
     
@@ -3772,7 +3772,7 @@ bool save_current_queue_on_exit(AudioPlayer *player) {
     
     FILE *f = fopen(temp_playlist_path, "w");
     if (!f) {
-        printf("Failed to create temp queue file\n");
+        SDL_Log("Failed to create temp queue file");
         return false;
     }
     
@@ -3784,7 +3784,7 @@ bool save_current_queue_on_exit(AudioPlayer *player) {
     }
     
     fclose(f);
-    printf("Saved current queue to: %s\n", temp_playlist_path);
+    SDL_Log("Saved current queue to: %s", temp_playlist_path);
     
     // Save current index and playback position
     f = fopen(position_path, "w");
@@ -3792,12 +3792,12 @@ bool save_current_queue_on_exit(AudioPlayer *player) {
         fprintf(f, "%d\n", player->queue.current_index);
         fprintf(f, "%.2f\n", playTime);
         fclose(f);
-        printf("Saved playback state: index=%d, time=%.2f\n", 
+        SDL_Log("Saved playback state: index=%d, time=%.2f", 
                player->queue.current_index, playTime);
     }
     
     if (save_last_playlist_path(temp_playlist_path)) {
-        printf("Set temp queue as last playlist\n");
+        SDL_Log("Set temp queue as last playlist");
         return true;
     }
     
@@ -3922,13 +3922,13 @@ bool save_last_playlist_path(const char *playlist_path) {
     
     FILE *f = fopen(config_path, "w");
     if (!f) {
-        printf("Failed to save last playlist path\n");
+        SDL_Log("Failed to save last playlist path");
         return false;
     }
     
     fprintf(f, "%s\n", playlist_path);
     fclose(f);
-    printf("Saved last playlist path: %s\n", playlist_path);
+    SDL_Log("Saved last playlist path: %s", playlist_path);
     return true;
 }
 
@@ -3940,7 +3940,7 @@ bool load_last_playlist_path(char *playlist_path, size_t path_size) {
     
     FILE *f = fopen(config_path, "r");
     if (!f) {
-        printf("No last playlist file found\n");
+        SDL_Log("No last playlist file found");
         return false;
     }
     
@@ -3960,12 +3960,12 @@ bool load_last_playlist_path(char *playlist_path, size_t path_size) {
     // Check if file still exists
     FILE *test = fopen(playlist_path, "r");
     if (!test) {
-        printf("Last playlist no longer exists: %s\n", playlist_path);
+        SDL_Log("Last playlist no longer exists: %s", playlist_path);
         return false;
     }
     fclose(test);
     
-    printf("Found last playlist: %s\n", playlist_path);
+    SDL_Log("Found last playlist: %s", playlist_path);
     return true;
 }
 
@@ -4002,7 +4002,7 @@ bool load_playlist_state(int *current_index, double *position) {
     }
     
     fclose(f);
-    printf("Loaded playback state: index=%d, time=%.2f\n", *current_index, *position);
+    SDL_Log("Loaded playback state: index=%d, time=%.2f", *current_index, *position);
     return true;
 }
 
@@ -4041,13 +4041,13 @@ bool get_settings_path(char *path, size_t path_size) {
 bool save_player_settings(AudioPlayer *player) {
     char settings_path[1024];
     if (!get_settings_path(settings_path, sizeof(settings_path))) {
-        printf("Failed to get settings path\n");
+        SDL_Log("Failed to get settings path");
         return false;
     }
     
     FILE *f = fopen(settings_path, "w");
     if (!f) {
-        printf("Failed to save settings\n");
+        SDL_Log("Failed to save settings");
         return false;
     }
     
@@ -4074,20 +4074,20 @@ bool save_player_settings(AudioPlayer *player) {
     }
     
     fclose(f);
-    printf("Settings saved to: %s\n", settings_path);
+    SDL_Log("Settings saved to: %s", settings_path);
     return true;
 }
 
 bool load_player_settings(AudioPlayer *player) {
     char settings_path[1024];
     if (!get_settings_path(settings_path, sizeof(settings_path))) {
-        printf("Failed to get settings path\n");
+        SDL_Log("Failed to get settings path");
         return false;
     }
     
     FILE *f = fopen(settings_path, "r");
     if (!f) {
-        printf("No settings file found, using defaults\n");
+        SDL_Log("No settings file found, using defaults");
         return false;
     }
     
@@ -4107,28 +4107,28 @@ bool load_player_settings(AudioPlayer *player) {
         
         // Parse key=value pairs
         if (sscanf(line, "volume=%lf", &volume) == 1) {
-            printf("Loaded volume: %.2f\n", volume);
+            SDL_Log("Loaded volume: %.2f", volume);
         }
         else if (sscanf(line, "speed=%lf", &speed) == 1) {
-            printf("Loaded speed: %.2f\n", speed);
+            SDL_Log("Loaded speed: %.2f", speed);
         }
         else if (sscanf(line, "eq_enabled=%d", (int*)&eq_enabled) == 1) {
-            printf("Loaded eq_enabled: %d\n", eq_enabled);
+            SDL_Log("Loaded eq_enabled: %d", eq_enabled);
         }
         else if (sscanf(line, "bass_gain=%f", &bass_gain) == 1) {
-            printf("Loaded bass_gain: %.2f\n", bass_gain);
+            SDL_Log("Loaded bass_gain: %.2f", bass_gain);
         }
         else if (sscanf(line, "mid_gain=%f", &mid_gain) == 1) {
-            printf("Loaded mid_gain: %.2f\n", mid_gain);
+            SDL_Log("Loaded mid_gain: %.2f", mid_gain);
         }
         else if (sscanf(line, "treble_gain=%f", &treble_gain) == 1) {
-            printf("Loaded treble_gain: %.2f\n", treble_gain);
+            SDL_Log("Loaded treble_gain: %.2f", treble_gain);
         }
         else if (sscanf(line, "vis_type=%d", &vis_type) == 1) {
-            printf("Loaded vis_type: %d\n", vis_type);
+            SDL_Log("Loaded vis_type: %d", vis_type);
         }
         else if (sscanf(line, "vis_sensitivity=%f", &vis_sensitivity) == 1) {
-            printf("Loaded vis_sensitivity: %.2f\n", vis_sensitivity);
+            SDL_Log("Loaded vis_sensitivity: %.2f", vis_sensitivity);
         }
     }
     
@@ -4172,7 +4172,7 @@ bool load_player_settings(AudioPlayer *player) {
         visualizer_set_type(player->visualizer, (VisualizationType)vis_type);
     }
     
-    printf("Settings loaded successfully\n");
+    SDL_Log("Settings loaded successfully");
     return true;
 }
 
@@ -4308,7 +4308,7 @@ static void handle_dbus_method_call(GDBusConnection *connection,
         const gchar *filepath;
         g_variant_get(parameters, "(s)", &filepath);
         
-        printf("Received file from another instance: %s\n", filepath);
+        SDL_Log("Received file from another instance: %s", filepath);
         
         // Add to queue and play
         if (!filename_exists_in_queue(&player->queue, filepath)) {
@@ -4370,7 +4370,7 @@ bool try_send_to_existing_instance(const char *filepath) {
     if (result) {
         g_variant_unref(result);
         g_object_unref(connection);
-        printf("Sent file to existing instance: %s\n", filepath);
+        SDL_Log("Sent file to existing instance: %s", filepath);
         return true;
     }
     
@@ -4386,13 +4386,13 @@ void setup_dbus_service(AudioPlayer *player) {
     GDBusNodeInfo *introspection_data = g_dbus_node_info_new_for_xml(introspection_xml, &error);
     
     if (!introspection_data) {
-        printf("Failed to parse D-Bus introspection XML\n");
+        SDL_Log("Failed to parse D-Bus introspection XML");
         return;
     }
     
     player->dbus_connection = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
     if (!player->dbus_connection) {
-        printf("Failed to connect to D-Bus\n");
+        SDL_Log("Failed to connect to D-Bus");
         return;
     }
     
@@ -4417,7 +4417,7 @@ void setup_dbus_service(AudioPlayer *player) {
     );
     
     g_dbus_node_info_unref(introspection_data);
-    printf("D-Bus service registered: %s\n", ZENAMP_DBUS_NAME);
+    SDL_Log("D-Bus service registered: %s", ZENAMP_DBUS_NAME);
 }
 
 void cleanup_dbus_service(AudioPlayer *player) {
@@ -4458,7 +4458,7 @@ bool try_send_to_existing_instance(const char *filepath) {
     // Bring window to front
     SetForegroundWindow(hwnd);
     
-    printf("Sent file to existing instance: %s\n", filepath);
+    SDL_Log("Sent file to existing instance: %s", filepath);
     return true;
 }
 
@@ -4471,7 +4471,7 @@ LRESULT CALLBACK window_proc_wrapper(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             // Get player from window data
             AudioPlayer *player = (AudioPlayer*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
             if (player) {
-                printf("Received file from another instance: %s\n", filepath);
+                SDL_Log("Received file from another instance: %s", filepath);
                 
                 // Add to queue and play
                 if (!filename_exists_in_queue(&player->queue, filepath)) {
@@ -4509,7 +4509,7 @@ void setup_windows_single_instance(AudioPlayer *player) {
         SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)window_proc_wrapper);
     }
     
-    printf("Windows single instance mutex created\n");
+    SDL_Log("Windows single instance mutex created");
 }
 
 void cleanup_windows_single_instance(AudioPlayer *player) {
@@ -4555,7 +4555,7 @@ int main(int argc, char *argv[]) {
                 
                 if (result) {
                     g_variant_unref(result);
-                    printf("Sent file to existing instance: %s\n", abs_path);
+                    SDL_Log("Sent file to existing instance: %s", abs_path);
                 } else {
                     sent_all = false;
                     if (error) {
@@ -4568,7 +4568,7 @@ int main(int argc, char *argv[]) {
             g_object_unref(connection);
             
             if (sent_all) {
-                printf("All files forwarded to existing instance, exiting\n");
+                SDL_Log("All files forwarded to existing instance, exiting");
                 return 0;
             }
         }
@@ -4596,7 +4596,7 @@ int main(int argc, char *argv[]) {
             }, (LPARAM)&hwnd);
             
             if (hwnd) {
-                printf("Found existing Zenamp window, sending files...\n");
+                SDL_Log("Found existing Zenamp window, sending files...");
                 for (int i = 1; i < argc; i++) {
                     char abs_path[4096];
                     _fullpath(abs_path, argv[i], sizeof(abs_path));
@@ -4607,12 +4607,12 @@ int main(int argc, char *argv[]) {
                     cds.lpData = (void*)abs_path;
                     
                     SendMessage(hwnd, WM_COPYDATA, 0, (LPARAM)&cds);
-                    printf("Sent file to existing instance: %s\n", abs_path);
+                    SDL_Log("Sent file to existing instance: %s", abs_path);
                 }
                 
                 SetForegroundWindow(hwnd);
                 ShowWindow(hwnd, SW_RESTORE);
-                printf("All files forwarded to existing instance, exiting\n");
+                SDL_Log("All files forwarded to existing instance, exiting");
                 return 0;
             }
         }
@@ -4631,7 +4631,7 @@ int main(int argc, char *argv[]) {
     init_audio_cache(&player->audio_cache, 500);
    
     if (!init_audio(player)) {
-        printf("Audio initialization failed\n");
+        SDL_Log("Audio initialization failed");
         cleanup_conversion_cache(&player->conversion_cache);
         cleanup_virtual_filesystem();
         return 1;
@@ -4639,7 +4639,7 @@ int main(int argc, char *argv[]) {
     
     player->equalizer = equalizer_new(SAMPLE_RATE);
     if (!player->equalizer) {
-        printf("Failed to initialize equalizer\n");
+        SDL_Log("Failed to initialize equalizer");
     }
     
     OPL_Init(SAMPLE_RATE);
@@ -4685,7 +4685,7 @@ int main(int argc, char *argv[]) {
                         AudioPlayer *player = (AudioPlayer*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
                         
                         if (player) {
-                            printf("Received file from another instance: %s\n", filepath);
+                            SDL_Log("Received file from another instance: %s", filepath);
                             
                             if (!filename_exists_in_queue(&player->queue, filepath)) {
                                  add_to_queue(&player->queue, filepath);
@@ -4713,11 +4713,11 @@ int main(int argc, char *argv[]) {
                 return DefWindowProc(hwnd, msg, wParam, lParam);
             });
             
-            printf("Windows message handler installed on HWND %p\n", hwnd);
+            SDL_Log("Windows message handler installed on HWND %p", hwnd);
         }
     }
     
-    printf("Windows single instance mutex created\n");
+    SDL_Log("Windows single instance mutex created");
 #endif
     
 #ifndef _WIN32
@@ -4748,7 +4748,7 @@ int main(int argc, char *argv[]) {
                         const gchar *filepath;
                         g_variant_get(parameters, "(s)", &filepath);
                         
-                        printf("Received file from another instance: %s\n", filepath);
+                        SDL_Log("Received file from another instance: %s", filepath);
                         if (!filename_exists_in_queue(&player->queue, filepath)) {
                             add_to_queue(&player->queue, filepath);
                             player->queue.current_index = player->queue.count - 1;
@@ -4788,14 +4788,14 @@ int main(int argc, char *argv[]) {
                 NULL
             );
             
-            printf("D-Bus service registered: %s\n", ZENAMP_DBUS_NAME);
+            SDL_Log("D-Bus service registered: %s", ZENAMP_DBUS_NAME);
         }
         
         g_dbus_node_info_unref(introspection_data);
     }
     
     if (error) {
-        printf("D-Bus setup error: %s\n", error->message);
+        SDL_Log("D-Bus setup error: %s", error->message);
         g_error_free(error);
     }
 #endif
@@ -4805,9 +4805,9 @@ int main(int argc, char *argv[]) {
     char last_playlist[1024];
     bool loaded_last_playlist = false;
     if (load_last_playlist_path(last_playlist, sizeof(last_playlist))) {
-        printf("Auto-loading last playlist: %s\n", last_playlist);
+        SDL_Log("Auto-loading last playlist: %s", last_playlist);
         if (load_m3u_playlist(player, last_playlist)) {
-            printf("Successfully loaded last playlist\n");
+            SDL_Log("Successfully loaded last playlist");
             loaded_last_playlist = true;
             
             int saved_index = 0;
@@ -4815,7 +4815,7 @@ int main(int argc, char *argv[]) {
             if (load_playlist_state(&saved_index, &saved_position)) {
                 if (saved_index >= 0 && saved_index < player->queue.count) {
                     player->queue.current_index = saved_index;
-                    printf("Restored queue index to %d\n", saved_index);
+                    SDL_Log("Restored queue index to %d", saved_index);
                 }
             }
         }
@@ -4836,7 +4836,7 @@ int main(int argc, char *argv[]) {
                 strncpy(abs_playlist_path, first_arg, sizeof(abs_playlist_path) - 1);
             }
 #endif
-            printf("Loading new M3U playlist: %s\n", abs_playlist_path);
+            SDL_Log("Loading new M3U playlist: %s", abs_playlist_path);
             clear_queue(&player->queue);
             load_m3u_playlist(player, abs_playlist_path);
             save_last_playlist_path(abs_playlist_path);
@@ -4858,7 +4858,7 @@ int main(int argc, char *argv[]) {
             }
             
             if (player->queue.count > 0 && load_file_from_queue(player)) {
-                printf("Loaded and auto-starting file from queue\n");
+                SDL_Log("Loaded and auto-starting file from queue");
                 update_queue_display_with_filter(player);
                 update_gui_state(player);
             }
@@ -4885,21 +4885,21 @@ int main(int argc, char *argv[]) {
                 }
                 
                 if (found_index >= 0) {
-                    printf("File already in queue at index %d, jumping to it\n", found_index);
+                    SDL_Log("File already in queue at index %d, jumping to it", found_index);
                     player->queue.current_index = found_index;
                     if (load_file_from_queue(player)) {
-                        printf("Loaded and auto-starting existing file from queue\n");
+                        SDL_Log("Loaded and auto-starting existing file from queue");
                         update_queue_display_with_filter(player);
                         update_gui_state(player);
                     }
                 } else {
-                    printf("File not in queue, adding and playing it\n");
+                    SDL_Log("File not in queue, adding and playing it");
                     if (!filename_exists_in_queue(&player->queue, abs_file_path)) {
                         add_to_queue(&player->queue, abs_file_path);
                         player->queue.current_index = player->queue.count - 1;
                     }
                     if (load_file_from_queue(player)) {
-                        printf("Loaded and auto-starting new file\n");
+                        SDL_Log("Loaded and auto-starting new file");
                         update_queue_display_with_filter(player);
                         update_gui_state(player);
                     }
@@ -4907,7 +4907,7 @@ int main(int argc, char *argv[]) {
             }
         }
     } else if (loaded_last_playlist && player->queue.count > 0) {
-        printf("Auto-loading first accessible file from last playlist...\n");
+        SDL_Log("Auto-loading first accessible file from last playlist...");
         
         // Try to load first accessible file from queue
         // Will automatically skip any inaccessible files with timeout
@@ -4918,11 +4918,11 @@ int main(int argc, char *argv[]) {
                 if (saved_position > 0 && saved_position < player->song_duration) {
                     seek_to_position(player, saved_position);
                     gtk_range_set_value(GTK_RANGE(player->progress_scale), saved_position);
-                    printf("Restored playback position to %.2f\n", saved_position);
+                    SDL_Log("Restored playback position to %.2f", saved_position);
                 }
             }
         } else {
-            printf("No accessible files found in playlist on startup\n");
+            SDL_Log("No accessible files found in playlist on startup");
             if (player->visualizer) {
                 snprintf(player->visualizer->error_message, sizeof(player->visualizer->error_message),
                          "No accessible files in playlist");
@@ -4932,20 +4932,20 @@ int main(int argc, char *argv[]) {
         }
         
         // Queue population posted back to main thread (atomic operation)
-        printf("Queuing background population of %d files...\n", player->queue.count);
+        SDL_Log("Queuing background population of %d files...", player->queue.count);
         std::thread([](AudioPlayer *p) {
-            printf("Background population thread started\n");
+            SDL_Log("Background population thread started");
             g_usleep(100000);  // 100ms to ensure UI is fully rendered
             
-            printf("Populating queue display (%d files)...\n", p->queue.count);
+            SDL_Log("Populating queue display (%d files)...", p->queue.count);
             
             // Post the entire update as atomic operation on main thread
             // This prevents conflicts between concurrent imports
             g_idle_add([](gpointer data) -> gboolean {
                 AudioPlayer *p = (AudioPlayer*)data;
-                printf("Queue update on main thread (%d files)\n", p->queue.count);
+                SDL_Log("Queue update on main thread (%d files)", p->queue.count);
                 update_queue_display_with_filter(p);
-                printf("Queue display complete\n");
+                SDL_Log("Queue display complete");
                 return FALSE;
             }, p);
         }, player).detach();

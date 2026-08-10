@@ -1,5 +1,6 @@
 #include "icon.h"
 #include <glib.h>
+#include <SDL2/SDL.h>
 
 // Global animation state
 IconAnimationState *g_icon_animation = NULL;
@@ -251,7 +252,7 @@ void start_icon_animation(void) {
         g_icon_animation
     );
     
-    printf("Animation started! (plays once)\n");
+    SDL_Log("Animation started! (plays once)");
 }
 
 // Stop animation after delay, return to first frame
@@ -332,7 +333,7 @@ void on_icon_button_press(GtkGestureClick *gesture, gint n_press, gdouble x, gdo
         return;
     }
     
-    printf("Icon clicked - starting animation!\n");
+    SDL_Log("Icon clicked - starting animation!");
     start_icon_animation();
 }
 

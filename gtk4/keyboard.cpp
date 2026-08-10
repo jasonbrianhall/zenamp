@@ -61,7 +61,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                     gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &selected_index, -1);
                     
                     if (selected_index == player->queue.current_index && player->is_playing) {
-                        printf("Already playing this song\n");
+                        SDL_Log("Already playing this song");
                         return TRUE;
                     }
                     
@@ -72,7 +72,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                         update_queue_display_minimal(player);  // Performance: minimal update during playback
                         update_gui_state(player);
                         start_playback(player);
-                        printf("Started playing: %s\n", get_current_queue_file(&player->queue));
+                        SDL_Log("Started playing: %s", get_current_queue_file(&player->queue));
                         char *metadata = extract_metadata(get_current_queue_file(&player->queue));
                         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
                         parse_metadata(metadata, title, artist, album, genre);
@@ -108,7 +108,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                             player->layout.toggle_queue_menu_item,
                             (void*)on_toggle_queue_panel, player);
                     }
-                    printf("Queue panel hidden (F10)\n");
+                    SDL_Log("Queue panel hidden (F10)");
                 } else {
                     gtk_widget_show(player->layout.queue_vbox);
                     if (player->layout.toggle_queue_menu_item) {
@@ -122,7 +122,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                             player->layout.toggle_queue_menu_item,
                             (void*)on_toggle_queue_panel, player);
                     }
-                    printf("Queue panel shown (F10)\n");
+                    SDL_Log("Queue panel shown (F10)");
                 }
             }
             return TRUE;            
@@ -137,7 +137,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                 if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
                     int selected_index;
                     gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &selected_index, -1);
-                    printf("Removing item %d from queue via keyboard\n", selected_index);
+                    SDL_Log("Removing item %d from queue via keyboard", selected_index);
                     
                     bool was_current_playing = (selected_index == player->queue.current_index && player->is_playing);
                     bool queue_will_be_empty = (player->queue.count <= 1);
@@ -189,7 +189,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
             // Q: Next visualization
             if (player->visualizer) {
                 visualizer_prev_mode(player->visualizer);
-                printf("Switched to prev visualization\n");
+                SDL_Log("Switched to prev visualization");
             }
             return TRUE;
             
@@ -202,7 +202,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
             // A: Previous visualization
             if (player->visualizer) {
                 visualizer_next_mode(player->visualizer);
-                printf("Switched to next visualization\n");
+                SDL_Log("Switched to next visualization");
             }
             return TRUE;
             
@@ -245,9 +245,9 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                 
                 if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
                     gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &index_to_delete, -1);
-                    printf("Removing selected queue item (index %d) via keyboard\n", index_to_delete);
+                    SDL_Log("Removing selected queue item (index %d) via keyboard", index_to_delete);
                 } else {
-                    printf("Removing current song (index %d) via keyboard\n", index_to_delete);
+                    SDL_Log("Removing current song (index %d) via keyboard", index_to_delete);
                 }
                 
                 bool was_current_playing = (index_to_delete == player->queue.current_index && player->is_playing);
@@ -327,7 +327,7 @@ gboolean on_key_press_event(GtkEventControllerKey *controller, guint keyval, gui
                 player->queue.repeat_queue = !player->queue.repeat_queue;
                 gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), 
                                            player->queue.repeat_queue);
-                printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
+                SDL_Log("Queue repeat: %s", player->queue.repeat_queue ? "ON" : "OFF");
                 return TRUE;
             }
             break;
@@ -439,7 +439,7 @@ void toggle_fullscreen(AudioPlayer *player) {
     // used in zenamp_main.cpp's visualizer timer callback.
     GdkSurface *gdk_surface = gtk_native_get_surface(GTK_NATIVE(player->window));
     if (!gdk_surface) {
-        printf("Cannot toggle fullscreen: window not realized\n");
+        SDL_Log("Cannot toggle fullscreen: window not realized");
         return;
     }
     
@@ -447,10 +447,10 @@ void toggle_fullscreen(AudioPlayer *player) {
     
     if (state & GDK_TOPLEVEL_STATE_FULLSCREEN) {
         gtk_window_unfullscreen(GTK_WINDOW(player->window));
-        printf("Exiting fullscreen mode\n");
+        SDL_Log("Exiting fullscreen mode");
     } else {
         gtk_window_fullscreen(GTK_WINDOW(player->window));
-        printf("Entering fullscreen mode\n");
+        SDL_Log("Entering fullscreen mode");
     }
 }
 
@@ -476,7 +476,7 @@ gboolean on_vis_fullscreen_key_press(GtkEventControllerKey *controller, guint ke
         case GDK_KEY_Q:
             if (player->visualizer) {
                 visualizer_prev_mode(player->visualizer);
-                printf("Switched to previous visualization in fullscreen\n");
+                SDL_Log("Switched to previous visualization in fullscreen");
             }
             return TRUE;
             
@@ -484,7 +484,7 @@ gboolean on_vis_fullscreen_key_press(GtkEventControllerKey *controller, guint ke
         case GDK_KEY_A:
             if (player->visualizer) {
                 visualizer_next_mode(player->visualizer);
-                printf("Switched to next visualization in fullscreen\n");
+                SDL_Log("Switched to next visualization in fullscreen");
             }
             return TRUE;
             
@@ -535,7 +535,7 @@ gboolean on_vis_fullscreen_key_press(GtkEventControllerKey *controller, guint ke
                 player->queue.repeat_queue = !player->queue.repeat_queue;
                 gtk_check_button_set_active(GTK_CHECK_BUTTON(player->repeat_queue_button), 
                                            player->queue.repeat_queue);
-                printf("Queue repeat: %s\n", player->queue.repeat_queue ? "ON" : "OFF");
+                SDL_Log("Queue repeat: %s", player->queue.repeat_queue ? "ON" : "OFF");
                 return TRUE;
             }
             break;
@@ -610,7 +610,7 @@ gboolean on_vis_fullscreen_key_press(GtkEventControllerKey *controller, guint ke
                         update_queue_display_minimal(player);  // Performance: minimal update during playback
                         update_gui_state(player);
                         start_playback(player);
-                        printf("Started playing: %s\n", get_current_queue_file(&player->queue));
+                        SDL_Log("Started playing: %s", get_current_queue_file(&player->queue));
                         char *metadata = extract_metadata(get_current_queue_file(&player->queue));
                         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
                         parse_metadata(metadata, title, artist, album, genre);

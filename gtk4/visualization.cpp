@@ -57,7 +57,7 @@ Visualizer* visualizer_new(void) {
     VisualizationType last_vis_type;
     if (load_last_visualization(&last_vis_type)) {
         vis->type = last_vis_type;
-        printf("Restored last visualization type: %d\n", last_vis_type);
+        SDL_Log("Restored last visualization type: %d", last_vis_type);
     }    
     
     vis->showing_error=false;
@@ -134,7 +134,7 @@ Visualizer* visualizer_new(void) {
 void visualizer_free(Visualizer *vis) {
     if (!vis) return;
     
-    printf("Freeing Visualizer\n");
+    SDL_Log("Freeing Visualizer");
 
     if (player->visualizer) {
         save_last_visualization(player->visualizer->type);
@@ -765,7 +765,7 @@ gboolean visualizer_timer_callback(gpointer user_data) {
 void on_visualizer_realize(GtkWidget *widget, gpointer user_data) {
     // The size is already set by on_window_realize(), so we don't need to do anything here
     // Just ensure the widget is properly realized
-    printf("Visualizer realized\n");
+    SDL_Log("Visualizer realized");
 }
 
 
@@ -818,7 +818,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     }
     int screen_width = monitor_geometry.width;
     int scale = gtk_widget_get_scale_factor(player->window);
-    printf("%i %i\n", screen_width, scale);
+    SDL_Log("%i %i", screen_width, scale);
 
     bool use_compact_controls = (screen_width <= 1024);
     
@@ -968,13 +968,13 @@ bool save_last_visualization(VisualizationType vis_type) {
     
     FILE *f = fopen(config_path, "w");
     if (!f) {
-        printf("Failed to save last visualization type\n");
+        SDL_Log("Failed to save last visualization type");
         return false;
     }
     
     fprintf(f, "%d\n", (int)vis_type);
     fclose(f);
-    printf("Saved last visualization: %d\n", vis_type);
+    SDL_Log("Saved last visualization: %d", vis_type);
     return true;
 }
 
@@ -997,7 +997,7 @@ bool load_last_visualization(VisualizationType *vis_type) {
     
     FILE *f = fopen(config_path, "r");
     if (!f) {
-        printf("No last visualization file found\n");
+        SDL_Log("No last visualization file found");
         return false;
     }
     
@@ -1009,7 +1009,7 @@ bool load_last_visualization(VisualizationType *vis_type) {
     fclose(f);
     
     *vis_type = (VisualizationType)type_int;
-    printf("Loaded last visualization: %d\n", type_int);
+    SDL_Log("Loaded last visualization: %d", type_int);
     return true;
 }
 
@@ -1128,5 +1128,5 @@ void show_track_info_overlay(Visualizer *vis, const char *title,
     vis->track_info_display_time = 3.0;  // Show for 3 seconds
     vis->track_info_fade_alpha = 1.0;    // Start fully visible
     
-    printf("Track info overlay triggered: %s\n", title);
+    SDL_Log("Track info overlay triggered: %s", title);
 }

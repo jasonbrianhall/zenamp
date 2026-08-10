@@ -84,7 +84,7 @@ static QueueMetaCacheEntry extract_queue_item_metadata(const char *filepath) {
             metadata = g_strdup("(File not accessible)");
             duration_seconds = 0;
             file_accessible = false;
-            printf("Warning: ZIP file not accessible: %s\n", filepath);
+            SDL_Log("Warning: ZIP file not accessible: %s", filepath);
         }
     } else if (ext && strcasecmp(ext, ".kfn") == 0) {
         metadata = extract_kfn_metadata(filepath);
@@ -94,7 +94,7 @@ static QueueMetaCacheEntry extract_queue_item_metadata(const char *filepath) {
             metadata = g_strdup("(File not accessible)");
             duration_seconds = 0;
             file_accessible = false;
-            printf("Warning: KFN file not accessible: %s\n", filepath);
+            SDL_Log("Warning: KFN file not accessible: %s", filepath);
         } else {
             duration_seconds = get_kfn_duration(filepath);
         }
@@ -106,7 +106,7 @@ static QueueMetaCacheEntry extract_queue_item_metadata(const char *filepath) {
             metadata = g_strdup("(File not accessible)");
             duration_seconds = 0;
             file_accessible = false;
-            printf("Warning: File not accessible: %s\n", filepath);
+            SDL_Log("Warning: File not accessible: %s", filepath);
         } else {
             duration_seconds = get_file_duration(filepath);
         }
@@ -180,7 +180,7 @@ static QueueMetaCacheEntry get_cached_or_placeholder(const char *filepath, bool 
 // main thread (via g_idle_add) to refresh the visible queue so long queues
 // fill in progressively instead of appearing frozen or empty.
 static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::string> paths) {
-    printf("Queue metadata loader: extracting metadata for %zu file(s)...\n", paths.size());
+    SDL_Log("Queue metadata loader: extracting metadata for %zu file(s)...", paths.size());
 
     int since_last_refresh = 0;
     for (const auto &filepath : paths) {
@@ -203,7 +203,7 @@ static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::stri
         }
     }
 
-    printf("Queue metadata loader: finished.\n");
+    SDL_Log("Queue metadata loader: finished.");
     g_queue_meta_loader_running = false;
 
     // Final refresh to pick up the last batch, and to pick up any files
@@ -504,7 +504,7 @@ void on_queue_model_row_deleted(GtkTreeModel *model, GtkTreePath *path, gpointer
     gint *indices = gtk_tree_path_get_indices(path);
     pending_delete_index = indices[0];
     
-    printf("Model row deleted at index: %d\n", pending_delete_index);
+    SDL_Log("Model row deleted at index: %d", pending_delete_index);
     
     // Store the file path before it gets removed
     if (pending_delete_index >= 0 && pending_delete_index < player->queue.count) {
@@ -557,12 +557,12 @@ void on_queue_model_row_inserted(GtkTreeModel *model, GtkTreePath *path, GtkTree
     gint *indices = gtk_tree_path_get_indices(path);
     int insert_index = indices[0];
     
-    printf("Model row inserted at index: %d (was at %d)\n", insert_index, pending_delete_index);
+    SDL_Log("Model row inserted at index: %d (was at %d)", insert_index, pending_delete_index);
     
     if (pending_delete_index >= 0 && pending_move_file) {
         // Perform the actual queue reorder
         if (reorder_queue_item(&player->queue, pending_delete_index, insert_index)) {
-            printf("Queue reordered: %d -> %d\n", pending_delete_index, insert_index);
+            SDL_Log("Queue reordered: %d -> %d", pending_delete_index, insert_index);
             
             // Update only the play indicators, don't rebuild entire display
             GtkTreeIter temp_iter;
@@ -647,7 +647,7 @@ void setup_queue_drag_and_drop(AudioPlayer *player) {
     // audio_player.h's notes on the equivalent declarations.
     gtk_tree_view_set_reorderable(GTK_TREE_VIEW(tree_view), TRUE);
     
-    printf("Queue tree view set to reorderable\n");
+    SDL_Log("Queue tree view set to reorderable");
 }
 
 void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
@@ -671,7 +671,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
         return;
     }
     
-    printf("Queue row activated: original queue index %d\n", queue_index);
+    SDL_Log("Queue row activated: original queue index %d", queue_index);
     
     // Get the filepath from the model to verify what file is actually being clicked
     char *filepath = NULL;
@@ -683,13 +683,13 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
     
     // Check if already playing this exact file
     if (queue_index == player->queue.current_index && player->is_playing) {
-        printf("Already playing this song\n");
+        SDL_Log("Already playing this song");
         g_free(filepath);
         return;
     }
     
     // Only set current_index after we've verified it matches the filepath
-    printf("Setting current_index to %d for file: %s\n", queue_index, filepath);
+    SDL_Log("Setting current_index to %d for file: %s", queue_index, filepath);
     
     stop_playback(player);
     player->queue.current_index = queue_index;
@@ -698,7 +698,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
         update_queue_display_minimal(player);  // Preserves karaoke checkmarks
         update_gui_state(player);
         start_playback(player);
-        printf("Started playing: %s\n", get_current_queue_file(&player->queue));
+        SDL_Log("Started playing: %s", get_current_queue_file(&player->queue));
         char *metadata = extract_metadata(get_current_queue_file(&player->queue));
         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
         parse_metadata(metadata, title, artist, album, genre);
@@ -706,7 +706,7 @@ void on_queue_row_activated(GtkTreeView *tree_view, GtkTreePath *path,
             show_track_info_overlay(player->visualizer, title, artist, album,
                 get_file_duration(player->queue.files[player->queue.current_index]));
         }
-        //printf("\n\n\nMy Queue %s %i\n\n\n", get_current_queue_file(&player->queue), !ends_with_zip(get_current_queue_file(&player->queue)));
+        //SDL_Log("\n\n\nMy Queue %s %i\n\n", get_current_queue_file(&player->queue), !ends_with_zip(get_current_queue_file(&player->queue)));
         g_free(metadata);
 
 
@@ -852,7 +852,7 @@ void on_queue_delete_item(GtkWidget *menuitem, gpointer user_data) {
             return;
         }
         
-        printf("Removing item %d from queue\n", index);
+        SDL_Log("Removing item %d from queue", index);
         
         bool was_current_playing = (index == player->queue.current_index && player->is_playing);
         bool queue_will_be_empty = (player->queue.count <= 1);
@@ -960,7 +960,7 @@ static bool rename_file_on_disk(const char *old_path, const char *new_filename) 
                     
                     // Rename the .cdg file
                     if (rename(old_cdg_path.c_str(), new_cdg_path) != 0) {
-                        printf("Warning: Could not rename .cdg file from %s to %s\n", 
+                        SDL_Log("Warning: Could not rename .cdg file from %s to %s", 
                                old_cdg_path.c_str(), new_cdg_path);
                     }
                     
@@ -1016,7 +1016,7 @@ static void on_rename_response(GtkDialog *dialog, gint response_id, gpointer use
                 
                 // Refresh display
                 update_queue_display_with_filter(player, false);
-                printf("File renamed successfully\n");
+                SDL_Log("File renamed successfully");
             } else {
                 // GTK4 removed gtk_dialog_run() - show the error non-modally
                 // and destroy it on response instead of blocking.
@@ -1132,7 +1132,7 @@ void on_queue_context_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gd
                 return;
             }
             
-            printf("Removing item %d via middle-click\n", index);
+            SDL_Log("Removing item %d via middle-click", index);
             
             bool was_current_playing = (index == player->queue.current_index && player->is_playing);
             bool queue_will_be_empty = (player->queue.count <= 1);
@@ -1401,7 +1401,7 @@ static gboolean apply_queue_filter_delayed(gpointer user_data) {
     strncpy(player->queue_filter_text, filter_text, sizeof(player->queue_filter_text) - 1);
     player->queue_filter_text[sizeof(player->queue_filter_text) - 1] = '\0';
     
-    printf("Applying queue filter: '%s'\n", player->queue_filter_text);
+    SDL_Log("Applying queue filter: '%s'", player->queue_filter_text);
     
     // Refilter the tree view
     GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
