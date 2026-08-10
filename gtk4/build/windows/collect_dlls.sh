@@ -111,6 +111,39 @@ else
     missing_dlls+=("SDL3.dll")
 fi
 
+# GTK4's GDK win32 backend loads its GL renderer (ANGLE) via libepoxy at
+# runtime through LoadLibrary(), not through a static PE import - so neither
+# the exe nor any DLL in the dependency chain ever references libEGL.dll or
+# libGLESv2.dll in its import table, and the objdump-based walk above can
+# never find them no matter how deep it recurses. Without them, GDK's GL
+# context creation silently fails and GTK4 crashes the first time the
+# window is realized (gtk_window_present()) - it does NOT fall back to
+# cairo gracefully on its own. They must be added explicitly, same as the
+# SDL3.dll case above.
+echo "Checking for ANGLE (libEGL.dll / libGLESv2.dll)..."
+for angle_dll in "libEGL.dll" "libGLESv2.dll"; do
+    if dll_exists "$angle_dll"; then
+        if [ "${processed_dlls[$angle_dll]}" != "1" ]; then
+            dlls_to_process+=("$angle_dll")
+        fi
+    else
+        missing_dlls+=("$angle_dll")
+    fi
+done
+
+# NOTE on d3dcompiler_47.dll: ANGLE needs it (to compile its translated
+# HLSL shaders), but it is deliberately NOT auto-bundled here. On a Linux
+# build host the only copy that turns up under a generic search is often
+# Wine's own reimplementation (used internally by Wine's D3D emulation),
+# which is not a drop-in substitute for the real Microsoft shader compiler
+# and would be actively wrong to ship - it's not just "missing," it would
+# silently misbehave in a way that's much harder to diagnose than an
+# absent DLL. Rely on the genuine copy already present on the target
+# Windows machine (it ships with Windows 10/11 and the D3D/VC++
+# redistributables) rather than trying to source one from the build
+# environment. If a target machine somehow lacks it, get the real one
+# from Microsoft's redistributable, not from a Wine install.
+
 # Process DLLs recursively
 while [ ${#dlls_to_process[@]} -gt 0 ]; do
     current_dll="${dlls_to_process[0]}"
