@@ -20,7 +20,8 @@ RUN dnf -y install \
         mingw64-crt mingw64-headers \
         mingw64-gtk4 \
         mingw64-SDL2 mingw64-SDL2_image mingw64-SDL2_ttf mingw64-SDL2_mixer \
-        bash && \
+        bash \
+        mingw64-taglib && \
     dnf clean all
 
 # Rootless podman user
