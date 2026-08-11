@@ -35,7 +35,8 @@ RUN dnf -y install gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
         ImageMagick \
         ffmpeg-devel \
         taglib-devel \
-        rpm-build rpmdevtools
+        rpm-build rpmdevtools \
+        meson
 
 RUN dnf -y install \
         # MinGW cross toolchain
