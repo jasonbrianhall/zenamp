@@ -4520,7 +4520,73 @@ void cleanup_windows_single_instance(AudioPlayer *player) {
 #endif
 
 
+#ifdef _WIN32
+// gdk-pixbuf finds its loader modules (svg, png, etc.) via a cache file
+// whose location it resolves either from the GDK_PIXBUF_MODULE_FILE env
+// var or a compiled-in default - neither of which is reliable for a
+// portable/relocatable install. collect_dlls.sh bundles
+// lib\gdk-pixbuf-2.0\<version>\loaders.cache next to the exe, but relies on
+// the app being launched with its own directory as the working directory.
+// This computes an absolute path to that cache from the exe's own location
+// (via GetModuleFileNameA) and points GDK_PIXBUF_MODULE_FILE at it
+// directly, so loader discovery works no matter where the app is invoked
+// from. Must run before gtk_init() - GTK's own icon-theme loading already
+// exercises gdk-pixbuf loaders during init.
+static void setup_gdk_pixbuf_module_file(void) {
+    char exe_path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) {
+        return; // couldn't resolve our own path - leave gdk-pixbuf to its defaults
+    }
+
+    // Strip the executable filename, leaving the directory it lives in
+    char *last_slash = strrchr(exe_path, '\\');
+    if (!last_slash) {
+        return;
+    }
+    *last_slash = '\0';
+
+    char pixbuf_dir[MAX_PATH];
+    snprintf(pixbuf_dir, sizeof(pixbuf_dir), "%s\\lib\\gdk-pixbuf-2.0", exe_path);
+
+    // Version subdirectory name isn't known at compile time - it's whatever
+    // collect_dlls.sh found on the build machine's sysroot - so scan for
+    // whichever subdirectory actually has a loaders.cache in it.
+    char search_pattern[MAX_PATH];
+    snprintf(search_pattern, sizeof(search_pattern), "%s\\*", pixbuf_dir);
+
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle = FindFirstFileA(search_pattern, &find_data);
+    if (find_handle == INVALID_HANDLE_VALUE) {
+        SDL_Log("gdk-pixbuf: no %s directory found, leaving loader discovery to defaults", pixbuf_dir);
+        return;
+    }
+
+    do {
+        if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) continue;
+
+        char cache_path[MAX_PATH];
+        snprintf(cache_path, sizeof(cache_path), "%s\\%s\\loaders.cache", pixbuf_dir, find_data.cFileName);
+
+        DWORD attrs = GetFileAttributesA(cache_path);
+        if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            SetEnvironmentVariableA("GDK_PIXBUF_MODULE_FILE", cache_path);
+            SDL_Log("gdk-pixbuf: using loaders.cache at %s", cache_path);
+            FindClose(find_handle);
+            return;
+        }
+    } while (FindNextFileA(find_handle, &find_data));
+
+    FindClose(find_handle);
+    SDL_Log("gdk-pixbuf: found %s but no loaders.cache inside any subdirectory - SVG/PNG loader discovery may fail at runtime", pixbuf_dir);
+}
+#endif
+
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    setup_gdk_pixbuf_module_file();
+#endif
     // GTK4's gtk_init() takes no arguments - it no longer strips its own
     // flags out of argv, so argc/argv below are exactly what the OS gave us.
     gtk_init();
@@ -4649,9 +4715,12 @@ int main(int argc, char *argv[]) {
     player->has_cdg = false;
     
     create_main_window(player);
+    SDL_Log("DEBUG: create_main_window returned");
     update_gui_state(player);
+    SDL_Log("DEBUG: update_gui_state returned");
     // GTK4 widgets are visible by default - gtk_widget_show_all() is gone.
     gtk_window_present(GTK_WINDOW(player->window));
+    SDL_Log("DEBUG: gtk_window_present returned");
     
     // Force UI to render immediately before any blocking operations.
     // GTK4 removed gtk_events_pending()/gtk_main_iteration(); pump the
@@ -4659,23 +4728,34 @@ int main(int argc, char *argv[]) {
     while (g_main_context_pending(NULL)) {
         g_main_context_iteration(NULL, FALSE);
     }
+    SDL_Log("DEBUG: initial main-context pump complete");
     
 #ifdef _WIN32
     // Setup Windows single instance AFTER window is shown
+    SDL_Log("DEBUG: about to call CreateMutexA");
     HANDLE single_instance_mutex = CreateMutexA(NULL, TRUE, ZENAMP_MUTEX_NAME);
     player->single_instance_mutex = single_instance_mutex;
+    SDL_Log("DEBUG: CreateMutexA returned %p", (void*)single_instance_mutex);
     
+    SDL_Log("DEBUG: about to call gtk_native_get_surface");
     GdkSurface *gdk_surface = gtk_native_get_surface(GTK_NATIVE(player->window));
+    SDL_Log("DEBUG: gtk_native_get_surface returned %p", (void*)gdk_surface);
     if (gdk_surface && GDK_IS_WIN32_SURFACE(gdk_surface)) {
+        SDL_Log("DEBUG: surface is a WIN32 surface, about to call gdk_win32_surface_get_handle");
         HWND hwnd = (HWND)gdk_win32_surface_get_handle(GDK_WIN32_SURFACE(gdk_surface));
+        SDL_Log("DEBUG: gdk_win32_surface_get_handle returned %p", (void*)hwnd);
         if (hwnd) {
             // Set a window property to identify this as Zenamp
             SetPropA(hwnd, "ZenampInstance", (HANDLE)1);
+            SDL_Log("DEBUG: SetPropA(ZenampInstance) done");
             SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)player);
+            SDL_Log("DEBUG: SetWindowLongPtr(GWLP_USERDATA) done");
             
             // Subclass to handle WM_COPYDATA
             WNDPROC old_proc = (WNDPROC)GetWindowLongPtr(hwnd, GWLP_WNDPROC);
+            SDL_Log("DEBUG: GetWindowLongPtr(GWLP_WNDPROC) returned %p", (void*)old_proc);
             SetProp(hwnd, TEXT("OldWndProc"), (HANDLE)old_proc);
+            SDL_Log("DEBUG: SetProp(OldWndProc) done, about to subclass wndproc");
             
             SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)+[](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
                 if (msg == WM_COPYDATA) {
@@ -4800,7 +4880,9 @@ int main(int argc, char *argv[]) {
     }
 #endif
     
+    SDL_Log("DEBUG: about to call load_player_settings");
     load_player_settings(player);
+    SDL_Log("DEBUG: load_player_settings returned");
     
     char last_playlist[1024];
     bool loaded_last_playlist = false;
