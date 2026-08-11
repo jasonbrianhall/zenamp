@@ -696,6 +696,16 @@ void create_queue_treeview(AudioPlayer *player) {
         G_TYPE_STRING,  // COL_DURATION
         G_TYPE_STRING,  // GTK3
         G_TYPE_INT);    // COL_QUEUE_INDEX - NEW!
+
+    // Second store, same column layout, used for the "Group by Artist"
+    // view: one collapsible parent row per artist, tracks as its children.
+    // Toggling between the two is just a matter of switching the tree
+    // view's model (see set_queue_grouped_view() in queue.cpp) - the
+    // flat player->queue_store above is left untouched either way.
+    player->queue_store_grouped = gtk_tree_store_new(NUM_COLS,
+        G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+        G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
+        G_TYPE_STRING, G_TYPE_INT);
     
     // Create tree view
     GtkWidget *tree_view = gtk_tree_view_new_with_model(
@@ -726,6 +736,14 @@ void create_queue_treeview(AudioPlayer *player) {
     // searching, so the built-in one is redundant as well as conflicting.
     gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree_view), FALSE);
     gtk_tree_view_set_search_column(GTK_TREE_VIEW(tree_view), COL_FILENAME);
+
+    // Put the expand/collapse arrow next to the filename column rather
+    // than the tiny "now playing" indicator column - only matters once
+    // the grouped-by-artist tree store is showing, but harmless either way.
+    GtkTreeViewColumn *filename_column = gtk_tree_view_get_column(GTK_TREE_VIEW(tree_view), 1);
+    if (filename_column) {
+        gtk_tree_view_set_expander_column(GTK_TREE_VIEW(tree_view), filename_column);
+    }
     
     // Connect click handler for double-click
     g_signal_connect(tree_view, "row-activated",

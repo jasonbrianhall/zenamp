@@ -22,6 +22,7 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <SDL2/SDL.h>
+#include <vector>
 #include "midiplayer.h"
 #include "dbopl_wrapper.h"
 #include "wav_converter.h"
@@ -191,6 +192,16 @@ typedef struct {
     GtkWidget *prev_button;
     GtkListStore *queue_store;
     GtkWidget *queue_tree_view;
+
+    // "Group by Artist" view: a second store with the same column layout
+    // as queue_store, holding one collapsible parent row per artist with
+    // tracks as children. The tree view's model is switched between this
+    // and queue_store depending on queue_grouped_view; player->queue.files
+    // itself is never reordered by grouping. See set_queue_grouped_view()
+    // and get_queue_display_order() in queue.cpp.
+    GtkTreeStore *queue_store_grouped = nullptr;
+    bool queue_grouped_view = false;
+    GtkWidget *queue_group_toggle_button = nullptr;
     
     PlayQueue queue;
     ConversionCache conversion_cache;
@@ -347,6 +358,13 @@ GtkWidget* create_queue_search_bar(AudioPlayer *player);
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current = true);
 void update_queue_display_minimal(AudioPlayer *player);
 void update_queue_display_debounced(AudioPlayer *player);
+// "Group by Artist" view (see queue_store_grouped above). set_queue_grouped_view()
+// switches the tree view's model and rebuilds the display; get_queue_display_order()
+// returns queue.files[] indices in current on-screen order (flat or grouped),
+// depth-first, used by next_song()/previous_song() so playback follows whichever
+// order is showing.
+void set_queue_grouped_view(AudioPlayer *player, bool grouped);
+std::vector<int> get_queue_display_order(AudioPlayer *player);
 bool matches_filter(const char *text, const char *filter);
 bool filename_exists_in_queue(PlayQueue *queue, const char *filepath);
 // NOTE(gtk4): GtkCheckMenuItem is gone along with the rest of the old menu

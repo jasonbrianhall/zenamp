@@ -47,6 +47,7 @@
 #include <string>
 #include <functional>
 #include <algorithm>
+#include <iterator>
 #include <thread>
 #include <atomic>
 #include <dirent.h>
@@ -413,8 +414,13 @@ static gpointer g_scan_thread_func(gpointer user_data) {
 
             SDL_Log("Finished adding files to queue. Total: %d", player->queue.count);
             SDL_Log("Starting display render...");
-            // For bulk imports, skip metadata extraction and just show filenames
-            if (player->queue_store) {
+            // For bulk imports, skip metadata extraction and just show filenames.
+            // That fast path only knows about the flat GtkListStore; if the
+            // grouped-by-artist view is active, fall back to the normal
+            // (slower, but grouping-aware) renderer instead.
+            if (player->queue_grouped_view) {
+                update_queue_display_with_filter(player, false);
+            } else if (player->queue_store) {
                 SDL_Log("Clearing queue store...");
                 gtk_list_store_clear(player->queue_store);
                 
@@ -727,49 +733,38 @@ static void g_on_import_directory_clicked(GtkWidget *widget, gpointer user_data)
 static guint queue_update_timeout_id = 0;
 static int last_queue_index = -1;  // Track last updated index to detect changes
 
-// Minimal fast update - only updates the "▶" playing indicator without metadata extraction
+// Minimal fast update - only updates the "▶" playing indicator without
+// metadata extraction. Walks whichever model (flat or artist-grouped) the
+// tree view currently has, via gtk_tree_model_foreach so it correctly
+// descends into grouped children too, not just top-level rows.
+struct QueueIndicatorCtx {
+    AudioPlayer *player;
+};
+
+static gboolean update_queue_indicator_row(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter, gpointer data) {
+    (void)path;
+    auto *ctx = (QueueIndicatorCtx *)data;
+
+    int queue_index = -1;
+    gtk_tree_model_get(model, iter, COL_QUEUE_INDEX, &queue_index, -1);
+    const char *indicator = (queue_index == ctx->player->queue.current_index) ? "▶" : "";
+
+    if (ctx->player->queue_grouped_view) {
+        gtk_tree_store_set(GTK_TREE_STORE(model), iter, COL_PLAYING, indicator, -1);
+    } else {
+        gtk_list_store_set(GTK_LIST_STORE(model), iter, COL_PLAYING, indicator, -1);
+    }
+    return FALSE;  // keep going
+}
+
 void update_queue_display_minimal(AudioPlayer *player) {
-    if (!player || !player->queue_store) return;
+    if (!player || !player->queue_tree_view) return;
 
-    // Check if a filter is active
-    const char *filter = player->queue_filter_text;
-    bool has_filter = (filter && filter[0] != '\0');
+    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
+    if (!model) return;
 
-    // If a filter is active, just update the play indicator without refiltering
-    if (has_filter) {
-        SDL_Log("Filter active ('%s'), updating play indicator only", filter);
-        
-        // Just update the ▶ indicator, don't clear and refilter
-        GtkTreeIter iter;
-        gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(player->queue_store), &iter);
-
-        while (valid) {
-            int queue_index = -1;
-            gtk_tree_model_get(GTK_TREE_MODEL(player->queue_store), &iter,
-                               COL_QUEUE_INDEX, &queue_index, -1);
-
-            const char *indicator = (queue_index == player->queue.current_index) ? "▶" : "";
-            gtk_list_store_set(player->queue_store, &iter, COL_PLAYING, indicator, -1);
-
-            valid = gtk_tree_model_iter_next(GTK_TREE_MODEL(player->queue_store), &iter);
-        }
-        return;
-    }
-
-    // No filter active - just update the "▶" playing indicator
-    GtkTreeIter iter;
-    gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(player->queue_store), &iter);
-
-    while (valid) {
-        int queue_index = -1;
-        gtk_tree_model_get(GTK_TREE_MODEL(player->queue_store), &iter,
-                           COL_QUEUE_INDEX, &queue_index, -1);
-
-        const char *indicator = (queue_index == player->queue.current_index) ? "▶" : "";
-        gtk_list_store_set(player->queue_store, &iter, COL_PLAYING, indicator, -1);
-
-        valid = gtk_tree_model_iter_next(GTK_TREE_MODEL(player->queue_store), &iter);
-    }
+    QueueIndicatorCtx ctx{player};
+    gtk_tree_model_foreach(model, update_queue_indicator_row, &ctx);
 }
 
 static gboolean queue_update_debounce_callback(gpointer user_data) {
@@ -2478,53 +2473,28 @@ void next_song(AudioPlayer *player) {
         GtkTreeSortable *sortable = GTK_TREE_SORTABLE(model);
         gint sort_column_id = -1;
         GtkSortType sort_type = GTK_SORT_ASCENDING;
-        
-        // Check if a sort is active
-        if (gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type)) {
-            // A sort is active, follow the sorted order
-            GtkTreeIter iter;
-            gboolean found_current = FALSE;
-            gboolean found_next = FALSE;
-            
-            // Find current playing track in sorted order
-            if (gtk_tree_model_get_iter_first(model, &iter)) {
-                do {
-                    int queue_index = -1;
-                    gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &queue_index, -1);
-                    
-                    if (queue_index == player->queue.current_index) {
-                        found_current = TRUE;
-                        break;
-                    }
-                } while (gtk_tree_model_iter_next(model, &iter));
-            }
-            
-            // If we found current, try to move to next
-            if (found_current && gtk_tree_model_iter_next(model, &iter)) {
-                int next_queue_index = -1;
-                gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &next_queue_index, -1);
-                if (next_queue_index >= 0 && next_queue_index < player->queue.count) {
-                    player->queue.current_index = next_queue_index;
-                    found_next = TRUE;
+        bool column_sort_active = gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type);
+
+        // Follow the on-screen order whenever it's not plain queue order -
+        // either a column sort is active, or the grouped-by-artist view is
+        // showing. get_queue_display_order() walks the tree model
+        // depth-first, so it covers a grouped tree's children too.
+        if (column_sort_active || player->queue_grouped_view) {
+            std::vector<int> order = get_queue_display_order(player);
+            auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
+
+            bool found_next = false;
+            if (pos != order.end()) {
+                auto next_it = std::next(pos);
+                if (next_it != order.end()) {
+                    player->queue.current_index = *next_it;
+                    found_next = true;
+                } else if (player->queue.repeat_queue && !order.empty()) {
+                    player->queue.current_index = order.front();
+                    found_next = true;
                 }
             }
-            
-            // If we couldn't find next (at end of sorted list)
-            if (!found_next) {
-                if (player->queue.repeat_queue) {
-                    // Go back to first in sorted order
-                    if (gtk_tree_model_get_iter_first(model, &iter)) {
-                        int first_queue_index = -1;
-                        gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &first_queue_index, -1);
-                        if (first_queue_index >= 0) {
-                            player->queue.current_index = first_queue_index;
-                            found_next = TRUE;
-                        }
-                    }
-                }
-            }
-            
-            // If we successfully found and set next track
+
             if (found_next) {
                 if (load_file_from_queue(player)) {
                     update_queue_display_minimal(player);  // Performance: minimal update for song switch
@@ -2620,62 +2590,23 @@ void previous_song(AudioPlayer *player) {
         GtkTreeSortable *sortable = GTK_TREE_SORTABLE(model);
         gint sort_column_id = -1;
         GtkSortType sort_type = GTK_SORT_ASCENDING;
-        
-        // Check if a sort is active
-        if (gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type)) {
-            // A sort is active, follow the sorted order
-            GtkTreeIter iter;
-            GtkTreeIter prev_iter;
-            gboolean found_current = FALSE;
-            gboolean found_prev = FALSE;
-            gboolean first_iter = TRUE;
-            
-            // Find current playing track in sorted order
-            if (gtk_tree_model_get_iter_first(model, &iter)) {
-                do {
-                    int queue_index = -1;
-                    gtk_tree_model_get(model, &iter, COL_QUEUE_INDEX, &queue_index, -1);
-                    
-                    if (queue_index == player->queue.current_index) {
-                        found_current = TRUE;
-                        if (!first_iter) {
-                            // We have a previous iterator
-                            int prev_queue_index = -1;
-                            gtk_tree_model_get(model, &prev_iter, COL_QUEUE_INDEX, &prev_queue_index, -1);
-                            if (prev_queue_index >= 0 && prev_queue_index < player->queue.count) {
-                                player->queue.current_index = prev_queue_index;
-                                found_prev = TRUE;
-                            }
-                        }
-                        break;
-                    }
-                    
-                    prev_iter = iter;
-                    first_iter = FALSE;
-                } while (gtk_tree_model_iter_next(model, &iter));
+        bool column_sort_active = gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type);
+
+        // Same reasoning as next_song(): follow the on-screen order for
+        // either an active column sort or the grouped-by-artist view.
+        if (column_sort_active || player->queue_grouped_view) {
+            std::vector<int> order = get_queue_display_order(player);
+            auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
+
+            bool found_prev = false;
+            if (pos != order.end() && pos != order.begin()) {
+                player->queue.current_index = *std::prev(pos);
+                found_prev = true;
+            } else if (pos == order.begin() && player->queue.repeat_queue && !order.empty()) {
+                player->queue.current_index = order.back();
+                found_prev = true;
             }
-            
-            // If we couldn't find previous (at beginning of sorted list)
-            if (!found_prev && found_current) {
-                if (player->queue.repeat_queue) {
-                    // Go to last in sorted order
-                    GtkTreeIter last_iter;
-                    if (gtk_tree_model_get_iter_first(model, &iter)) {
-                        last_iter = iter;
-                        while (gtk_tree_model_iter_next(model, &iter)) {
-                            last_iter = iter;
-                        }
-                        int last_queue_index = -1;
-                        gtk_tree_model_get(model, &last_iter, COL_QUEUE_INDEX, &last_queue_index, -1);
-                        if (last_queue_index >= 0) {
-                            player->queue.current_index = last_queue_index;
-                            found_prev = TRUE;
-                        }
-                    }
-                }
-            }
-            
-            // If we successfully found and set previous track
+
             if (found_prev) {
                 if (load_file_from_queue(player)) {
                     update_queue_display_with_filter(player);
