@@ -90,7 +90,17 @@ gboolean on_icon_animation_frame(gpointer user_data) {
     GdkPixbuf *frame = gdk_pixbuf_animation_iter_get_pixbuf(state->iter);
     
     if (frame) {
-        gtk_image_set_from_pixbuf(state->image_widget, frame);
+        // The animation source is decoded at its native (small) resolution,
+        // so each frame must be scaled up to the configured display size -
+        // otherwise the icon renders at native size regardless of icon_size.
+        GdkPixbuf *scaled_frame = gdk_pixbuf_scale_simple(
+            frame, state->icon_size, state->icon_size, GDK_INTERP_BILINEAR);
+        if (scaled_frame) {
+            gtk_image_set_from_pixbuf(state->image_widget, scaled_frame);
+            g_object_unref(scaled_frame);
+        } else {
+            gtk_image_set_from_pixbuf(state->image_widget, frame);
+        }
         gtk_widget_queue_draw(GTK_WIDGET(state->image_widget));
     }
     
@@ -164,13 +174,14 @@ static gboolean on_icon_reset_to_first_frame(gpointer user_data) {
 }
 
 // Initialize animation state
-IconAnimationState* init_icon_animation(GtkImage *image_widget) {
+IconAnimationState* init_icon_animation(GtkImage *image_widget, gint icon_size) {
     if (!image_widget) {
         g_warning("Invalid image widget for animation");
         return NULL;
     }
     
     IconAnimationState *state = g_malloc0(sizeof(IconAnimationState));
+    state->icon_size = (icon_size > 0) ? icon_size : 64;
     
     // Load animation
     state->animation = load_animation_from_base64();
@@ -192,10 +203,19 @@ IconAnimationState* init_icon_animation(GtkImage *image_widget) {
         return NULL;
     }
     
-    // Get first frame and store it
-    state->first_frame = gdk_pixbuf_animation_iter_get_pixbuf(state->iter);
-    if (state->first_frame) {
-        g_object_ref(state->first_frame);
+    // Get first frame and store it, scaled to the target display size (the
+    // source is decoded at its small native resolution, so this must be
+    // scaled up here - it's what gets shown immediately below and what
+    // on_icon_reset_to_first_frame() / the play-once-complete callback
+    // redisplay later).
+    GdkPixbuf *raw_first_frame = gdk_pixbuf_animation_iter_get_pixbuf(state->iter);
+    if (raw_first_frame) {
+        state->first_frame = gdk_pixbuf_scale_simple(
+            raw_first_frame, state->icon_size, state->icon_size, GDK_INTERP_BILINEAR);
+        if (!state->first_frame) {
+            state->first_frame = raw_first_frame;
+            g_object_ref(state->first_frame);
+        }
     }
     
     state->image_widget = image_widget;
@@ -212,9 +232,15 @@ IconAnimationState* init_icon_animation(GtkImage *image_widget) {
         g_debug("Icon animation initialized successfully");
     }
     
-    // Display first frame immediately
+    // Display first frame immediately. GtkImage's own size negotiation
+    // can't be trusted to size itself off the paintable/pixbuf alone (in
+    // testing it measured a 200x200 pixbuf as a 16x16 natural size, likely
+    // due to theme/CSS icon-size defaults) - gtk_image_set_pixel_size()
+    // explicitly forces the display size regardless of that, and must be
+    // set for this to render at the intended size.
     if (state->first_frame) {
         gtk_image_set_from_pixbuf(image_widget, state->first_frame);
+        gtk_image_set_pixel_size(image_widget, state->icon_size);
     }
     
     return state;

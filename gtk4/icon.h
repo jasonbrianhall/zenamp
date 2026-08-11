@@ -32,6 +32,7 @@ typedef struct {
     gboolean is_playing;
     gint frame_count;
     GdkPixbuf *first_frame;
+    gint icon_size;  // target display size; every frame is scaled to this before display
 } IconAnimationState;
 
 // Global animation state
@@ -41,7 +42,9 @@ extern IconAnimationState *g_icon_animation;
 GdkPixbuf* load_icon_from_base64(void);
 
 // APNG animation functions
-IconAnimationState* init_icon_animation(GtkImage *image_widget);
+// icon_size is the target display size (in pixels, square) that every frame
+// (including the first) is scaled to before being shown.
+IconAnimationState* init_icon_animation(GtkImage *image_widget, gint icon_size);
 void start_icon_animation(void);
 void stop_icon_animation(void);
 gboolean on_icon_animation_frame(gpointer user_data);

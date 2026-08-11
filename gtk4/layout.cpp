@@ -188,7 +188,7 @@ static void calculate_layout_config(LayoutManager *layout) {
     layout->config.vis_height = scale_size(base_vis_height, screen_height, ref_height);
     layout->config.queue_width = scale_size(base_queue_width, screen_width, ref_width);
     layout->config.queue_height = scale_size(base_queue_height, screen_height, ref_height);
-    layout->config.icon_size = scale_size(64, screen_width, 1920);
+    layout->config.icon_size = scale_size(100, screen_width, 1920);
     
     // Apply DPI scaling if needed
     int scale = 1; // We'll get this from the window later
@@ -229,8 +229,8 @@ static void calculate_layout_config(LayoutManager *layout) {
     }
     
     // Icon size bounds
-    layout->config.icon_size = fmax(layout->config.icon_size, 32);
-    layout->config.icon_size = fmin(layout->config.icon_size, 96);
+    layout->config.icon_size = fmax(layout->config.icon_size, 64);
+    layout->config.icon_size = fmin(layout->config.icon_size, 512);
 }
 
 // GtkRecentChooserMenu is gone in GTK4 along with the rest of GtkRecentChooser
@@ -590,9 +590,15 @@ static void create_icon_section(AudioPlayer *player) {
         if (scaled_icon) {
             // Create image widget for animation
             GtkWidget *icon_image = gtk_image_new_from_pixbuf(scaled_icon);
+            // GtkImage's own size negotiation isn't reliable here - testing
+            // showed it measuring a 200x200 pixbuf as a 16x16 natural size
+            // (likely a theme/CSS icon-size default), so pixel_size must be
+            // set explicitly to force the actual display size.
+            gtk_image_set_pixel_size(GTK_IMAGE(icon_image), player->layout.config.icon_size);
             
-            // Initialize animation state
-            g_icon_animation = init_icon_animation(GTK_IMAGE(icon_image));
+            // Initialize animation state (scales every frame, including the
+            // first, to player->layout.config.icon_size - see icon.cpp)
+            g_icon_animation = init_icon_animation(GTK_IMAGE(icon_image), player->layout.config.icon_size);
             
             if (g_icon_animation) {
                 // GtkEventBox is removed entirely in GTK4 - every widget can
@@ -611,6 +617,7 @@ static void create_icon_section(AudioPlayer *player) {
             } else {
                 // Fallback if animation initialization fails
                 GtkWidget *icon_image_fallback = gtk_image_new_from_pixbuf(scaled_icon);
+                gtk_image_set_pixel_size(GTK_IMAGE(icon_image_fallback), player->layout.config.icon_size);
                 gtk_box_append(GTK_BOX(player->layout.bottom_box), icon_image_fallback);
                 
                 g_warning("Animation initialization failed, using static icon");
