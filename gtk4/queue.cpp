@@ -1,6 +1,8 @@
 #include "audio_player.h"
 #include "miniz.h"
 #include "kfn.h"
+#include <taglib/fileref.h>
+#include <taglib/tag.h>
 #include <glib.h>
 #include <string.h>
 #include <filesystem>
@@ -1117,6 +1119,170 @@ void on_queue_rename_item(GtkWidget *menuitem, gpointer user_data) {
     g_free(basename);
 }
 
+// Returns true if `filepath` is a format TagLib can read/write tags for
+// directly. The karaoke wrapper formats (.zip/.kfn/.kar) aren't plain
+// tagged audio files - .zip/.kfn are archives and .kar's metadata (if any)
+// isn't something TagLib understands - so tag editing isn't offered for
+// those.
+static bool queue_file_supports_tag_editing(const char *filepath) {
+    if (!filepath || filepath[0] == '\0') return false;
+    const char *ext = strrchr(filepath, '.');
+    if (!ext) return false;
+    if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0 || strcasecmp(ext, ".kar") == 0) {
+        return false;
+    }
+    return true;
+}
+
+// Writes title/artist/album/genre to filepath's tags via TagLib. Any field
+// passed as an empty string clears that tag; NULL leaves it untouched.
+// Returns false if TagLib couldn't open the file, it has no taggable
+// stream, or the save failed (e.g. read-only file).
+static bool write_tags_with_taglib(const char *filepath, const char *title, const char *artist,
+                                    const char *album, const char *genre) {
+    TagLib::FileRef file(filepath);
+    if (file.isNull() || !file.tag()) {
+        return false;
+    }
+
+    TagLib::Tag *tag = file.tag();
+    if (title)  tag->setTitle(TagLib::String(title, TagLib::String::UTF8));
+    if (artist) tag->setArtist(TagLib::String(artist, TagLib::String::UTF8));
+    if (album)  tag->setAlbum(TagLib::String(album, TagLib::String::UTF8));
+    if (genre)  tag->setGenre(TagLib::String(genre, TagLib::String::UTF8));
+
+    return file.save();
+}
+
+static void on_edit_tags_response(GtkDialog *dialog, gint response_id, gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+
+    if (response_id == GTK_RESPONSE_OK) {
+        GtkEntry *title_entry  = GTK_ENTRY(g_object_get_data(G_OBJECT(dialog), "title_entry"));
+        GtkEntry *artist_entry = GTK_ENTRY(g_object_get_data(G_OBJECT(dialog), "artist_entry"));
+        GtkEntry *album_entry  = GTK_ENTRY(g_object_get_data(G_OBJECT(dialog), "album_entry"));
+        GtkEntry *genre_entry  = GTK_ENTRY(g_object_get_data(G_OBJECT(dialog), "genre_entry"));
+        const char *filepath = (const char*)g_object_get_data(G_OBJECT(dialog), "filepath");
+
+        const char *title  = gtk_editable_get_text(GTK_EDITABLE(title_entry));
+        const char *artist = gtk_editable_get_text(GTK_EDITABLE(artist_entry));
+        const char *album  = gtk_editable_get_text(GTK_EDITABLE(album_entry));
+        const char *genre  = gtk_editable_get_text(GTK_EDITABLE(genre_entry));
+
+        if (write_tags_with_taglib(filepath, title, artist, album, genre)) {
+            // Drop the cached metadata for this file so the next display
+            // refresh re-reads what we just wrote, rather than the old
+            // cached values or waiting on an mtime check that may not
+            // notice (some filesystems have 1-second mtime resolution).
+            {
+                std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+                g_queue_meta_cache.erase(filepath);
+            }
+            update_queue_display_with_filter(player, false);
+            SDL_Log("Tags updated for: %s", filepath);
+        } else {
+            GtkWidget *error_dialog = gtk_message_dialog_new(
+                GTK_WINDOW(dialog),
+                GTK_DIALOG_MODAL,
+                GTK_MESSAGE_ERROR,
+                GTK_BUTTONS_OK,
+                "Failed to save tags. The file format may not support tag editing, or it isn't writable."
+            );
+            g_signal_connect(error_dialog, "response", G_CALLBACK(queue_destroy_dialog_on_response), NULL);
+            gtk_window_present(GTK_WINDOW(error_dialog));
+        }
+    }
+
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+void on_queue_edit_tags_item(GtkWidget *menuitem, gpointer user_data) {
+    (void)menuitem;
+    AudioPlayer *player = (AudioPlayer*)user_data;
+
+    GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(player->queue_tree_view));
+    GtkTreeModel *model;
+    GtkTreeIter iter;
+
+    if (!gtk_tree_selection_get_selected(selection, &model, &iter)) {
+        return;
+    }
+
+    char *filepath = NULL;
+    gtk_tree_model_get(model, &iter, COL_FILEPATH, &filepath, -1);
+    if (!filepath || filepath[0] == '\0') {
+        g_free(filepath);
+        return;
+    }
+
+    if (!queue_file_supports_tag_editing(filepath)) {
+        GtkWidget *info_dialog = gtk_message_dialog_new(
+            GTK_WINDOW(player->window),
+            GTK_DIALOG_MODAL,
+            GTK_MESSAGE_INFO,
+            GTK_BUTTONS_OK,
+            "Tag editing isn't supported for karaoke (.zip/.kfn/.kar) files."
+        );
+        g_signal_connect(info_dialog, "response", G_CALLBACK(queue_destroy_dialog_on_response), NULL);
+        gtk_window_present(GTK_WINDOW(info_dialog));
+        g_free(filepath);
+        return;
+    }
+
+    // Pre-fill from whatever's already cached/displayed rather than
+    // re-reading the file synchronously on the UI thread.
+    bool needs_load = false;
+    QueueMetaCacheEntry meta = get_cached_or_placeholder(filepath, &needs_load);
+
+    GtkWidget *dialog = gtk_dialog_new_with_buttons(
+        "Edit Tags",
+        GTK_WINDOW(player->window),
+        GTK_DIALOG_MODAL,
+        "Cancel", GTK_RESPONSE_CANCEL,
+        "Save", GTK_RESPONSE_OK,
+        NULL
+    );
+
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_widget_set_margin_start(content_area, 10);
+    gtk_widget_set_margin_end(content_area, 10);
+    gtk_widget_set_margin_top(content_area, 10);
+    gtk_widget_set_margin_bottom(content_area, 10);
+
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_box_append(GTK_BOX(content_area), grid);
+
+    auto add_tag_row = [&](int row, const char *label_text, const char *value) -> GtkWidget* {
+        GtkWidget *label = gtk_label_new(label_text);
+        gtk_widget_set_halign(label, GTK_ALIGN_END);
+        gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+
+        GtkWidget *entry = gtk_entry_new();
+        gtk_editable_set_text(GTK_EDITABLE(entry), value ? value : "");
+        gtk_widget_set_hexpand(entry, TRUE);
+        gtk_widget_set_size_request(entry, 260, -1);
+        gtk_grid_attach(GTK_GRID(grid), entry, 1, row, 1, 1);
+        return entry;
+    };
+
+    GtkWidget *title_entry  = add_tag_row(0, "Title:",  meta.loaded ? meta.title.c_str()  : "");
+    GtkWidget *artist_entry = add_tag_row(1, "Artist:", meta.loaded ? meta.artist.c_str() : "");
+    GtkWidget *album_entry  = add_tag_row(2, "Album:",  meta.loaded ? meta.album.c_str()  : "");
+    GtkWidget *genre_entry  = add_tag_row(3, "Genre:",  meta.loaded ? meta.genre.c_str()  : "");
+
+    g_object_set_data(G_OBJECT(dialog), "title_entry", title_entry);
+    g_object_set_data(G_OBJECT(dialog), "artist_entry", artist_entry);
+    g_object_set_data(G_OBJECT(dialog), "album_entry", album_entry);
+    g_object_set_data(G_OBJECT(dialog), "genre_entry", genre_entry);
+    g_object_set_data_full(G_OBJECT(dialog), "filepath", filepath, g_free);
+
+    g_signal_connect(dialog, "response", G_CALLBACK(on_edit_tags_response), player);
+
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
 // "button-press-event" -> GtkGestureClick's "pressed" signal. Both middle-
 // click-to-delete and right-click context menu are handled here since both
 // come through the same gesture (attached with "any button" in
@@ -1255,6 +1421,15 @@ void on_queue_context_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gd
             g_signal_connect(rename_item, "clicked", G_CALLBACK(on_queue_rename_item), player);
             g_signal_connect_swapped(rename_item, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
             gtk_box_append(GTK_BOX(box), rename_item);
+
+            GtkWidget *edit_tags_item = gtk_button_new_with_label("Edit Tags...");
+            gtk_button_set_has_frame(GTK_BUTTON(edit_tags_item), FALSE);
+            gtk_widget_set_sensitive(edit_tags_item,
+                index >= 0 && index < player->queue.count &&
+                queue_file_supports_tag_editing(player->queue.files[index]));
+            g_signal_connect(edit_tags_item, "clicked", G_CALLBACK(on_queue_edit_tags_item), player);
+            g_signal_connect_swapped(edit_tags_item, "clicked", G_CALLBACK(gtk_popover_popdown), popover);
+            gtk_box_append(GTK_BOX(box), edit_tags_item);
 
             gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
 

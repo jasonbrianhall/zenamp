@@ -365,6 +365,10 @@ void on_queue_model_row_deleted(GtkTreeModel *model, GtkTreePath *path, gpointer
 void on_queue_model_row_inserted(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter, gpointer user_data);
 void cleanup_queue_filter(AudioPlayer *player);
 GtkWidget* create_queue_search_bar(AudioPlayer *player);
+// Opens a small dialog to edit title/artist/album/genre tags (via TagLib)
+// for the currently selected queue row. No-ops for karaoke wrapper formats
+// (.zip/.kfn/.kar), which don't carry ordinary audio tags.
+void on_queue_edit_tags_item(GtkWidget *menuitem, gpointer user_data);
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current = true);
 void update_queue_display_minimal(AudioPlayer *player);
 void update_queue_display_debounced(AudioPlayer *player);
