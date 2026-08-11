@@ -78,6 +78,15 @@ enum {
     NUM_COLS
 };
 
+// Which field the queue's collapsible group view is currently grouped by.
+// QUEUE_GROUP_NONE means the flat, ungrouped queue_store is shown.
+enum QueueGroupMode {
+    QUEUE_GROUP_NONE = 0,
+    QUEUE_GROUP_ARTIST,
+    QUEUE_GROUP_ALBUM,
+    QUEUE_GROUP_GENRE
+};
+
 // Structure to hold audio metadata
 struct AudioMetadata {
     std::string title;
@@ -193,15 +202,16 @@ typedef struct {
     GtkListStore *queue_store;
     GtkWidget *queue_tree_view;
 
-    // "Group by Artist" view: a second store with the same column layout
-    // as queue_store, holding one collapsible parent row per artist with
-    // tracks as children. The tree view's model is switched between this
-    // and queue_store depending on queue_grouped_view; player->queue.files
-    // itself is never reordered by grouping. See set_queue_grouped_view()
-    // and get_queue_display_order() in queue.cpp.
+    // Collapsible "Group by" view: a second store with the same column
+    // layout as queue_store, holding one collapsible parent row per
+    // artist/album/genre (per queue_group_mode) with tracks as children.
+    // The tree view's model is switched between this and queue_store
+    // depending on queue_group_mode; player->queue.files itself is never
+    // reordered by grouping. See set_queue_group_mode() and
+    // get_queue_display_order() in queue.cpp.
     GtkTreeStore *queue_store_grouped = nullptr;
-    bool queue_grouped_view = false;
-    GtkWidget *queue_group_toggle_button = nullptr;
+    QueueGroupMode queue_group_mode = QUEUE_GROUP_NONE;
+    GtkWidget *queue_group_dropdown = nullptr;
     
     PlayQueue queue;
     ConversionCache conversion_cache;
@@ -358,12 +368,12 @@ GtkWidget* create_queue_search_bar(AudioPlayer *player);
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current = true);
 void update_queue_display_minimal(AudioPlayer *player);
 void update_queue_display_debounced(AudioPlayer *player);
-// "Group by Artist" view (see queue_store_grouped above). set_queue_grouped_view()
+// Queue group-by view (see queue_store_grouped above). set_queue_group_mode()
 // switches the tree view's model and rebuilds the display; get_queue_display_order()
 // returns queue.files[] indices in current on-screen order (flat or grouped),
 // depth-first, used by next_song()/previous_song() so playback follows whichever
 // order is showing.
-void set_queue_grouped_view(AudioPlayer *player, bool grouped);
+void set_queue_group_mode(AudioPlayer *player, QueueGroupMode mode);
 std::vector<int> get_queue_display_order(AudioPlayer *player);
 bool matches_filter(const char *text, const char *filter);
 bool filename_exists_in_queue(PlayQueue *queue, const char *filepath);

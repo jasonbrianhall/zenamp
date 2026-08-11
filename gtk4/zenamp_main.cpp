@@ -418,7 +418,7 @@ static gpointer g_scan_thread_func(gpointer user_data) {
             // That fast path only knows about the flat GtkListStore; if the
             // grouped-by-artist view is active, fall back to the normal
             // (slower, but grouping-aware) renderer instead.
-            if (player->queue_grouped_view) {
+            if (player->queue_group_mode != QUEUE_GROUP_NONE) {
                 update_queue_display_with_filter(player, false);
             } else if (player->queue_store) {
                 SDL_Log("Clearing queue store...");
@@ -734,7 +734,7 @@ static guint queue_update_timeout_id = 0;
 static int last_queue_index = -1;  // Track last updated index to detect changes
 
 // Minimal fast update - only updates the "▶" playing indicator without
-// metadata extraction. Walks whichever model (flat or artist-grouped) the
+// metadata extraction. Walks whichever model (flat or grouped) the
 // tree view currently has, via gtk_tree_model_foreach so it correctly
 // descends into grouped children too, not just top-level rows.
 struct QueueIndicatorCtx {
@@ -749,7 +749,7 @@ static gboolean update_queue_indicator_row(GtkTreeModel *model, GtkTreePath *pat
     gtk_tree_model_get(model, iter, COL_QUEUE_INDEX, &queue_index, -1);
     const char *indicator = (queue_index == ctx->player->queue.current_index) ? "▶" : "";
 
-    if (ctx->player->queue_grouped_view) {
+    if (ctx->player->queue_group_mode != QUEUE_GROUP_NONE) {
         gtk_tree_store_set(GTK_TREE_STORE(model), iter, COL_PLAYING, indicator, -1);
     } else {
         gtk_list_store_set(GTK_LIST_STORE(model), iter, COL_PLAYING, indicator, -1);
@@ -2479,7 +2479,7 @@ void next_song(AudioPlayer *player) {
         // either a column sort is active, or the grouped-by-artist view is
         // showing. get_queue_display_order() walks the tree model
         // depth-first, so it covers a grouped tree's children too.
-        if (column_sort_active || player->queue_grouped_view) {
+        if (column_sort_active || player->queue_group_mode != QUEUE_GROUP_NONE) {
             std::vector<int> order = get_queue_display_order(player);
             auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
 
@@ -2594,7 +2594,7 @@ void previous_song(AudioPlayer *player) {
 
         // Same reasoning as next_song(): follow the on-screen order for
         // either an active column sort or the grouped-by-artist view.
-        if (column_sort_active || player->queue_grouped_view) {
+        if (column_sort_active || player->queue_group_mode != QUEUE_GROUP_NONE) {
             std::vector<int> order = get_queue_display_order(player);
             auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
 

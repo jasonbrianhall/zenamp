@@ -1379,8 +1379,8 @@ gboolean on_queue_key_press(GtkEventControllerKey *controller, guint keyval, gui
     
     // Ctrl+Up/Down moves by raw tree-path position, which only lines up
     // with the queue order in the flat view - reordering doesn't have a
-    // well-defined meaning while grouped by artist (see set_queue_grouped_view).
-    if (player->queue_grouped_view) {
+    // well-defined meaning while grouped (see set_queue_group_mode).
+    if (player->queue_group_mode != QUEUE_GROUP_NONE) {
         return FALSE;
     }
     
@@ -1457,9 +1457,19 @@ static void on_queue_search_stop(GtkSearchEntry *entry, gpointer user_data) {
     update_queue_display_with_filter(player);
 }
 
-static void on_queue_group_toggle_clicked(GtkToggleButton *button, gpointer user_data) {
+static void on_queue_group_dropdown_changed(GObject *dropdown, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
     AudioPlayer *player = (AudioPlayer*)user_data;
-    set_queue_grouped_view(player, gtk_toggle_button_get_active(button));
+
+    guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(dropdown));
+    QueueGroupMode mode = QUEUE_GROUP_NONE;
+    switch (selected) {
+        case 1: mode = QUEUE_GROUP_ARTIST; break;
+        case 2: mode = QUEUE_GROUP_ALBUM;  break;
+        case 3: mode = QUEUE_GROUP_GENRE;  break;
+        default: mode = QUEUE_GROUP_NONE;  break;
+    }
+    set_queue_group_mode(player, mode);
 }
 
 GtkWidget* create_queue_search_bar(AudioPlayer *player) {
@@ -1488,10 +1498,15 @@ GtkWidget* create_queue_search_bar(AudioPlayer *player) {
     gtk_widget_set_hexpand(search_entry, TRUE);
     gtk_box_append(GTK_BOX(bar_box), search_entry);
 
-    GtkWidget *group_toggle = gtk_toggle_button_new_with_label("Group by Artist");
-    player->queue_group_toggle_button = group_toggle;
-    g_signal_connect(group_toggle, "toggled", G_CALLBACK(on_queue_group_toggle_clicked), player);
-    gtk_box_append(GTK_BOX(bar_box), group_toggle);
+    // "Group by" selector: None / Artist / Album / Genre. Index order here
+    // must match the QUEUE_GROUP_* enum in audio_player.h.
+    const char *group_options[] = {"None", "Artist", "Album", "Genre", NULL};
+    GtkWidget *group_dropdown = gtk_drop_down_new_from_strings(group_options);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(group_dropdown), 0);
+    player->queue_group_dropdown = group_dropdown;
+    g_signal_connect(group_dropdown, "notify::selected",
+                     G_CALLBACK(on_queue_group_dropdown_changed), player);
+    gtk_box_append(GTK_BOX(bar_box), group_dropdown);
 
     return bar_box;
 }
@@ -1516,7 +1531,7 @@ bool matches_filter(const char *text, const char *filter) {
 // ---------------------------------------------------------------------------
 // Grouped-by-artist queue view
 //
-// Toggled via the "Group by Artist" button next to the queue filter. When
+// Selected via the "Group by" dropdown next to the queue filter. When
 // active, the queue tree view's model is switched from the flat
 // player->queue_store (GtkListStore) to player->queue_store_grouped
 // (GtkTreeStore): one collapsible parent row per artist, tracks as
@@ -1527,7 +1542,7 @@ bool matches_filter(const char *text, const char *filter) {
 //
 // next_song()/previous_song() (in zenamp_main.cpp) walk whichever model is
 // currently attached to the tree view via get_queue_display_order() below,
-// so playback follows the artist-grouped order shown here once grouping is
+// so playback follows the grouped order shown here once grouping is
 // on, and falls back to plain queue order once it's off.
 // ---------------------------------------------------------------------------
 
@@ -1587,7 +1602,7 @@ static bool find_tree_path_for_queue_index(GtkTreeModel *model, int queue_index,
 static void ensure_queue_tree_view_model(AudioPlayer *player) {
     if (!player->queue_tree_view) return;
 
-    GtkTreeModel *want = player->queue_grouped_view
+    GtkTreeModel *want = (player->queue_group_mode != QUEUE_GROUP_NONE)
         ? GTK_TREE_MODEL(player->queue_store_grouped)
         : GTK_TREE_MODEL(player->queue_store);
     GtkTreeModel *have = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
@@ -1598,10 +1613,27 @@ static void ensure_queue_tree_view_model(AudioPlayer *player) {
 }
 
 struct QueueGroupBucket {
-    std::string artist;
-    std::string artist_lower;
+    std::string label;
+    std::string label_lower;
     std::vector<int> queue_indices;  // original queue.files order, filtered
 };
+
+// Pulls the grouping key out of a metadata entry for the given mode, with
+// the same "Unknown X" / "(Loading…)" fallback convention used elsewhere
+// in this file.
+static std::string queue_group_key_for_meta(const QueueMetaCacheEntry &meta, QueueGroupMode mode) {
+    if (!meta.loaded) return "(Loading…)";
+
+    switch (mode) {
+        case QUEUE_GROUP_ALBUM:
+            return meta.album.empty() ? "Unknown Album" : meta.album;
+        case QUEUE_GROUP_GENRE:
+            return meta.genre.empty() ? "Unknown Genre" : meta.genre;
+        case QUEUE_GROUP_ARTIST:
+        default:
+            return meta.artist.empty() ? "Unknown Artist" : meta.artist;
+    }
+}
 
 static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_current) {
     if (!player->queue_store_grouped) return;
@@ -1610,6 +1642,7 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
 
     const char *filter = player->queue_filter_text;
     bool has_filter = (filter && filter[0] != '\0');
+    QueueGroupMode mode = player->queue_group_mode;
 
     std::vector<QueueGroupBucket> buckets;
     std::unordered_map<std::string, size_t> bucket_for_key;
@@ -1638,17 +1671,15 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
         }
         if (!matches) continue;
 
-        std::string artist_key = meta.loaded
-            ? (meta.artist.empty() ? "Unknown Artist" : meta.artist)
-            : "(Loading…)";
-        std::string key_lower = artist_key;
+        std::string group_key = queue_group_key_for_meta(meta, mode);
+        std::string key_lower = group_key;
         for (auto &c : key_lower) c = tolower((unsigned char)c);
 
         auto it = bucket_for_key.find(key_lower);
         size_t bucket_idx;
         if (it == bucket_for_key.end()) {
             bucket_idx = buckets.size();
-            buckets.push_back(QueueGroupBucket{artist_key, key_lower, {}});
+            buckets.push_back(QueueGroupBucket{group_key, key_lower, {}});
             bucket_for_key[key_lower] = bucket_idx;
         } else {
             bucket_idx = it->second;
@@ -1656,14 +1687,14 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
         buckets[bucket_idx].queue_indices.push_back(i);
     }
 
-    // Alphabetical by artist (case-insensitive); files still awaiting
+    // Alphabetical by group label (case-insensitive); files still awaiting
     // metadata sit in a "(Loading…)" group pinned last so they don't jump
     // around as extraction finishes in the background.
     std::stable_sort(buckets.begin(), buckets.end(), [](const QueueGroupBucket &a, const QueueGroupBucket &b) {
-        bool a_loading = (a.artist == "(Loading…)");
-        bool b_loading = (b.artist == "(Loading…)");
+        bool a_loading = (a.label == "(Loading…)");
+        bool b_loading = (b.label == "(Loading…)");
         if (a_loading != b_loading) return b_loading;
-        return a.artist_lower < b.artist_lower;
+        return a.label_lower < b.label_lower;
     });
 
     for (const auto &bucket : buckets) {
@@ -1672,7 +1703,7 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
 
         char group_label[300];
         snprintf(group_label, sizeof(group_label), "%s (%zu)",
-                 bucket.artist.c_str(), bucket.queue_indices.size());
+                 bucket.label.c_str(), bucket.queue_indices.size());
 
         gtk_tree_store_set(player->queue_store_grouped, &parent_iter,
             COL_FILEPATH, "",
@@ -1756,16 +1787,16 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
     }
 }
 
-// Switches between the flat and artist-grouped queue views. Disables
-// drag-to-reorder while grouped, since manual reordering only has a
-// well-defined meaning against the flat order.
-void set_queue_grouped_view(AudioPlayer *player, bool grouped) {
-    if (!player || player->queue_grouped_view == grouped) return;
+// Switches between the flat queue view and grouping by artist/album/genre.
+// Disables drag-to-reorder while grouped, since manual reordering only has
+// a well-defined meaning against the flat order.
+void set_queue_group_mode(AudioPlayer *player, QueueGroupMode mode) {
+    if (!player || player->queue_group_mode == mode) return;
 
-    player->queue_grouped_view = grouped;
+    player->queue_group_mode = mode;
 
     if (player->queue_tree_view) {
-        gtk_tree_view_set_reorderable(GTK_TREE_VIEW(player->queue_tree_view), !grouped);
+        gtk_tree_view_set_reorderable(GTK_TREE_VIEW(player->queue_tree_view), mode == QUEUE_GROUP_NONE);
     }
 
     update_queue_display_with_filter(player, true);
@@ -1950,12 +1981,12 @@ static void update_queue_display_flat(AudioPlayer *player, bool scroll_to_curren
 }
 
 // Public entry point used everywhere else in the app - dispatches to the
-// flat or artist-grouped renderer depending on the current view mode, and
-// makes sure the tree view is showing the matching store.
+// flat or grouped renderer depending on the current view mode, and makes
+// sure the tree view is showing the matching store.
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current) {
     ensure_queue_tree_view_model(player);
 
-    if (player->queue_grouped_view) {
+    if (player->queue_group_mode != QUEUE_GROUP_NONE) {
         update_queue_display_grouped(player, scroll_to_current);
     } else {
         update_queue_display_flat(player, scroll_to_current);

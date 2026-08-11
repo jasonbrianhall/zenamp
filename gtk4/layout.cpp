@@ -697,10 +697,10 @@ void create_queue_treeview(AudioPlayer *player) {
         G_TYPE_STRING,  // GTK3
         G_TYPE_INT);    // COL_QUEUE_INDEX - NEW!
 
-    // Second store, same column layout, used for the "Group by Artist"
+    // Second store, same column layout, used for the "Group by" (artist/album/genre)
     // view: one collapsible parent row per artist, tracks as its children.
     // Toggling between the two is just a matter of switching the tree
-    // view's model (see set_queue_grouped_view() in queue.cpp) - the
+    // view's model (see set_queue_group_mode() in queue.cpp) - the
     // flat player->queue_store above is left untouched either way.
     player->queue_store_grouped = gtk_tree_store_new(NUM_COLS,
         G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING,
