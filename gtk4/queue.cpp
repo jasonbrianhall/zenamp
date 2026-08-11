@@ -7,13 +7,24 @@
 #include <string.h>
 #include <filesystem>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <io.h>
+#ifndef W_OK
+#define W_OK 2
+#endif
+#define access _access
+#else
+#include <unistd.h>
+#endif
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <atomic>
 #include <thread>
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <exception>
    
 namespace fs = std::filesystem;
 
@@ -1119,39 +1130,90 @@ void on_queue_rename_item(GtkWidget *menuitem, gpointer user_data) {
     g_free(basename);
 }
 
-// Returns true if `filepath` is a format TagLib can read/write tags for
-// directly. The karaoke wrapper formats (.zip/.kfn/.kar) aren't plain
-// tagged audio files - .zip/.kfn are archives and .kar's metadata (if any)
-// isn't something TagLib understands - so tag editing isn't offered for
-// those.
+// Returns true if `filepath`'s extension is one of the formats TagLib
+// actually understands. Deliberately an allow-list rather than a deny-list:
+// TagLib::FileRef doesn't reliably no-op on formats it can't parse (e.g.
+// MIDI) - it can misbehave rather than cleanly report isNull(), so the
+// safe thing is to never hand it anything outside this known-good set
+// rather than trying to enumerate every format that might go wrong.
 static bool queue_file_supports_tag_editing(const char *filepath) {
     if (!filepath || filepath[0] == '\0') return false;
     const char *ext = strrchr(filepath, '.');
-    if (!ext) return false;
-    if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0 || strcasecmp(ext, ".kar") == 0) {
-        return false;
+    if (!ext || !ext[1]) return false;
+
+    static const char *const taggable_exts[] = {
+        ".mp3", ".flac", ".ogg", ".oga", ".opus", ".spx",
+        ".wav", ".aiff", ".aif", ".aifc",
+        ".m4a", ".m4b", ".m4p", ".mp4",
+        ".wma", ".asf",
+        ".ape", ".mpc", ".wv", ".tta",
+        ".dsf", ".dff",
+        ".s3m", ".it", ".xm", ".mod",
+    };
+
+    for (const char *taggable : taggable_exts) {
+        if (strcasecmp(ext, taggable) == 0) return true;
     }
-    return true;
+    return false;
 }
 
 // Writes title/artist/album/genre to filepath's tags via TagLib. Any field
 // passed as an empty string clears that tag; NULL leaves it untouched.
-// Returns false if TagLib couldn't open the file, it has no taggable
-// stream, or the save failed (e.g. read-only file).
+// Returns false - never throws or crashes - if TagLib couldn't open the
+// file, the file has no taggable stream, or the save failed (read-only
+// file, disk full, or a file whose extension doesn't match its actual
+// contents).
 static bool write_tags_with_taglib(const char *filepath, const char *title, const char *artist,
                                     const char *album, const char *genre) {
-    TagLib::FileRef file(filepath);
-    if (file.isNull() || !file.tag()) {
+    // Belt-and-suspenders: never hand TagLib a file extension outside its
+    // known-good set, even if a future call site forgets to check first
+    // (see queue_file_supports_tag_editing() for why this matters).
+    if (!queue_file_supports_tag_editing(filepath)) {
         return false;
     }
 
-    TagLib::Tag *tag = file.tag();
-    if (title)  tag->setTitle(TagLib::String(title, TagLib::String::UTF8));
-    if (artist) tag->setArtist(TagLib::String(artist, TagLib::String::UTF8));
-    if (album)  tag->setAlbum(TagLib::String(album, TagLib::String::UTF8));
-    if (genre)  tag->setGenre(TagLib::String(genre, TagLib::String::UTF8));
+    // Catch these up front with clear, specific reasons logged, rather
+    // than letting TagLib discover them (a missing file in particular can
+    // make some TagLib versions misbehave rather than fail cleanly).
+    if (!fs::exists(filepath) || !fs::is_regular_file(filepath)) {
+        SDL_Log("Edit Tags: file not accessible: %s", filepath);
+        return false;
+    }
+    if (access(filepath, W_OK) != 0) {
+        SDL_Log("Edit Tags: file not writable: %s", filepath);
+        return false;
+    }
 
-    return file.save();
+    // TagLib doesn't normally throw, but a file whose extension doesn't
+    // match its real contents (a renamed/corrupted file) can hit format
+    // parsing edge cases in some codec backends. Catching here means a
+    // bad file produces the "failed to save" dialog instead of taking the
+    // whole app down.
+    try {
+        TagLib::FileRef file(filepath);
+        if (file.isNull() || !file.tag()) {
+            SDL_Log("Edit Tags: TagLib could not parse: %s", filepath);
+            return false;
+        }
+
+        TagLib::Tag *tag = file.tag();
+        if (title)  tag->setTitle(TagLib::String(title, TagLib::String::UTF8));
+        if (artist) tag->setArtist(TagLib::String(artist, TagLib::String::UTF8));
+        if (album)  tag->setAlbum(TagLib::String(album, TagLib::String::UTF8));
+        if (genre)  tag->setGenre(TagLib::String(genre, TagLib::String::UTF8));
+
+        if (!file.save()) {
+            SDL_Log("Edit Tags: TagLib save() failed: %s", filepath);
+            return false;
+        }
+        return true;
+    } catch (const std::exception &e) {
+        SDL_Log("Edit Tags: exception writing tags to %s: %s", filepath, e.what());
+        return false;
+    } catch (...) {
+        SDL_Log("Edit Tags: unknown exception writing tags to %s", filepath);
+        return false;
+    }
 }
 
 static void on_edit_tags_response(GtkDialog *dialog, gint response_id, gpointer user_data) {
@@ -1221,7 +1283,7 @@ void on_queue_edit_tags_item(GtkWidget *menuitem, gpointer user_data) {
             GTK_DIALOG_MODAL,
             GTK_MESSAGE_INFO,
             GTK_BUTTONS_OK,
-            "Tag editing isn't supported for karaoke (.zip/.kfn/.kar) files."
+            "Tag editing isn't supported for this file type."
         );
         g_signal_connect(info_dialog, "response", G_CALLBACK(queue_destroy_dialog_on_response), NULL);
         gtk_window_present(GTK_WINDOW(info_dialog));
@@ -1810,8 +1872,98 @@ static std::string queue_group_key_for_meta(const QueueMetaCacheEntry &meta, Que
     }
 }
 
+// Strips a trailing " (N)" track-count suffix off a group header's display
+// label, e.g. "Beatles, The (12)" -> "Beatles, The". Used to match a group
+// across a rebuild by its stable underlying label, since the count can
+// shift as metadata loads or the filter changes.
+static std::string queue_strip_group_count_suffix(const char *text) {
+    if (!text) return "";
+    std::string s = text;
+    if (!s.empty() && s.back() == ')') {
+        size_t pos = s.rfind(" (");
+        if (pos != std::string::npos) return s.substr(0, pos);
+    }
+    return s;
+}
+
+// Finds the top-level group row whose label (count suffix stripped) matches
+// `label`. Caller must gtk_tree_path_free the result.
+static bool find_tree_path_for_group_label(GtkTreeModel *model, const std::string &label, GtkTreePath **out_path) {
+    GtkTreeIter iter;
+    if (!gtk_tree_model_get_iter_first(model, &iter)) return false;
+
+    do {
+        char *text = NULL;
+        gtk_tree_model_get(model, &iter, COL_FILENAME, &text, -1);
+        bool match = text && (queue_strip_group_count_suffix(text) == label);
+        g_free(text);
+        if (match) {
+            *out_path = gtk_tree_model_get_path(model, &iter);
+            return true;
+        }
+    } while (gtk_tree_model_iter_next(model, &iter));
+
+    return false;
+}
+
 static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_current) {
     if (!player->queue_store_grouped) return;
+
+    // gtk_tree_store_clear() below throws away expand/collapse state and
+    // resets scroll position - and this function reruns every time the
+    // background metadata loader fills in another batch of tags, not just
+    // on user actions. Without preserving these across the rebuild, the
+    // view would jump back to the top and re-collapse every group a few
+    // seconds after you open one. Groups are remembered by their label
+    // text (stable across rebuilds) rather than by row position.
+    std::unordered_set<std::string> expanded_labels;
+    int saved_top_queue_index = -1;
+    std::string saved_top_group_label;
+    bool saved_top_is_group = false;
+
+    if (player->queue_tree_view) {
+        GtkTreeModel *current_model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
+        if (current_model == GTK_TREE_MODEL(player->queue_store_grouped)) {
+            GtkTreeIter top_iter;
+            if (gtk_tree_model_get_iter_first(current_model, &top_iter)) {
+                do {
+                    GtkTreePath *p = gtk_tree_model_get_path(current_model, &top_iter);
+                    if (gtk_tree_view_row_expanded(GTK_TREE_VIEW(player->queue_tree_view), p)) {
+                        char *text = NULL;
+                        gtk_tree_model_get(current_model, &top_iter, COL_FILENAME, &text, -1);
+                        if (text) {
+                            expanded_labels.insert(queue_strip_group_count_suffix(text));
+                            g_free(text);
+                        }
+                    }
+                    gtk_tree_path_free(p);
+                } while (gtk_tree_model_iter_next(current_model, &top_iter));
+            }
+
+            if (!scroll_to_current) {
+                GtkTreePath *start_path = NULL;
+                if (gtk_tree_view_get_visible_range(GTK_TREE_VIEW(player->queue_tree_view), &start_path, NULL) && start_path) {
+                    GtkTreeIter vis_iter;
+                    if (gtk_tree_model_get_iter(current_model, &vis_iter, start_path)) {
+                        int qi = -1;
+                        gtk_tree_model_get(current_model, &vis_iter, COL_QUEUE_INDEX, &qi, -1);
+                        if (qi >= 0) {
+                            saved_top_queue_index = qi;
+                        } else {
+                            char *text = NULL;
+                            gtk_tree_model_get(current_model, &vis_iter, COL_FILENAME, &text, -1);
+                            if (text) {
+                                saved_top_group_label = queue_strip_group_count_suffix(text);
+                                saved_top_is_group = true;
+                                g_free(text);
+                            }
+                        }
+                    }
+                    gtk_tree_path_free(start_path);
+                }
+            }
+        }
+    }
 
     gtk_tree_store_clear(player->queue_store_grouped);
 
@@ -1940,7 +2092,7 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
             g_free(basename);
         }
 
-        if (group_has_current && player->queue_tree_view) {
+        if ((group_has_current || expanded_labels.count(bucket.label) > 0) && player->queue_tree_view) {
             GtkTreePath *ppath = gtk_tree_model_get_path(
                 GTK_TREE_MODEL(player->queue_store_grouped), &parent_iter);
             gtk_tree_view_expand_row(GTK_TREE_VIEW(player->queue_tree_view), ppath, FALSE);
@@ -1957,6 +2109,22 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
             gtk_tree_view_scroll_to_cell(GTK_TREE_VIEW(player->queue_tree_view), path, NULL, TRUE, 0.5, 0.0);
             GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(player->queue_tree_view));
             gtk_tree_selection_select_path(selection, path);
+            gtk_tree_path_free(path);
+        }
+    } else if (!scroll_to_current && player->queue_tree_view) {
+        // Restore wherever the user had scrolled to (a track, or a group
+        // header) rather than snapping back to the top of the list.
+        GtkTreePath *path = nullptr;
+        bool found = false;
+        if (saved_top_queue_index >= 0) {
+            found = find_tree_path_for_queue_index(GTK_TREE_MODEL(player->queue_store_grouped),
+                                                    saved_top_queue_index, &path);
+        } else if (saved_top_is_group) {
+            found = find_tree_path_for_group_label(GTK_TREE_MODEL(player->queue_store_grouped),
+                                                    saved_top_group_label, &path);
+        }
+        if (found) {
+            gtk_tree_view_scroll_to_cell(GTK_TREE_VIEW(player->queue_tree_view), path, NULL, FALSE, 0.0, 0.0);
             gtk_tree_path_free(path);
         }
     }
