@@ -80,7 +80,8 @@ jobs:
           taglib-devel \
           rpm-build rpmdevtools \
           rsync \
-          mingw64-gtk4
+          mingw64-gtk4 \
+          gtk4-devel
           
     - name: Convert Icon
       working-directory: gtk3
