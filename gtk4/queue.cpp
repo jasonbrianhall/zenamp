@@ -194,6 +194,17 @@ static QueueMetaCacheEntry get_cached_or_placeholder(const char *filepath, bool 
     return it->second;
 }
 
+// Public, cache-only lookup used outside this file (e.g. next_song()'s
+// filtered-navigation path in zenamp_main.cpp) - never triggers extraction,
+// just answers "do we currently know this file is karaoke content?".
+bool queue_file_is_karaoke_cached(const char *filepath) {
+    if (!filepath) return false;
+    std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+    auto it = g_queue_meta_cache.find(filepath);
+    if (it == g_queue_meta_cache.end() || !it->second.loaded) return false;
+    return it->second.is_karaoke;
+}
+
 // Runs on a background thread: extracts metadata for every path in
 // `paths` and stores it in the cache, periodically hopping back to the
 // main thread (via g_idle_add) to refresh the visible queue so long queues
@@ -1709,6 +1720,12 @@ static void on_queue_group_dropdown_changed(GObject *dropdown, GParamSpec *pspec
     set_queue_group_mode(player, mode);
 }
 
+static void on_queue_karaoke_filter_toggled(GtkCheckButton *check, gpointer user_data) {
+    AudioPlayer *player = (AudioPlayer*)user_data;
+    player->queue_karaoke_only_filter = gtk_check_button_get_active(check);
+    update_queue_display_with_filter(player, false);
+}
+
 GtkWidget* create_queue_search_bar(AudioPlayer *player) {
     GtkWidget *bar_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 
@@ -1744,6 +1761,16 @@ GtkWidget* create_queue_search_bar(AudioPlayer *player) {
     g_signal_connect(group_dropdown, "notify::selected",
                      G_CALLBACK(on_queue_group_dropdown_changed), player);
     gtk_box_append(GTK_BOX(bar_box), group_dropdown);
+
+    // "Karaoke only" checkbox - filters both the flat and grouped queue
+    // views (and next/previous navigation) down to tracks with karaoke
+    // content, same detection used for the ✓ in the Karaoke column.
+    GtkWidget *karaoke_check = gtk_check_button_new_with_mnemonic("_Karaoke");
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(karaoke_check), FALSE);
+    player->queue_karaoke_filter_check = karaoke_check;
+    g_signal_connect(karaoke_check, "toggled",
+                     G_CALLBACK(on_queue_karaoke_filter_toggled), player);
+    gtk_box_append(GTK_BOX(bar_box), karaoke_check);
 
     return bar_box;
 }
@@ -1996,6 +2023,9 @@ static void update_queue_display_grouped(AudioPlayer *player, bool scroll_to_cur
                           matches_filter(meta.genre.c_str(), filter);
             }
         }
+        if (matches && player->queue_karaoke_only_filter && !meta.is_karaoke) {
+            matches = false;
+        }
         if (!matches) continue;
 
         std::string group_key = queue_group_key_for_meta(meta, mode);
@@ -2208,6 +2238,9 @@ static void update_queue_display_flat(AudioPlayer *player, bool scroll_to_curren
                           matches_filter(meta.album.c_str(), filter) ||
                           matches_filter(meta.genre.c_str(), filter);
             }
+        }
+        if (matches && player->queue_karaoke_only_filter && !meta.is_karaoke) {
+            matches = false;
         }
 
         if (matches) {

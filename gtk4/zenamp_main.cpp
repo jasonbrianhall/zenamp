@@ -2402,366 +2402,118 @@ void fast_forward_5_seconds(AudioPlayer *player) {
     SDL_Log("Fast forwarded 5 seconds to %.2f", new_time);
 }
 
-void next_song(AudioPlayer *player) {
-    if (player->queue.count <= 1) return;
-    
-    stop_playback(player);
-    
-    // Check if a filter is active - if so, use filter-aware navigation
-    const char *filter = player->queue_filter_text;
-    bool has_filter = (filter && filter[0] != '\0');
-    
-    if (has_filter) {
-        // When filtering, find next matching song
-        int start_index = player->queue.current_index + 1;
-        int search_count = 0;
-        
-        while (search_count < player->queue.count) {
-            int check_index = (start_index + search_count) % player->queue.count;
-            
-            // Extract metadata for this file
-            char *metadata = extract_metadata(player->queue.files[check_index]);
-            char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-            parse_metadata(metadata, title, artist, album, genre);
-            g_free(metadata);
-            
-            char *basename = g_path_get_basename(player->queue.files[check_index]);
-            
-            // Check if matches filter
-            bool matches = matches_filter(basename, filter) ||
-                          matches_filter(title, filter) ||
-                          matches_filter(artist, filter) ||
-                          matches_filter(album, filter) ||
-                          matches_filter(genre, filter);
-            
-            g_free(basename);
-            
-            if (matches) {
-                player->queue.current_index = check_index;
-                if (load_file_from_queue(player)) {
-                    update_queue_display_minimal(player);  // Performance: minimal update for song switch
-                    update_gui_state(player);
-                    start_playback(player);
-                }
-                return;
-            }
-            
-            search_count++;
-        }
-        
-        // No matching song found, stay on current
-        start_playback(player);
-        return;
-    }
-    
-    // No filter active, check for sorted display order
-    // Check if queue_tree_view exists first
+// Navigates next/previous following whatever's currently on screen in the
+// queue tree view - flat or grouped, filtered by search text and/or the
+// karaoke-only checkbox, plain or column-sorted. get_queue_display_order()
+// walks the currently attached model depth-first, so it already reflects
+// every one of those transforms (they're all baked into the model by
+// update_queue_display_with_filter() before this ever runs); there's no
+// need for next/previous to re-derive filtering or sort order themselves.
+// Within a group, the last/first track steps into the adjacent group (and
+// wraps between the last and first group) regardless of Repeat Queue - see
+// the `grouped` check below. `direction` is +1 for next, -1 for previous.
+static void step_song_in_display_order(AudioPlayer *player, int direction) {
     if (!player->queue_tree_view) {
-        SDL_Log("No tree view in next_song, using simple next");
-        if (advance_queue(&player->queue)) {
-            if (load_file_from_queue(player)) {
-                update_queue_display_minimal(player);  // Performance: minimal update for song switch
-                update_gui_state(player);
-                start_playback(player);
-            }
-        }
-        return;
-    }
-    
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
-    if (model && GTK_IS_TREE_MODEL(model)) {
-        GtkTreeSortable *sortable = GTK_TREE_SORTABLE(model);
-        gint sort_column_id = -1;
-        GtkSortType sort_type = GTK_SORT_ASCENDING;
-        bool column_sort_active = gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type);
-
-        // Follow the on-screen order whenever it's not plain queue order -
-        // either a column sort is active, or the grouped-by-artist view is
-        // showing. get_queue_display_order() walks the tree model
-        // depth-first, so it covers a grouped tree's children too.
-        if (column_sort_active || player->queue_group_mode != QUEUE_GROUP_NONE) {
-            std::vector<int> order = get_queue_display_order(player);
-            auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
-
-            bool found_next = false;
-            if (pos != order.end()) {
-                auto next_it = std::next(pos);
-                if (next_it != order.end()) {
-                    player->queue.current_index = *next_it;
-                    found_next = true;
-                } else if (player->queue.repeat_queue && !order.empty()) {
-                    player->queue.current_index = order.front();
-                    found_next = true;
-                }
-            }
-
-            if (found_next) {
-                if (load_file_from_queue(player)) {
-                    update_queue_display_minimal(player);  // Performance: minimal update for song switch
-                    update_gui_state(player);
-                    start_playback(player);
-                }
-                return;
-            }
-        }
-    }
-    
-    // Fall back to normal unsorted next
-    if (advance_queue(&player->queue)) {
-        if (load_file_from_queue(player)) {
-            update_queue_display_minimal(player);  // Performance: minimal update for song switch
+        // No tree view at all (shouldn't normally happen) - fall back to
+        // plain unsorted/unfiltered queue order.
+        bool advanced = (direction > 0) ? advance_queue(&player->queue)
+                                         : previous_queue(&player->queue);
+        if (advanced && load_file_from_queue(player)) {
+            update_queue_display_minimal(player);
             update_gui_state(player);
             start_playback(player);
         }
+        return;
     }
+
+    std::vector<int> order = get_queue_display_order(player);
+    if (order.empty()) {
+        // Nothing visible (e.g. filter/karaoke-only matches nothing) -
+        // nothing to step to.
+        return;
+    }
+
+    auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
+
+    // In grouped (artist/album/genre) mode, running off the end of one
+    // group's tracks always continues into the next group - that's the
+    // whole point of browsing grouped - and running off the last group
+    // wraps back to the first one, the same way. This wrap happens
+    // regardless of the Repeat Queue toggle, which is about whether a
+    // finished *linear* queue starts over, not about whether adjacent
+    // groups are connected. Plain flat/column-sorted mode keeps the
+    // original repeat-gated stop-at-the-end behavior below.
+    bool grouped = (player->queue_group_mode != QUEUE_GROUP_NONE);
+
+    if (pos == order.end()) {
+        // Current song isn't part of the visible order right now (filtered
+        // out, or mid metadata-load rebuild) - jump onto the visible list
+        // rather than silently doing nothing.
+        player->queue.current_index = (direction > 0) ? order.front() : order.back();
+    } else if (direction > 0) {
+        auto next_it = std::next(pos);
+        if (next_it != order.end()) {
+            player->queue.current_index = *next_it;
+        } else if (player->queue.repeat_queue || grouped) {
+            player->queue.current_index = order.front();
+        } else {
+            return;  // Last song visible, repeat off - stop here.
+        }
+    } else {
+        if (pos != order.begin()) {
+            player->queue.current_index = *std::prev(pos);
+        } else if (player->queue.repeat_queue || grouped) {
+            player->queue.current_index = order.back();
+        } else {
+            return;  // First song visible, repeat off - stop here.
+        }
+    }
+
+    if (load_file_from_queue(player)) {
+        update_queue_display_minimal(player);  // Performance: minimal update for song switch
+        update_gui_state(player);
+        start_playback(player);
+
+        // Track info overlay, using the *new* current song's metadata (not
+        // the one we just left).
+        const char *new_file = get_current_queue_file(&player->queue);
+        if (new_file && !ends_with_zip(new_file)) {
+            char *metadata = extract_metadata(new_file);
+            char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
+            parse_metadata(metadata, title, artist, album, genre);
+            show_track_info_overlay(player->visualizer, title, artist, album,
+                get_file_duration(new_file));
+            g_free(metadata);
+        }
+    }
+}
+
+void next_song(AudioPlayer *player) {
+    if (player->queue.count <= 1) return;
+    stop_playback(player);
+    step_song_in_display_order(player, +1);
 }
 
 void previous_song(AudioPlayer *player) {
     if (player->queue.count <= 1) return;
-    
     stop_playback(player);
-    
-    // Check if a filter is active - if so, use filter-aware navigation
-    const char *filter = player->queue_filter_text;
-    bool has_filter = (filter && filter[0] != '\0');
-    
-    if (has_filter) {
-        // When filtering, find previous matching song
-        int start_index = player->queue.current_index - 1;
-        int search_count = 0;
-        
-        while (search_count < player->queue.count) {
-            int check_index = start_index - search_count;
-            if (check_index < 0) {
-                check_index = player->queue.count + check_index;
-            }
-            
-            // Extract metadata for this file
-            char *metadata = extract_metadata(player->queue.files[check_index]);
-            char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-            parse_metadata(metadata, title, artist, album, genre);
-            g_free(metadata);
-            
-            char *basename = g_path_get_basename(player->queue.files[check_index]);
-            
-            // Check if matches filter
-            bool matches = matches_filter(basename, filter) ||
-                          matches_filter(title, filter) ||
-                          matches_filter(artist, filter) ||
-                          matches_filter(album, filter) ||
-                          matches_filter(genre, filter);
-            
-            g_free(basename);
-            
-            if (matches) {
-                player->queue.current_index = check_index;
-                if (load_file_from_queue(player)) {
-                    update_queue_display_minimal(player);
-                    update_gui_state(player);
-                    start_playback(player);
-                }
-                return;
-            }
-            
-            search_count++;
-        }
-        
-        // No matching song found, stay on current
-        start_playback(player);
-        return;
-    }
-    
-    // No filter active, check for sorted display order
-    // Check if queue_tree_view exists first
-    if (!player->queue_tree_view) {
-        SDL_Log("No tree view in previous_song, using simple previous");
-        if (previous_queue(&player->queue)) {
-            if (load_file_from_queue(player)) {
-                update_queue_display_minimal(player);
-                update_gui_state(player);
-                start_playback(player);
-            }
-        }
-        return;
-    }
-    
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
-    if (model && GTK_IS_TREE_MODEL(model)) {
-        GtkTreeSortable *sortable = GTK_TREE_SORTABLE(model);
-        gint sort_column_id = -1;
-        GtkSortType sort_type = GTK_SORT_ASCENDING;
-        bool column_sort_active = gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type);
-
-        // Same reasoning as next_song(): follow the on-screen order for
-        // either an active column sort or the grouped-by-artist view.
-        if (column_sort_active || player->queue_group_mode != QUEUE_GROUP_NONE) {
-            std::vector<int> order = get_queue_display_order(player);
-            auto pos = std::find(order.begin(), order.end(), player->queue.current_index);
-
-            bool found_prev = false;
-            if (pos != order.end() && pos != order.begin()) {
-                player->queue.current_index = *std::prev(pos);
-                found_prev = true;
-            } else if (pos == order.begin() && player->queue.repeat_queue && !order.empty()) {
-                player->queue.current_index = order.back();
-                found_prev = true;
-            }
-
-            if (found_prev) {
-                if (load_file_from_queue(player)) {
-                    update_queue_display_with_filter(player);
-                    update_gui_state(player);
-                    start_playback(player);
-                }
-                return;
-            }
-        }
-    }
-    
-    // Fall back to normal unsorted previous
-    if (previous_queue(&player->queue)) {
-        if (load_file_from_queue(player)) {
-            update_queue_display_with_filter(player);
-            update_gui_state(player);
-            start_playback(player);
-        }
-    }
+    step_song_in_display_order(player, -1);
 }
 
-void next_song_filtered(AudioPlayer *player) {
-    if (player->queue.count == 0) {
-        return;
-    }
-    
-    const char *filter = player->queue_filter_text;
-    bool has_filter = (filter && filter[0] != '\0');
-    
-    /*if (!has_filter) {
-        // No filter active, use normal next_song
-        next_song(player);
-        return;
-    }*/
-    
-    // Find the next visible (non-filtered) song
-    int start_index = player->queue.current_index + 1;
-    int search_count = 0;
 
-    
-    while (search_count < player->queue.count) {
-        int check_index = (start_index + search_count) % player->queue.count;
-        
-        // Extract metadata for this file
-        char *metadata = extract_metadata(player->queue.files[check_index]);
-        char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-        parse_metadata(metadata, title, artist, album, genre);
-        if (!ends_with_zip(player->queue.files[check_index])) {
-            show_track_info_overlay(player->visualizer, title, artist, album,
-                get_file_duration(player->queue.files[player->queue.current_index]));
-        }
-        g_free(metadata);
-        
-        char *basename = g_path_get_basename(player->queue.files[check_index]);
-        
-        // Check if this item matches the filter
-        bool matches = matches_filter(basename, filter) ||
-                      matches_filter(title, filter) ||
-                      matches_filter(artist, filter) ||
-                      matches_filter(album, filter) ||
-                      matches_filter(genre, filter);
-        
-        g_free(basename);
-        
-        if (matches) {
-            // Found the next visible song
-            stop_playback(player);
-            player->queue.current_index = check_index;
-            
-            if (load_file_from_queue(player)) {
-                update_queue_display_minimal(player);  // Performance: minimal update for song switch
-                update_gui_state(player);
-                start_playback(player);
-                SDL_Log("Next filtered song: %s (index %d)", 
-                       get_current_queue_file(&player->queue), check_index);
-            }
-            return;
-        }
-        
-        search_count++;
-    }
-    
-    // No matching song found in filter
-    SDL_Log("No next song matches current filter");
+// next_song()/previous_song() already follow whatever's on screen - text
+// filter, karaoke-only checkbox, column sort, and grouping are all baked
+// into the tree model they walk via get_queue_display_order(). These
+// "_filtered" entry points used to duplicate that logic with their own
+// separate (and, for karaoke/grouping, incorrect) raw-array search; they're
+// now just aliases kept around because on_next_clicked()/on_previous_clicked()
+// and the song-completed callback call them by name.
+void next_song_filtered(AudioPlayer *player) {
+    next_song(player);
 }
 
 void previous_song_filtered(AudioPlayer *player) {
-    if (player->queue.count == 0) {
-        return;
-    }
-    
-    const char *filter = player->queue_filter_text;
-    bool has_filter = (filter && filter[0] != '\0');
-    
-    /*if (!has_filter) {
-        // No filter active, use normal previous_song
-        previous_song(player);
-        return;
-    }*/
-    
-    // Find the previous visible (non-filtered) song
-    int start_index = player->queue.current_index - 1;
-    if (start_index < 0) {
-        start_index = player->queue.count - 1;
-    }
-    
-    int search_count = 0;
-    
-    while (search_count < player->queue.count) {
-        int check_index = start_index - search_count;
-        if (check_index < 0) {
-            check_index += player->queue.count;
-        }
-        
-        // Extract metadata for this file
-        char *metadata = extract_metadata(player->queue.files[check_index]);
-        char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-        parse_metadata(metadata, title, artist, album, genre);
-        if (!ends_with_zip(player->queue.files[check_index])) {
-            show_track_info_overlay(player->visualizer, title, artist, album,
-                get_file_duration(player->queue.files[player->queue.current_index]));
-        }
-        g_free(metadata);
-        
-        char *basename = g_path_get_basename(player->queue.files[check_index]);
-        
-        // Check if this item matches the filter
-        bool matches = matches_filter(basename, filter) ||
-                      matches_filter(title, filter) ||
-                      matches_filter(artist, filter) ||
-                      matches_filter(album, filter) ||
-                      matches_filter(genre, filter);
-        
-        g_free(basename);
-        
-        if (matches) {
-            // Found the previous visible song
-            stop_playback(player);
-            player->queue.current_index = check_index;
-            
-            if (load_file_from_queue(player)) {
-                update_queue_display_minimal(player);  // Performance: minimal update for song switch
-                update_gui_state(player);
-                start_playback(player);
-                SDL_Log("Previous filtered song: %s (index %d)", 
-                       get_current_queue_file(&player->queue), check_index);
-            }
-            return;
-        }
-        
-        search_count++;
-    }
-    
-    // No matching song found in filter
-    SDL_Log("No previous song matches current filter");
+    previous_song(player);
 }
 
 void update_gui_state(AudioPlayer *player) {

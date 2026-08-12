@@ -212,6 +212,14 @@ typedef struct {
     GtkTreeStore *queue_store_grouped = nullptr;
     QueueGroupMode queue_group_mode = QUEUE_GROUP_NONE;
     GtkWidget *queue_group_dropdown = nullptr;
+
+    // "Karaoke only" checkbox next to the Group by dropdown - when on, both
+    // the flat and grouped queue views (and next/previous navigation) only
+    // show/visit tracks with karaoke content (.kfn/.zip/.kar, or an audio
+    // file with a matching .cdg). See queue_karaoke_only_filter usage in
+    // queue.cpp's update_queue_display_flat()/update_queue_display_grouped().
+    bool queue_karaoke_only_filter = false;
+    GtkWidget *queue_karaoke_filter_check = nullptr;
     
     PlayQueue queue;
     ConversionCache conversion_cache;
@@ -380,6 +388,11 @@ void update_queue_display_debounced(AudioPlayer *player);
 void set_queue_group_mode(AudioPlayer *player, QueueGroupMode mode);
 std::vector<int> get_queue_display_order(AudioPlayer *player);
 bool matches_filter(const char *text, const char *filter);
+// Cheap cache-only lookup (no synchronous extraction) of whether filepath is
+// known to be karaoke content. Returns false for anything not yet cached -
+// safe to call from the main thread (e.g. from next_song()/previous_song()'s
+// filtered-navigation path) since it never blocks on file I/O.
+bool queue_file_is_karaoke_cached(const char *filepath);
 bool filename_exists_in_queue(PlayQueue *queue, const char *filepath);
 // NOTE(gtk4): GtkCheckMenuItem is gone along with the rest of the old menu
 // widgets - a GTK4 menu bar built from GMenu/GAction would represent these as
