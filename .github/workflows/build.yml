@@ -4,6 +4,7 @@ on:
   push:
     branches: [ master, main, dev ]
     paths:
+      - 'gtk4/**.cpp'
       - 'gtk3/**.cpp'
       - 'gtk3/**.h'
       - 'gtk3/**.c'
@@ -16,6 +17,7 @@ on:
   pull_request:
     branches: [ master, main, dev ]
     paths:
+      - 'gtk4/**.cpp"
       - 'gtk3/**.cpp'
       - 'gtk3/**.h'
       - 'gtk3/**.c'
@@ -28,7 +30,7 @@ on:
   workflow_dispatch:
 
 env:
-  PRODUCT_VERSION: "1.0.${{ github.run_number }}"
+  PRODUCT_VERSION: "1.1.${{ github.run_number }}"
   UPGRADE_CODE: "A8F5B321-9D73-4E2A-B8F6-D425E9A7C841"
 
 jobs:
@@ -76,7 +78,9 @@ jobs:
           ImageMagick \
           ffmpeg-devel \
           taglib-devel \
-          rpm-build rpmdevtools
+          rpm-build rpmdevtools \
+          rsync \
+          mingw64-gtk4
           
     - name: Convert Icon
       working-directory: gtk3
@@ -125,12 +129,12 @@ jobs:
                 BEGIN
                     VALUE "CompanyName", "Jason Brian Hall"
                     VALUE "FileDescription", "Zenamp - Retro-Modern Music Player"
-                    VALUE "FileVersion", "1.0.${{ github.run_number }}.0"
+                    VALUE "FileVersion", "1.1.${{ github.run_number }}.0"
                     VALUE "InternalName", "zenamp"
                     VALUE "LegalCopyright", "Copyright (c) 2025 Jason Brian Hall"
                     VALUE "OriginalFilename", "zenamp.exe"
                     VALUE "ProductName", "Zenamp"
-                    VALUE "ProductVersion", "1.0.${{ github.run_number }}.0"
+                    VALUE "ProductVersion", "1.1.${{ github.run_number }}.0"
                 END
             END
             BLOCK "VarFileInfo"
@@ -143,11 +147,17 @@ jobs:
         echo "Resource file created successfully"
         cat icon.rc
 
-    - name: Build Linux Version
-      working-directory: gtk3
+    - name: Sync GTK3 Stuff
+      working-directory: gtk4_build
       run: |
-        make linux VERSION=1.0.${{ github.run_number }}
-        make rpm VERSION=1.0.${{ github.run_number }}
+        rsync -avl ../gtk3/
+        rsync -avl ../gtk4/
+      
+    - name: Build Linux Version
+      working-directory: gtk4_build
+      run: |
+        make linux VERSION=1.1.${{ github.run_number }}
+        make rpm VERSION=1.1.${{ github.run_number }}
         
         # Copy RPM from rpmbuild directory to expected location
         mkdir -p build/rpm
@@ -163,14 +173,14 @@ jobs:
         fi
 
     - name: Build Windows Version
-      working-directory: gtk3
+      working-directory: gtk4_build
       run: |
         # Compile resource file first
         x86_64-w64-mingw32-windres icon.rc -o icon.o
         echo "Resource file compiled successfully"
         
         # Build with embedded icon and version info
-        make windows EXTRA_OBJS=icon.o VERSION=1.0.${{ github.run_number }}
+        make windows EXTRA_OBJS=icon.o VERSION=1.1.${{ github.run_number }}
         
         # Verify the build
         if [ -f "build/windows/zenamp.exe" ]; then
@@ -182,7 +192,7 @@ jobs:
         fi
 
     - name: Prepare Build Artifacts
-      working-directory: gtk3
+      working-directory: gtk4_build
       run: |
         # Copy resources to both builds
         cp ../README.md build/linux/ 2>/dev/null || true
@@ -260,7 +270,7 @@ jobs:
         zip -r "Zenamp-Portable.zip" build/windows/*
 
     - name: Test Linux Build
-      working-directory: gtk3
+      working-directory: gtk4_build
       run: |
         # Test if the binary can at least show version/help
         cd build/linux
@@ -537,7 +547,17 @@ jobs:
                       <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
                       <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
                     </RegistryKey>
-                    
+
+                    <!-- KFN Files -->
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\.kfn\OpenWithProgids">
+                      <RegistryValue Type="string" Name="ZenampKFN" Value="" />
+                    </RegistryKey>
+                    <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\ZenampKFN">
+                      <RegistryValue Type="string" Value="WMA Audio File" />
+                      <RegistryValue Type="string" Key="DefaultIcon" Value="[INSTALLFOLDER]zenamp.exe,0" />
+                      <RegistryValue Type="string" Key="shell\open\command" Value="&quot;[INSTALLFOLDER]zenamp.exe&quot; &quot;%1&quot;" />
+                    </RegistryKey>
+
                     <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
                                  Type="integer" Name="FileAssociations" Value="1" KeyPath="yes"/>
                   </Component>
@@ -898,6 +918,7 @@ jobs:
                       <uap:FileType ContentType="audio/x-ms-wma">.wma</uap:FileType>
                       <uap:FileType ContentType="audio/x-mpegurl">.m3u</uap:FileType>
                       <uap:FileType ContentType="audio/x-mpegurl">.m3u8</uap:FileType>
+                      <uap:FileType ContentType="audio/x-mpegurl">.kfn</uap:FileType>
                     </uap:SupportedFileTypes>
                   </uap:FileTypeAssociation>
                 </uap:Extension>
