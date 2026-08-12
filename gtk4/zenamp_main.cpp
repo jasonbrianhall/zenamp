@@ -816,6 +816,7 @@ static void leave_karaoke_visualization(AudioPlayer *p) {
 }
 
 // Signal handler for graceful shutdown
+static void save_metadata_cache_on_exit();  // defined below, near save_player_settings
 static void signal_handler(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         SDL_Log("\nReceived signal %d, initiating graceful shutdown...", sig);
@@ -824,6 +825,7 @@ static void signal_handler(int sig) {
             // Save current queue before exit
             save_current_queue_on_exit(player);
             save_player_settings(player);
+            save_metadata_cache_on_exit();
             
             // Stop playback if playing
             if (isPlaying) {
@@ -2405,8 +2407,9 @@ void fast_forward_5_seconds(AudioPlayer *player) {
 // Navigates next/previous following whatever's currently on screen in the
 // queue tree view - flat or grouped, filtered by search text and/or the
 // karaoke-only checkbox, plain or column-sorted. get_queue_display_order()
-// walks the currently attached model depth-first, so it already reflects
-// every one of those transforms (they're all baked into the model by
+// derives its model directly from queue_group_mode (not from whatever's
+// attached to the tree view widget), so it already reflects every one of
+// those transforms (they're all baked into the model by
 // update_queue_display_with_filter() before this ever runs); there's no
 // need for next/previous to re-derive filtering or sort order themselves.
 // Within a group, the last/first track steps into the adjacent group (and
@@ -2447,9 +2450,23 @@ static void step_song_in_display_order(AudioPlayer *player, int direction) {
 
     if (pos == order.end()) {
         // Current song isn't part of the visible order right now (filtered
-        // out, or mid metadata-load rebuild) - jump onto the visible list
-        // rather than silently doing nothing.
-        player->queue.current_index = (direction > 0) ? order.front() : order.back();
+        // out by search/karaoke-only, or mid metadata-load rebuild). Rather
+        // than jumping to an arbitrary spot - e.g. order.front(), which in
+        // grouped mode is whatever group sorts alphabetically first and can
+        // look completely unrelated to what was just playing - scan
+        // outward from the current queue position in underlying file order
+        // and land on the nearest entry that's actually visible right now.
+        int n = player->queue.count;
+        int landed = -1;
+        for (int step = 1; step <= n; step++) {
+            int idx = ((player->queue.current_index + direction * step) % n + n) % n;
+            if (std::find(order.begin(), order.end(), idx) != order.end()) {
+                landed = idx;
+                break;
+            }
+        }
+        if (landed == -1) return;  // Nothing visible reachable; shouldn't happen since order is non-empty.
+        player->queue.current_index = landed;
     } else if (direction > 0) {
         auto next_it = std::next(pos);
         if (next_it != order.end()) {
@@ -3299,6 +3316,7 @@ gboolean on_window_delete_event(GtkWindow *window, gpointer user_data) {
     save_current_queue_on_exit(player);
 
     save_player_settings(player);
+    save_metadata_cache_on_exit();
     
     stop_playback(player);
     clear_queue(&player->queue);
@@ -3704,6 +3722,21 @@ bool get_settings_path(char *path, size_t path_size) {
     
     return true;
 }
+
+bool get_metadata_cache_path(char *path, size_t path_size) {
+    char app_data[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, app_data) != S_OK) {
+        return false;
+    }
+    snprintf(path, path_size, "%s\\Zenamp\\cache.txt", app_data);
+
+    // Create directory if it doesn't exist
+    char dir_path[MAX_PATH];
+    snprintf(dir_path, sizeof(dir_path), "%s\\Zenamp", app_data);
+    CreateDirectoryA(dir_path, NULL);
+
+    return true;
+}
 #else
 bool get_settings_path(char *path, size_t path_size) {
     const char *home = getenv("HOME");
@@ -3717,6 +3750,21 @@ bool get_settings_path(char *path, size_t path_size) {
     snprintf(dir_path, sizeof(dir_path), "%s/.zenamp", home);
     mkdir(dir_path, 0755);
     
+    return true;
+}
+
+bool get_metadata_cache_path(char *path, size_t path_size) {
+    const char *home = getenv("HOME");
+    if (!home) {
+        return false;
+    }
+    snprintf(path, path_size, "%s/.zenamp/cache.txt", home);
+
+    // Create directory if it doesn't exist
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s/.zenamp", home);
+    mkdir(dir_path, 0755);
+
     return true;
 }
 #endif
@@ -3755,10 +3803,35 @@ bool save_player_settings(AudioPlayer *player) {
         fprintf(f, "vis_type=%d\n", player->visualizer->type);
         fprintf(f, "vis_sensitivity=%.2f\n", player->visualizer->sensitivity);
     }
+
+    // Queue sort order: the "Group by" mode (None/Artist/Album/Genre), the
+    // karaoke-only checkbox, and - for the flat (ungrouped) view - which
+    // column is sorted and in which direction, so next launch reopens to
+    // the same view instead of always starting flat/unsorted.
+    fprintf(f, "queue_group_mode=%d\n", (int)player->queue_group_mode);
+    fprintf(f, "queue_karaoke_only=%d\n", player->queue_karaoke_only_filter ? 1 : 0);
+    if (player->queue_store) {
+        GtkTreeSortable *sortable = GTK_TREE_SORTABLE(player->queue_store);
+        gint sort_column_id = -1;
+        GtkSortType sort_type = GTK_SORT_ASCENDING;
+        if (gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type)) {
+            fprintf(f, "queue_sort_column=%d\n", sort_column_id);
+            fprintf(f, "queue_sort_type=%d\n", (int)sort_type);
+        }
+    }
     
     fclose(f);
     SDL_Log("Settings saved to: %s", settings_path);
     return true;
+}
+
+// Small wrapper so the two shutdown paths (signal_handler and
+// on_window_delete_event) don't each have to duplicate the path lookup.
+static void save_metadata_cache_on_exit() {
+    char cache_path[1024];
+    if (get_metadata_cache_path(cache_path, sizeof(cache_path))) {
+        save_queue_metadata_cache(cache_path);
+    }
 }
 
 bool load_player_settings(AudioPlayer *player) {
@@ -3783,6 +3856,10 @@ bool load_player_settings(AudioPlayer *player) {
     float treble_gain = 0.0f;
     int vis_type = 0;
     float vis_sensitivity = 1.0f;
+    int queue_group_mode = QUEUE_GROUP_NONE;
+    int queue_karaoke_only = 0;
+    int queue_sort_column = -1;
+    int queue_sort_type = (int)GTK_SORT_ASCENDING;
     
     while (fgets(line, sizeof(line), f)) {
         // Skip comments and empty lines
@@ -3812,6 +3889,18 @@ bool load_player_settings(AudioPlayer *player) {
         }
         else if (sscanf(line, "vis_sensitivity=%f", &vis_sensitivity) == 1) {
             SDL_Log("Loaded vis_sensitivity: %.2f", vis_sensitivity);
+        }
+        else if (sscanf(line, "queue_group_mode=%d", &queue_group_mode) == 1) {
+            SDL_Log("Loaded queue_group_mode: %d", queue_group_mode);
+        }
+        else if (sscanf(line, "queue_karaoke_only=%d", &queue_karaoke_only) == 1) {
+            SDL_Log("Loaded queue_karaoke_only: %d", queue_karaoke_only);
+        }
+        else if (sscanf(line, "queue_sort_column=%d", &queue_sort_column) == 1) {
+            SDL_Log("Loaded queue_sort_column: %d", queue_sort_column);
+        }
+        else if (sscanf(line, "queue_sort_type=%d", &queue_sort_type) == 1) {
+            SDL_Log("Loaded queue_sort_type: %d", queue_sort_type);
         }
     }
     
@@ -3853,6 +3942,25 @@ bool load_player_settings(AudioPlayer *player) {
     if (player->visualizer) {
         player->visualizer->sensitivity = vis_sensitivity;
         visualizer_set_type(player->visualizer, (VisualizationType)vis_type);
+    }
+
+    // Queue sort order. Set the column sort directly on the store first
+    // (cheap - just a property, applies as rows get added later), then
+    // drive the group dropdown and karaoke checkbox through their normal
+    // setters so their existing "notify::selected"/"toggled" handlers do
+    // the actual set_queue_group_mode()/display-rebuild work, the same as
+    // if the user had just clicked them.
+    if (player->queue_store && queue_sort_column >= 0) {
+        gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(player->queue_store),
+                                              queue_sort_column, (GtkSortType)queue_sort_type);
+    }
+    if (player->queue_group_dropdown &&
+        queue_group_mode >= QUEUE_GROUP_NONE && queue_group_mode <= QUEUE_GROUP_GENRE) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(player->queue_group_dropdown), (guint)queue_group_mode);
+    }
+    if (player->queue_karaoke_filter_check) {
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(player->queue_karaoke_filter_check),
+                                     queue_karaoke_only != 0);
     }
     
     SDL_Log("Settings loaded successfully");
@@ -4566,6 +4674,18 @@ int main(int argc, char *argv[]) {
     SDL_Log("DEBUG: about to call load_player_settings");
     load_player_settings(player);
     SDL_Log("DEBUG: load_player_settings returned");
+
+    // Load the metadata cache before the queue/playlist gets populated
+    // below, so files that were already tagged/timed on a previous run
+    // show real title/artist/album/genre/duration immediately instead of
+    // "(Loading...)" placeholders while the background extractor re-does
+    // work it's already done.
+    {
+        char cache_path[1024];
+        if (get_metadata_cache_path(cache_path, sizeof(cache_path))) {
+            load_queue_metadata_cache(cache_path);
+        }
+    }
     
     char last_playlist[1024];
     bool loaded_last_playlist = false;

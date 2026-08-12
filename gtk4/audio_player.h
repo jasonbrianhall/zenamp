@@ -408,6 +408,13 @@ void on_shortcuts_menu_clicked(GtkWidget *menuitem, gpointer user_data);
 bool save_player_settings(AudioPlayer *player);
 bool load_player_settings(AudioPlayer *player);
 bool get_settings_path(char *path, size_t path_size);
+// Persists/restores the per-file metadata cache (tags, duration, karaoke
+// detection) used by the queue display, so relaunching doesn't have to
+// re-extract everything before the queue shows real info. `path` is a
+// full file path (see get_metadata_cache_path()), not a directory.
+bool save_queue_metadata_cache(const char *path);
+bool load_queue_metadata_cache(const char *path);
+bool get_metadata_cache_path(char *path, size_t path_size);
 
 // Audio functions
 void audio_callback(void* userdata, Uint8* stream, int len);

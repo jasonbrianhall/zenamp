@@ -5,6 +5,7 @@
 #include <taglib/tag.h>
 #include <glib.h>
 #include <string.h>
+#include <cstdio>
 #include <filesystem>
 #include <sys/stat.h>
 #ifdef _WIN32
@@ -203,6 +204,118 @@ bool queue_file_is_karaoke_cached(const char *filepath) {
     auto it = g_queue_meta_cache.find(filepath);
     if (it == g_queue_meta_cache.end() || !it->second.loaded) return false;
     return it->second.is_karaoke;
+}
+
+// Persists the metadata cache (title/artist/album/genre/duration/karaoke/
+// accessibility, keyed by filepath and validated by mtime) to a simple
+// tab-separated text file, so the *next* launch can skip re-extracting tags
+// and re-decoding durations for files it's already seen - the queue shows
+// real metadata immediately instead of sitting on "(Loading...)"
+// placeholders while the background loader works through everything again.
+// One line per file: filepath, title, artist, album, genre,
+// duration_seconds, is_karaoke, file_accessible, mtime. Tabs/newlines
+// inside string fields are collapsed to spaces so the format stays a
+// simple, dependency-free split on '\t' (matches settings.txt's style
+// rather than pulling in a real serialization format for this).
+bool save_queue_metadata_cache(const char *path) {
+    if (!path) return false;
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        SDL_Log("Failed to open metadata cache for writing: %s", path);
+        return false;
+    }
+
+    fprintf(f, "# Zenamp metadata cache - auto-generated, do not edit by hand\n");
+
+    auto sanitize = [](std::string s) {
+        for (auto &c : s) {
+            if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+        }
+        return s;
+    };
+
+    int written = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+        for (const auto &kv : g_queue_meta_cache) {
+            const QueueMetaCacheEntry &e = kv.second;
+            if (!e.loaded) continue;  // nothing useful to persist for a placeholder
+
+            fprintf(f, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%ld\n",
+                    sanitize(kv.first).c_str(),
+                    sanitize(e.title).c_str(),
+                    sanitize(e.artist).c_str(),
+                    sanitize(e.album).c_str(),
+                    sanitize(e.genre).c_str(),
+                    e.duration_seconds,
+                    e.is_karaoke ? 1 : 0,
+                    e.file_accessible ? 1 : 0,
+                    (long)e.mtime);
+            written++;
+        }
+    }
+
+    fclose(f);
+    SDL_Log("Saved %d metadata cache entries to: %s", written, path);
+    return true;
+}
+
+// Loads a previously-saved cache back into memory. Entries are still
+// mtime-checked the normal way (see get_cached_or_placeholder()) the first
+// time each file is looked up, so a file that changed on disk since the
+// cache was written gets transparently re-extracted in the background
+// rather than showing stale tags.
+bool load_queue_metadata_cache(const char *path) {
+    if (!path) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        SDL_Log("No metadata cache file found: %s", path);
+        return false;
+    }
+
+    char line[4096];
+    int loaded_count = 0;
+
+    std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        // Tab-separated: filepath, title, artist, album, genre,
+        // duration_seconds, is_karaoke, file_accessible, mtime
+        char *fields[9] = {nullptr};
+        int field_count = 0;
+        char *cursor = line;
+        fields[field_count++] = cursor;
+        while (field_count < 9 && (cursor = strchr(cursor, '\t')) != nullptr) {
+            *cursor = '\0';
+            cursor++;
+            fields[field_count++] = cursor;
+        }
+        if (field_count != 9) continue;  // malformed/truncated line - skip it
+
+        QueueMetaCacheEntry entry;
+        entry.title = fields[1];
+        entry.artist = fields[2];
+        entry.album = fields[3];
+        entry.genre = fields[4];
+        entry.duration_seconds = atoi(fields[5]);
+        entry.is_karaoke = atoi(fields[6]) != 0;
+        entry.file_accessible = atoi(fields[7]) != 0;
+        entry.mtime = (time_t)atol(fields[8]);
+        entry.loaded = true;
+
+        g_queue_meta_cache[fields[0]] = std::move(entry);
+        loaded_count++;
+    }
+
+    fclose(f);
+    SDL_Log("Loaded %d metadata cache entries from: %s", loaded_count, path);
+    return true;
 }
 
 // Runs on a background thread: extracts metadata for every path in
@@ -1804,10 +1917,11 @@ bool matches_filter(const char *text, const char *filter) {
 // cache the flat view uses. Drag-to-reorder only makes sense against the
 // flat order, so it's disabled while grouped.
 //
-// next_song()/previous_song() (in zenamp_main.cpp) walk whichever model is
-// currently attached to the tree view via get_queue_display_order() below,
-// so playback follows the grouped order shown here once grouping is
-// on, and falls back to plain queue order once it's off.
+// next_song()/previous_song() (in zenamp_main.cpp) walk the display order
+// computed by get_queue_display_order() below, which is derived directly
+// from queue_group_mode (not from whatever the tree view widget happens to
+// have attached), so playback always follows the grouped/alphabetical order
+// shown once grouping is on, and plain queue order once it's off.
 // ---------------------------------------------------------------------------
 
 // Returns every row's queue index (player->queue.files[] index) in current
@@ -1820,7 +1934,17 @@ std::vector<int> get_queue_display_order(AudioPlayer *player) {
     std::vector<int> order;
     if (!player || !player->queue_tree_view) return order;
 
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(player->queue_tree_view));
+    // Derive the authoritative model directly from queue_group_mode rather
+    // than trusting gtk_tree_view_get_model()'s current attachment. The
+    // fast per-song refresh (update_queue_display_minimal(), used after
+    // every next/previous) doesn't call ensure_queue_tree_view_model(), so
+    // if the tree view's attached model ever lags behind queue_group_mode
+    // for any reason, next/previous would silently walk the wrong store
+    // (e.g. flat add-order instead of the grouped/alphabetical order shown
+    // on screen). Reading the mode directly sidesteps that class of bug.
+    GtkTreeModel *model = (player->queue_group_mode != QUEUE_GROUP_NONE)
+        ? GTK_TREE_MODEL(player->queue_store_grouped)
+        : GTK_TREE_MODEL(player->queue_store);
     if (!model) return order;
 
     gtk_tree_model_foreach(model,
