@@ -6,6 +6,7 @@
 #include <glib.h>
 #include <string.h>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <sys/stat.h>
 #ifdef _WIN32
@@ -55,8 +56,23 @@ struct QueueMetaCacheEntry {
     bool is_karaoke = false;
     bool file_accessible = true;
     time_t mtime = 0;
+    // Last time we actually confirmed (via a successful stat()) that this
+    // file exists - NOT the same as "last used this session". Only touched
+    // when the file is verified present, so a temporarily-unmounted
+    // external/network drive's entries just stop advancing rather than
+    // looking stale; they pick back up the next time the drive is back and
+    // the file gets looked at again. See queue_cache_max_age_seconds below.
+    time_t last_seen = 0;
     bool loaded = false;  // false = placeholder only, not yet extracted
 };
+
+// How long a cache entry can go without being confirmed present before
+// save_queue_metadata_cache() drops it instead of persisting it. Generous
+// on purpose: a removable/network drive that's only plugged in occasionally
+// should easily clear this bar, while files that are genuinely gone for
+// good (deleted, drive retired) eventually age out on their own without
+// needing any manual "clean up cache" step.
+static const time_t queue_cache_max_age_seconds = 60 * 60 * 24 * 365;  // ~1 year
 
 static std::mutex g_queue_meta_mutex;
 static std::unordered_map<std::string, QueueMetaCacheEntry> g_queue_meta_cache;
@@ -86,6 +102,7 @@ static QueueMetaCacheEntry extract_queue_item_metadata(const char *filepath) {
     struct stat st;
     if (stat(filepath, &st) == 0) {
         result.mtime = st.st_mtime;
+        result.last_seen = time(nullptr);  // confirmed present right now
     }
 
     const char *ext = strrchr(filepath, '.');
@@ -186,7 +203,15 @@ static QueueMetaCacheEntry get_cached_or_placeholder(const char *filepath, bool 
     }
 
     struct stat st;
-    if (stat(filepath, &st) == 0 && st.st_mtime != it->second.mtime) {
+    bool exists_now = (stat(filepath, &st) == 0);
+    if (exists_now) {
+        // Confirmed present - keep this entry from aging out of the
+        // persisted cache (see queue_cache_max_age_seconds) regardless of
+        // whether its tags need re-reading below.
+        it->second.last_seen = time(nullptr);
+    }
+
+    if (exists_now && st.st_mtime != it->second.mtime) {
         *needs_load = true;  // stale - reload in background, but use old values meanwhile
         return it->second;
     }
@@ -213,10 +238,19 @@ bool queue_file_is_karaoke_cached(const char *filepath) {
 // real metadata immediately instead of sitting on "(Loading...)"
 // placeholders while the background loader works through everything again.
 // One line per file: filepath, title, artist, album, genre,
-// duration_seconds, is_karaoke, file_accessible, mtime. Tabs/newlines
-// inside string fields are collapsed to spaces so the format stays a
-// simple, dependency-free split on '\t' (matches settings.txt's style
+// duration_seconds, is_karaoke, file_accessible, mtime, last_seen. Tabs/
+// newlines inside string fields are collapsed to spaces so the format stays
+// a simple, dependency-free split on '\t' (matches settings.txt's style
 // rather than pulling in a real serialization format for this).
+//
+// Entries that haven't been confirmed present (last_seen) in over
+// queue_cache_max_age_seconds are quietly dropped instead of persisted -
+// this is the only cache cleanup that happens, and it's deliberately slow
+// and automatic rather than an explicit "clear cache" action: an entry only
+// ages out after a full year of the file never once being seen again, so a
+// removable/network drive that's merely unplugged at the moment easily
+// survives, while files that are genuinely gone for good eventually stop
+// taking up space without anyone having to remember to clean up after them.
 bool save_queue_metadata_cache(const char *path) {
     if (!path) return false;
     FILE *f = fopen(path, "w");
@@ -234,14 +268,21 @@ bool save_queue_metadata_cache(const char *path) {
         return s;
     };
 
+    time_t now = time(nullptr);
     int written = 0;
+    int aged_out = 0;
     {
         std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
         for (const auto &kv : g_queue_meta_cache) {
             const QueueMetaCacheEntry &e = kv.second;
             if (!e.loaded) continue;  // nothing useful to persist for a placeholder
 
-            fprintf(f, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%ld\n",
+            if (e.last_seen != 0 && (now - e.last_seen) > queue_cache_max_age_seconds) {
+                aged_out++;
+                continue;
+            }
+
+            fprintf(f, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%ld\t%ld\n",
                     sanitize(kv.first).c_str(),
                     sanitize(e.title).c_str(),
                     sanitize(e.artist).c_str(),
@@ -250,13 +291,15 @@ bool save_queue_metadata_cache(const char *path) {
                     e.duration_seconds,
                     e.is_karaoke ? 1 : 0,
                     e.file_accessible ? 1 : 0,
-                    (long)e.mtime);
+                    (long)e.mtime,
+                    (long)e.last_seen);
             written++;
         }
     }
 
     fclose(f);
-    SDL_Log("Saved %d metadata cache entries to: %s", written, path);
+    SDL_Log("Saved %d metadata cache entries to: %s (%d aged out after 1+ year unseen)",
+            written, path, aged_out);
     return true;
 }
 
@@ -286,17 +329,20 @@ bool load_queue_metadata_cache(const char *path) {
         }
 
         // Tab-separated: filepath, title, artist, album, genre,
-        // duration_seconds, is_karaoke, file_accessible, mtime
-        char *fields[9] = {nullptr};
+        // duration_seconds, is_karaoke, file_accessible, mtime, last_seen.
+        // The last field is accepted as optional so a cache.txt written by
+        // an older build (9 fields, no last_seen) still loads instead of
+        // being silently discarded wholesale.
+        char *fields[10] = {nullptr};
         int field_count = 0;
         char *cursor = line;
         fields[field_count++] = cursor;
-        while (field_count < 9 && (cursor = strchr(cursor, '\t')) != nullptr) {
+        while (field_count < 10 && (cursor = strchr(cursor, '\t')) != nullptr) {
             *cursor = '\0';
             cursor++;
             fields[field_count++] = cursor;
         }
-        if (field_count != 9) continue;  // malformed/truncated line - skip it
+        if (field_count != 9 && field_count != 10) continue;  // malformed/truncated line - skip it
 
         QueueMetaCacheEntry entry;
         entry.title = fields[1];
@@ -307,6 +353,10 @@ bool load_queue_metadata_cache(const char *path) {
         entry.is_karaoke = atoi(fields[6]) != 0;
         entry.file_accessible = atoi(fields[7]) != 0;
         entry.mtime = (time_t)atol(fields[8]);
+        // Older cache files without a last_seen column: treat as "seen
+        // right now" rather than 0/never, so pre-existing entries get a
+        // full fresh year before they'd be eligible to age out.
+        entry.last_seen = (field_count == 10) ? (time_t)atol(fields[9]) : time(nullptr);
         entry.loaded = true;
 
         g_queue_meta_cache[fields[0]] = std::move(entry);
