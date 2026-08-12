@@ -150,8 +150,8 @@ jobs:
     - name: Sync GTK3 Stuff
       working-directory: gtk4_build
       run: |
-        rsync -avl ../gtk3/
-        rsync -avl ../gtk4/
+        rsync -avl ../gtk3/ .
+        rsync -avl ../gtk4/ .
       
     - name: Build Linux Version
       working-directory: gtk4_build
