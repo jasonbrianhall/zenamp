@@ -3770,6 +3770,22 @@ bool save_player_settings(AudioPlayer *player) {
         fprintf(f, "vis_type=%d\n", player->visualizer->type);
         fprintf(f, "vis_sensitivity=%.2f\n", player->visualizer->sensitivity);
     }
+
+    // Queue sort order: the "Group by" mode (None/Artist/Album/Genre), the
+    // karaoke-only checkbox, and - for the flat (ungrouped) view - which
+    // column is sorted and in which direction, so next launch reopens to
+    // the same view instead of always starting flat/unsorted.
+    fprintf(f, "queue_group_mode=%d\n", (int)player->queue_group_mode);
+    fprintf(f, "queue_karaoke_only=%d\n", player->queue_karaoke_only_filter ? 1 : 0);
+    if (player->queue_store) {
+        GtkTreeSortable *sortable = GTK_TREE_SORTABLE(player->queue_store);
+        gint sort_column_id = -1;
+        GtkSortType sort_type = GTK_SORT_ASCENDING;
+        if (gtk_tree_sortable_get_sort_column_id(sortable, &sort_column_id, &sort_type)) {
+            fprintf(f, "queue_sort_column=%d\n", sort_column_id);
+            fprintf(f, "queue_sort_type=%d\n", (int)sort_type);
+        }
+    }
     
     fclose(f);
     SDL_Log("Settings saved to: %s", settings_path);
@@ -3798,6 +3814,10 @@ bool load_player_settings(AudioPlayer *player) {
     float treble_gain = 0.0f;
     int vis_type = 0;
     float vis_sensitivity = 1.0f;
+    int queue_group_mode = QUEUE_GROUP_NONE;
+    int queue_karaoke_only = 0;
+    int queue_sort_column = -1;
+    int queue_sort_type = (int)GTK_SORT_ASCENDING;
     
     while (fgets(line, sizeof(line), f)) {
         // Skip comments and empty lines
@@ -3827,6 +3847,18 @@ bool load_player_settings(AudioPlayer *player) {
         }
         else if (sscanf(line, "vis_sensitivity=%f", &vis_sensitivity) == 1) {
             SDL_Log("Loaded vis_sensitivity: %.2f", vis_sensitivity);
+        }
+        else if (sscanf(line, "queue_group_mode=%d", &queue_group_mode) == 1) {
+            SDL_Log("Loaded queue_group_mode: %d", queue_group_mode);
+        }
+        else if (sscanf(line, "queue_karaoke_only=%d", &queue_karaoke_only) == 1) {
+            SDL_Log("Loaded queue_karaoke_only: %d", queue_karaoke_only);
+        }
+        else if (sscanf(line, "queue_sort_column=%d", &queue_sort_column) == 1) {
+            SDL_Log("Loaded queue_sort_column: %d", queue_sort_column);
+        }
+        else if (sscanf(line, "queue_sort_type=%d", &queue_sort_type) == 1) {
+            SDL_Log("Loaded queue_sort_type: %d", queue_sort_type);
         }
     }
     
@@ -3868,6 +3900,25 @@ bool load_player_settings(AudioPlayer *player) {
     if (player->visualizer) {
         player->visualizer->sensitivity = vis_sensitivity;
         visualizer_set_type(player->visualizer, (VisualizationType)vis_type);
+    }
+
+    // Queue sort order. Set the column sort directly on the store first
+    // (cheap - just a property, applies as rows get added later), then
+    // drive the group dropdown and karaoke checkbox through their normal
+    // setters so their existing "notify::selected"/"toggled" handlers do
+    // the actual set_queue_group_mode()/display-rebuild work, the same as
+    // if the user had just clicked them.
+    if (player->queue_store && queue_sort_column >= 0) {
+        gtk_tree_sortable_set_sort_column_id(GTK_TREE_SORTABLE(player->queue_store),
+                                              queue_sort_column, (GtkSortType)queue_sort_type);
+    }
+    if (player->queue_group_dropdown &&
+        queue_group_mode >= QUEUE_GROUP_NONE && queue_group_mode <= QUEUE_GROUP_GENRE) {
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(player->queue_group_dropdown), (guint)queue_group_mode);
+    }
+    if (player->queue_karaoke_filter_check) {
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(player->queue_karaoke_filter_check),
+                                     queue_karaoke_only != 0);
     }
     
     SDL_Log("Settings loaded successfully");
