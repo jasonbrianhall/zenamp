@@ -105,7 +105,7 @@ jobs:
         fi
 
     - name: Create Windows Resource File
-      working-directory: gtk3
+      working-directory: gtk4_build
       run: |
         # Create resource file to embed icon and version info
         cat > icon.rc << 'EOF'
@@ -283,10 +283,10 @@ jobs:
       with:
         name: zenamp-builds
         path: |
-          gtk3/build/linux/**/*
-          gtk3/build/windows/**/*
-          gtk3/build/rpm/**/*
-          gtk3/Zenamp-Portable.zip
+          gtk4_build/build/linux/**/*
+          gtk4_build/build/windows/**/*
+          gtk4_build/build/rpm/**/*
+          gtk4_build/Zenamp-Portable.zip
         retention-days: 7
 
   build-msi-windows:
@@ -573,12 +573,12 @@ jobs:
                                      Type="integer" Name="GdkPixbuf" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
-                    <Directory Id="Gtk3" Name="gtk-3.0">
-                      <Component Id="Gtk3Dir" Guid="C2E5D951-A6B2-4E79-C7E4-864A3A9E7A51">
+                    <Directory Id="Gtk4" Name="gtk-4.0">
+                      <Component Id="Gtk4Dir" Guid="C2E5D951-A6B2-4E79-C7E4-864A3A9E7A51">
                         <CreateFolder />
-                        <RemoveFolder Id="RemoveGtk3" On="uninstall" />
+                        <RemoveFolder Id="RemoveGtk4" On="uninstall" />
                         <RegistryValue Root="HKCU" Key="Software\GTKzenamp\Components" 
-                                     Type="integer" Name="Gtk3" Value="1" KeyPath="yes"/>
+                                     Type="integer" Name="Gtk4" Value="1" KeyPath="yes"/>
                       </Component>
                     </Directory>
                   </Directory>
@@ -663,7 +663,7 @@ jobs:
               <ComponentRef Id="ApplicationShortcuts" />
               <ComponentRef Id="GtkSchemas" />
               <ComponentRef Id="GdkPixbufDir" />
-              <ComponentRef Id="Gtk3Dir" />
+              <ComponentRef Id="Gtk4Dir" />
               <ComponentRef Id="IconsDir" />
               <ComponentRef Id="ThemesDir" />
             </Feature>
@@ -1047,7 +1047,7 @@ jobs:
           - Complete playback controls with queue management
           - Volume control (10% to 500%) and speed control (0.1x to 4.0x)
           - Progress tracking with timestamps
-          - GTK3 interface for modern desktop integration
+          - GTK4 interface for modern desktop integration
           
           ### Microsoft Store Submission
           The MSIX package in this release is **unsigned** and ready for Microsoft Store submission through Partner Center. Before uploading:
@@ -1092,7 +1092,7 @@ jobs:
           - **Embedded Icon**: Icon properly embedded in executable
           - **Version Information**: Full version details embedded
           - **Store-Compliant Assets**: Multiple scale factors (100%, 125%, 150%, 200%)
-          - GTK3 runtime included
+          - GTK4 runtime included
           - All dependencies bundled
           - Cross-compiled with MinGW
           
