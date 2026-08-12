@@ -17,7 +17,7 @@ on:
   pull_request:
     branches: [ master, main, dev ]
     paths:
-      - 'gtk4/**.cpp"
+      - 'gtk4/**.cpp'
       - 'gtk3/**.cpp'
       - 'gtk3/**.h'
       - 'gtk3/**.c'
