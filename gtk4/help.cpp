@@ -127,9 +127,10 @@ void on_menu_about(GtkWidget *menuitem, gpointer user_data) {
         "• FLAC (.flac) - Lossless compression\n"
         "• OPUS (.opus) - Modern codec\n"
         "• AIFF (.aiff) - Apple audio format\n"
-        "• CDG (.zip) - Karaoke Files\n\n"      
-        "Other formats"      
-
+        "• Karafun (.kfn) - Karafun v1 Karaoke Files\n"
+        "• KAR (.kar) - MIDI Karaoke Files with Lyrics\n"
+        "• CDG (.zip) - Karaoke Files\n"      
+        "Other formats as supported by either FFMPEG or Windows Native\n\n"      
         "Features:\n"
         "• Playlist queue with repeat mode\n"
         "• Audio visualizer\n"
@@ -148,9 +149,11 @@ void on_menu_about(GtkWidget *menuitem, gpointer user_data) {
         "• OGG (.ogg) - Open-source alternative that sounds great\n"
         "• FLAC (.flac) - Lossless perfection for the audiophiles\n"
         "• OPUS (.opus) - Modern codec that's small but mighty\n"
-        "• AIFF (.aiff) - Apple's answer to WAV, crisp and clean\n\n"
-        "• CDG (.zip) - Karaoke Files\n\n"      
-        "Other formats supported by either FFMPEG (Linux) or Windows Native"      
+        "• AIFF (.aiff) - Apple's answer to WAV, crisp and clean\n"
+        "• Karafun (.kfn) - Karafun v1 Karaoke Files\n"
+        "• KAR (.kar) - MIDI Karaoke Files with Lyrics\n"
+        "• CDG (.zip) - Karaoke Files\n"      
+        "• Other formats supported by either FFMPEG (Linux) or Windows Native\n\n"      
         "Features:\n"
         "• Playlist queue with repeat mode\n"
         "• Audio visualizer for eye candy while you listen\n"
@@ -430,14 +433,33 @@ void on_menu_about(GtkWidget *menuitem, gpointer user_data) {
         "2. Provide system info (OS, GTK version, audio backend)\n"
         "3. Include console output if available\n"
         "4. Describe steps to reproduce\n\n"
-        "Repository:\n"
-        "https://github.com/jasonbrianhall/zenamp\n\n"
+        "Repository: (link below)\n\n"
         "Thank you for making Zenamp better! ⭐";
     
     gtk_text_buffer_set_text(contrib_buffer, contributing_text, -1);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(contrib_scrolled), contrib_textview);
+
+    // Wrap the (scrollable, plain-text) contributing text together with a
+    // clickable repository link underneath - GtkTextView doesn't support
+    // <a href> markup the way GtkLabel does, so the URL lives in its own
+    // label instead, same pattern as the About tab's author/website line
+    // and the Support tab's Buy Me a Coffee link.
+    GtkWidget *contrib_page_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_vexpand(contrib_scrolled, TRUE);
+    gtk_box_append(GTK_BOX(contrib_page_vbox), contrib_scrolled);
+
+    GtkWidget *contrib_repo_link = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(contrib_repo_link),
+        "<b>Repository:</b> <a href=\"https://github.com/jasonbrianhall/zenamp\">"
+        "https://github.com/jasonbrianhall/zenamp</a>");
+    gtk_label_set_justify(GTK_LABEL(contrib_repo_link), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_halign(contrib_repo_link, GTK_ALIGN_CENTER);
+    int contrib_link_margin = use_compact_dialog ? 10 : 15;
+    gtk_widget_set_margin_top(contrib_repo_link, contrib_link_margin);
+    gtk_widget_set_margin_bottom(contrib_repo_link, contrib_link_margin);
+    gtk_box_append(GTK_BOX(contrib_page_vbox), contrib_repo_link);
     
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), contrib_scrolled, 
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), contrib_page_vbox, 
                             gtk_label_new("Contributing"));
     
     // GTK4 widgets are visible by default - no gtk_widget_show_all() needed.
