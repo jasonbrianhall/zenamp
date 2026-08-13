@@ -85,6 +85,15 @@ void karafun_toggle_backing_and_reload(void *player);
 void draw_karafun_lyrics(void *vis, void *cr);
 
 /**
+ * Alternate lyrics renderer for the "Karaoke Flying Text" visualization:
+ * each letter rides a colorful sine-wave arc (green = sung, pulsing
+ * yellow/white = current word, orange = upcoming) instead of a flat static
+ * line. Same word-timing source (g_karafun) as draw_karafun_lyrics(), just a
+ * different look. Used only by draw_karaoke_fling() in karaoke.cpp.
+ */
+void draw_karafun_lyrics_fling(void *vis, void *cr);
+
+/**
  * When true, draw_karafun_lyrics() skips painting its own opaque
  * background, so a caller (e.g. the "exciting"/starburst visualization)
  * can composite the lyrics on top of something it already drew.

@@ -83,7 +83,8 @@ typedef enum {
     VIS_WAVEFORM,
     VIS_DRAW_WORMHOLE,
     VIS_KARAOKE,
-    VIS_KARAOKE_EXCITING
+    VIS_KARAOKE_EXCITING,
+    VIS_KARAOKE_FLING
 } VisualizationType;
 
 typedef struct {
@@ -584,6 +585,7 @@ void get_block_color(int frequency_band, double intensity, double *r, double *g,
 // Karaoke
 void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr);
 void draw_karaoke_boring(Visualizer *vis, cairo_t *cr);
+void draw_karaoke_fling(Visualizer *vis, cairo_t *cr);
 void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
 
 // Parrot

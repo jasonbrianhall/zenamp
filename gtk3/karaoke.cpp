@@ -475,3 +475,25 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr) {
     cairo_paint(cr);
     cairo_restore(cr);
 }
+
+// "Karaoke Flying Text" — a new, separate, opt-in visualization. When a
+// Karafun (.kfn) or KAR (.kar) file is loaded (both populate the shared
+// g_karafun state), lyrics are rendered with draw_karafun_lyrics_fling()'s
+// per-letter wavy, color-cycling style instead of the classic flat text.
+// CD+G (.zip/.cdg, .lrc-generated) files carry no separate text — the
+// lyrics are baked into the graphics bitmap — so there's nothing to "fling"
+// per-letter; this falls back to the same CDG rendering as Karaoke Classic.
+void draw_karaoke_fling(Visualizer *vis, cairo_t *cr) {
+    KarafunState *kfn = karafun_get_state();
+    if (kfn && kfn->active) {
+        cairo_set_source_rgb(cr, 0.05, 0.05, 0.08);
+        cairo_paint(cr);
+
+        karafun_set_skip_background(true);
+        draw_karafun_lyrics_fling(vis, cr);
+        karafun_set_skip_background(false);
+        return;
+    }
+
+    draw_karaoke_boring(vis, cr);
+}

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 #ifndef _WIN32
 #  include <unistd.h>
 #else
@@ -939,6 +940,258 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr)
         cairo_text_extents(cr, next_text, &ext);
         cairo_move_to(cr, (vis->width - ext.width) / 2, vis->height / 2 + 80);
         cairo_show_text(cr, next_text);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// "Flying Text" lyrics renderer — a separate, opt-in lyrics style used only
+// by the dedicated "Karaoke Flying Text" visualization (VIS_KARAOKE_FLING).
+// draw_karafun_lyrics() above is untouched and keeps powering the classic
+// two Karaoke modes plus the generic lyrics overlay on every other
+// visualization, so this is purely additive.
+// ---------------------------------------------------------------------------
+
+// Draws one line of lyrics with each glyph riding a gentle sine-wave arc and
+// individually rotated/colored, instead of a flat static baseline. Chars
+// before `highlight_start` are treated as already-sung (green), chars inside
+// [highlight_start, highlight_end) pulse yellow/white and lift slightly, and
+// the rest are upcoming (orange). Pass highlight_start < 0 to disable the
+// sung/upcoming coloring entirely (plain white).
+static void draw_flying_text(cairo_t *cr, Visualizer *vis, const char *text,
+                              double start_x, double baseline_y, double font_size,
+                              double time_sec, double amplitude, double freq,
+                              int highlight_start, int highlight_end, bool dim)
+{
+    if (!text || !text[0]) return;
+
+    size_t len = strlen(text);
+    double x_cursor = start_x;
+
+    double amp = amplitude * (dim ? 0.45 : 1.0);
+    if (!dim && vis) amp *= (0.85 + vis->volume_level * 0.6);
+
+    for (size_t i = 0; i < len; i++) {
+        char ch[2] = { text[i], '\0' };
+        if (text[i] == ' ') {
+            cairo_text_extents_t sp;
+            cairo_text_extents(cr, " ", &sp);
+            x_cursor += sp.x_advance;
+            continue;
+        }
+
+        cairo_text_extents_t ext;
+        cairo_text_extents(cr, ch, &ext);
+
+        double glyph_center_x = x_cursor + ext.x_advance / 2.0;
+        double wave_phase = glyph_center_x * freq + time_sec * 2.2;
+        double y_offset = sin(wave_phase) * amp;
+        double slope = cos(wave_phase) * amp * freq;
+        double angle = atan(slope) * 0.6; // damped so letters don't over-rotate
+
+        bool in_word = (highlight_start >= 0 && (int)i >= highlight_start && (int)i < highlight_end);
+
+        double r, g, b;
+        if (dim) {
+            r = g = b = 0.55;
+        } else if (highlight_start < 0) {
+            r = g = b = 1.0;
+        } else if ((int)i < highlight_start) {
+            r = 0.25; g = 0.85; b = 0.35; // already sung
+        } else if (in_word) {
+            double pulse = 0.5 + 0.5 * sin(time_sec * 8.0);
+            r = 1.0; g = 0.85 + 0.15 * pulse; b = 0.25 + 0.5 * pulse; // current word
+        } else {
+            r = 1.0; g = 0.55; b = 0.15; // upcoming
+        }
+
+        double lift = in_word ? -amp * 0.2 * (0.5 + 0.5 * sin(time_sec * 8.0)) : 0.0;
+        double scale = in_word ? 1.15 : 1.0;
+
+        cairo_save(cr);
+        cairo_translate(cr, glyph_center_x, baseline_y + y_offset + lift);
+        cairo_rotate(cr, angle);
+        cairo_scale(cr, scale, scale);
+
+        double draw_x = -ext.width / 2.0 - ext.x_bearing;
+        double draw_y = ext.height / 2.0;
+
+        if (in_word && !dim) {
+            cairo_set_source_rgba(cr, r, g, b, 0.35);
+            cairo_move_to(cr, draw_x, draw_y + 2);
+            cairo_show_text(cr, ch);
+        }
+
+        cairo_set_source_rgb(cr, r, g, b);
+        cairo_move_to(cr, draw_x, draw_y);
+        cairo_show_text(cr, ch);
+        cairo_restore(cr);
+
+        x_cursor += ext.x_advance;
+    }
+}
+
+// Public entry point for the "Karaoke Flying Text" visualization. Mirrors
+// draw_karafun_lyrics()'s word-timing logic (current word/line lookup) but
+// renders through draw_flying_text() instead of a flat cairo_show_text().
+void draw_karafun_lyrics_fling(void *vis_ptr, void *cr_ptr)
+{
+    Visualizer *vis = (Visualizer*)vis_ptr;
+    cairo_t *cr = (cairo_t*)cr_ptr;
+
+    if (!vis || !cr || !g_karafun.active || !g_karafun.words || g_karafun.word_count <= 0)
+        return;
+
+    extern double playTime;
+    int current_ms = (int)(playTime * 1000);
+
+    //
+    // --- FIND CURRENT WORD ---
+    //
+    int current_word_idx = 0;
+    for (int i = 0; i < g_karafun.sync_count; i++) {
+        if (current_ms >= g_karafun.sync_times_ms[i])
+            current_word_idx = i;
+        else
+            break;
+    }
+
+    //
+    // --- BACKGROUND ---
+    //
+    if (!g_karafun_skip_background) {
+        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+        cairo_rectangle(cr, 0, 0, vis->width, vis->height);
+        cairo_fill(cr);
+    }
+
+    //
+    // --- TITLE & ARTIST (dance gently too, not just the lyric lines) ---
+    //
+    double time_sec = playTime;
+    double header_wave_freq = 2.0 * M_PI / (vis->width * 1.4);
+
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 20);
+
+    cairo_text_extents_t ext;
+    cairo_text_extents(cr, g_karafun.title, &ext);
+    double title_x = (vis->width - ext.width) / 2;
+    draw_flying_text(cr, vis, g_karafun.title, title_x, 40, 20,
+                      time_sec, 20 * 0.20, header_wave_freq, -1, -1, false);
+
+    cairo_set_font_size(cr, 14);
+    cairo_text_extents(cr, g_karafun.artist, &ext);
+    double artist_x = (vis->width - ext.width) / 2;
+    draw_flying_text(cr, vis, g_karafun.artist, artist_x, 70, 14,
+                      time_sec, 14 * 0.20, header_wave_freq, -1, -1, true);
+
+    //
+    // --- FIND CURRENT LINE ---
+    //
+    int current_line = -1;
+    for (int i = 0; i < g_karafun.line_count; i++) {
+        int line_end = (i + 1 < g_karafun.line_count)
+            ? g_karafun.lines[i + 1].start_word_idx
+            : g_karafun.word_count;
+
+        if (current_word_idx >= g_karafun.lines[i].start_word_idx &&
+            current_word_idx < line_end) {
+            current_line = i;
+            break;
+        }
+    }
+
+    if (current_line < 0)
+        return;
+
+    const char *current_text = g_karafun.lines[current_line].display_text;
+
+    //
+    // --- DYNAMIC FONT SIZE (WIDTH + HEIGHT AWARE) ---
+    //
+    int font_size = vis->height / 6;
+    if (font_size < 8) font_size = 8;
+    if (font_size > 60) font_size = 60;
+
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+
+    // shrink until text fits width
+    for (;;) {
+        cairo_set_font_size(cr, font_size);
+        cairo_text_extents(cr, current_text, &ext);
+
+        if (ext.width <= vis->width * 0.90)
+            break;
+
+        font_size--;
+        if (font_size <= 8)
+            break;
+    }
+
+    //
+    // --- CENTER TEXT ---
+    //
+    cairo_text_extents(cr, current_text, &ext);
+    double text_x = (vis->width - ext.width) / 2;
+    double text_y = vis->height / 2 + 20;
+
+    //
+    // --- LOCATE CURRENT WORD WITHIN THE DISPLAY STRING (byte range) ---
+    //
+    const char *current_word = g_karafun.words[current_word_idx];
+
+    // count occurrences before this word (words can repeat within a line)
+    int occurrence = 0;
+    for (int i = g_karafun.lines[current_line].start_word_idx; i < current_word_idx; i++) {
+        if (strcmp(g_karafun.words[i], current_word) == 0)
+            occurrence++;
+    }
+
+    const char *pos = current_text;
+    for (int i = 0; i <= occurrence; i++) {
+        pos = strstr(pos, current_word);
+        if (!pos) break;
+        if (i < occurrence)
+            pos++;
+    }
+
+    int highlight_start = -1, highlight_end = -1;
+    if (pos) {
+        highlight_start = (int)(pos - current_text);
+        highlight_end = highlight_start + (int)strlen(current_word);
+    }
+
+    //
+    // --- DRAW CURRENT LINE AS FLYING TEXT ---
+    //
+    double wave_amplitude = font_size * 0.22;
+    double wave_freq = header_wave_freq; // same gentle arc as title/artist
+
+    draw_flying_text(cr, vis, current_text, text_x, text_y, font_size,
+                      time_sec, wave_amplitude, wave_freq,
+                      highlight_start, highlight_end, false);
+
+    //
+    // --- NEXT LINE (smaller, dimmer, still flying but calmer) ---
+    //
+    if (current_line + 1 < g_karafun.line_count) {
+        const char *next_text = g_karafun.lines[current_line + 1].display_text;
+
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        double next_font_size = font_size / 2;
+        cairo_set_font_size(cr, next_font_size);
+
+        cairo_text_extents(cr, next_text, &ext);
+        double next_x = (vis->width - ext.width) / 2;
+        double next_y = vis->height / 2 + 80;
+        double next_wave_amplitude = next_font_size * 0.18;
+
+        draw_flying_text(cr, vis, next_text, next_x, next_y, next_font_size,
+                          time_sec, next_wave_amplitude, wave_freq,
+                          -1, -1, true);
+
+        // restore font size for anything drawn after this in the caller
+        cairo_set_font_size(cr, font_size);
     }
 }
 

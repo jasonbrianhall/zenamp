@@ -540,15 +540,18 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
        case VIS_KARAOKE_EXCITING:
           draw_karaoke_exciting(vis, cr);
           break;          
+       case VIS_KARAOKE_FLING:
+          draw_karaoke_fling(vis, cr);
+          break;          
 
     }
 
     // Karafun lyrics overlay: when a .kfn file is loaded, show synced lyrics
-    // on top of whichever visualization is selected, not just the two
-    // dedicated Karaoke modes. Those two already draw the lyrics themselves
-    // (via draw_karaoke_boring()/draw_karaoke_exciting()), so skip here to
-    // avoid drawing them twice.
-    if (vis->type != VIS_KARAOKE && vis->type != VIS_KARAOKE_EXCITING) {
+    // on top of whichever visualization is selected, not just the three
+    // dedicated Karaoke modes. Those three already draw the lyrics themselves
+    // (via draw_karaoke_boring()/draw_karaoke_exciting()/draw_karaoke_fling()),
+    // so skip here to avoid drawing them twice.
+    if (vis->type != VIS_KARAOKE && vis->type != VIS_KARAOKE_EXCITING && vis->type != VIS_KARAOKE_FLING) {
         KarafunState *kfn = karafun_get_state();
         if (kfn && kfn->active) {
             // Dim whatever's underneath a touch so lyric text stays legible
@@ -747,7 +750,7 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             // In karaoke mode, we need to redraw frequently to show smooth CDG animations
             // even if the current packet hasn't changed. CDG runs at 75 packets/sec
             // but we want to render at display refresh rate (usually 60Hz) for smooth motion.
-            if (vis->type == VIS_KARAOKE || vis->type == VIS_KARAOKE_EXCITING) {
+            if (vis->type == VIS_KARAOKE || vis->type == VIS_KARAOKE_EXCITING || vis->type == VIS_KARAOKE_FLING) {
                 gtk_widget_queue_draw(vis->drawing_area);
             }
         }
@@ -885,6 +888,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Wormhole Simulation");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Classic");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Starburst");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Flying Text");
 
     gtk_combo_box_set_active(GTK_COMBO_BOX(type_combo), vis->type);
     gtk_widget_set_tooltip_text(type_combo, "Select visualization type (Q: Next | A: Previous); (i) means interactive");
@@ -925,10 +929,10 @@ void visualizer_next_mode(Visualizer *vis) {
     if (!vis) return;
     
     int current = (int)vis->type;
-    int next = (current + 1) % (VIS_KARAOKE_EXCITING+1);  // Wrap around to first mode
+    int next = (current + 1) % (VIS_KARAOKE_FLING+1);  // Wrap around to first mode
     
     // Skip to first mode if we go past the last
-    if (next > VIS_KARAOKE_EXCITING) {
+    if (next > VIS_KARAOKE_FLING) {
         next = VIS_MAZE_3D;
     }
     
@@ -943,7 +947,7 @@ void visualizer_prev_mode(Visualizer *vis) {
     
     // Wrap to last mode if we go below first
     if (prev < VIS_MAZE_3D) {
-        prev = VIS_KARAOKE_EXCITING;
+        prev = VIS_KARAOKE_FLING;
     }
     
     visualizer_set_type(vis, (VisualizationType)prev);
