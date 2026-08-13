@@ -539,6 +539,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_KARAOKE_EXCITING:
           draw_karaoke_exciting(vis, cr);
           break;          
+       case VIS_KARAOKE_FLING:
+          draw_karaoke_fling(vis, cr);
+          break;          
 
     }
 
@@ -547,7 +550,7 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
     // dedicated Karaoke modes. Those two already draw the lyrics themselves
     // (via draw_karaoke_boring()/draw_karaoke_exciting()), so skip here to
     // avoid drawing them twice.
-    if (vis->type != VIS_KARAOKE && vis->type != VIS_KARAOKE_EXCITING) {
+    if (vis->type != VIS_KARAOKE && vis->type != VIS_KARAOKE_EXCITING && vis->type != VIS_KARAOKE_FLING) {
         KarafunState *kfn = karafun_get_state();
         if (kfn && kfn->active) {
             // Dim whatever's underneath a touch so lyric text stays legible
@@ -567,7 +570,6 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
             draw_cdg_overlay(vis, cr);
         }
     }
-
     draw_track_info_overlay(vis, cr);
     
     return FALSE;
@@ -870,6 +872,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Wormhole Simulation");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Classic");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Starburst");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Karaoke Flying Text");
 
     gtk_combo_box_set_active(GTK_COMBO_BOX(type_combo), vis->type);
     gtk_widget_set_tooltip_text(type_combo, "Select visualization type (Q: Next | A: Previous); (i) means interactive");
