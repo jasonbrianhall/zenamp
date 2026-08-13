@@ -187,11 +187,18 @@ static void rubik_reset_cube(RubiksCubeSystem *sys) {
     sys->anim_progress = 0.0;
 }
 
-// Beat onset detector, in the same spirit as pong_detect_beat/blockstack's
+// Beat/loudness trigger, in the same spirit as pong_detect_beat/blockstack's
 // beat detectors, but edge-triggered with a cooldown so a single sustained
 // loud passage doesn't fire a dozen turns back to back. Also hard-gated on
 // actual playback state, since stale frequency data can otherwise linger
 // briefly right at pause/stop.
+//
+// Two ways to trigger a turn:
+//   - onset: energy jumps noticeably above its own recent average (catches
+//     rhythmic beats/kicks).
+//   - loud: energy (or overall volume) is just flat-out loud, regardless of
+//     whether it jumped — catches sustained loud passages/noise bursts that
+//     an onset check alone would miss.
 static bool rubik_detect_beat(Visualizer *vis, RubiksCubeSystem *sys, double dt) {
     if (sys->beat_cooldown > 0.0) sys->beat_cooldown -= dt;
 
@@ -206,10 +213,13 @@ static bool rubik_detect_beat(Visualizer *vis, RubiksCubeSystem *sys, double dt)
     energy /= VIS_FREQUENCY_BARS;
 
     bool onset = energy > 0.28 && energy > sys->beat_energy_avg * 1.25;
+    bool loud = energy > 0.5 || vis->volume_level > 0.6;
     sys->beat_energy_avg += (energy - sys->beat_energy_avg) * 0.2;
 
-    if (onset && sys->beat_cooldown <= 0.0) {
-        sys->beat_cooldown = 0.18; // minimum spacing between turns
+    if ((onset || loud) && sys->beat_cooldown <= 0.0) {
+        // A flat-out loud passage should feel busier than a subtle onset,
+        // so give it a shorter cooldown rather than reusing the same one.
+        sys->beat_cooldown = loud && !onset ? 0.12 : 0.18;
         return true;
     }
     return false;
