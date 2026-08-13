@@ -12,6 +12,7 @@
 #include "fourier.h"
 #include "dna.h"
 #include "pipes.h"
+#include "rubikscube.h"
 #include "fireworks.h"
 #include "matrix.h"
 #include "bubble.h"
@@ -76,6 +77,7 @@ typedef enum {
     VIS_RAINBOW,
     VIS_RIPPLES,
     VIS_ROBOT_CHASER,
+    VIS_RUBIKS_CUBE,
     VIS_SUDOKU_SOLVER,
     VIS_SYMMETRY_CASCADE,
     VIS_EYE_OF_SAURON,
@@ -187,6 +189,7 @@ typedef struct {
     double dna_twist_rate;
 
     PipesSystem pipes3d;
+    RubiksCubeSystem rubiks_cube;
 
     // DNA 2
     DNASegment dna_segments[MAX_DNA_SEGMENTS];
@@ -595,6 +598,11 @@ void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
 void init_pipes_system(Visualizer *vis);
 void update_pipes_system(Visualizer *vis, double dt);
 void draw_pipes_system(Visualizer *vis, cairo_t *cr);
+
+// Rubik's Cube
+void init_rubiks_cube_system(Visualizer *vis);
+void update_rubiks_cube_system(Visualizer *vis, double dt);
+void draw_rubiks_cube_system(Visualizer *vis, cairo_t *cr);
 
 // Parrot
 void draw_audio_bars_around_parrot(Visualizer *vis, cairo_t *cr, double cx, double cy, double scale);

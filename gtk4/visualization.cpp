@@ -92,6 +92,7 @@ Visualizer* visualizer_new(void) {
     init_dna_system(vis);
     init_dna2_system(vis);
     init_pipes_system(vis);
+    init_rubiks_cube_system(vis);
     init_sudoku_system(vis);
     init_ripple_system(vis);
     init_bouncy_ball_system(vis);
@@ -538,6 +539,9 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
        case VIS_PIPES_3D:
           draw_pipes_system(vis, cr);
           break;          
+       case VIS_RUBIKS_CUBE:
+          draw_rubiks_cube_system(vis, cr);
+          break;          
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -742,6 +746,9 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_PIPES_3D:
                 update_pipes_system(vis, dt);
                 break;
+            case VIS_RUBIKS_CUBE:
+                update_rubiks_cube_system(vis, dt);
+                break;
             default:
                 // No update function needed for other visualization types
                 break;
@@ -886,6 +893,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Rainbow (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Ripples (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Robot Chaser (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Rubik's Cube (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Sudoku");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Symmetry Cascade");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "The All Seeing Eye");
