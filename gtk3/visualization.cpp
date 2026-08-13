@@ -864,6 +864,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Minesweeper (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Monkey Drummer");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pipes");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
