@@ -91,6 +91,7 @@ Visualizer* visualizer_new(void) {
     init_fireworks_system(vis);
     init_dna_system(vis);
     init_dna2_system(vis);
+    init_pipes_system(vis);
     init_sudoku_system(vis);
     init_ripple_system(vis);
     init_bouncy_ball_system(vis);
@@ -543,6 +544,9 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
        case VIS_KARAOKE_FLING:
           draw_karaoke_fling(vis, cr);
           break;          
+       case VIS_PIPES_3D:
+          draw_pipes_system(vis, cr);
+          break;          
 
     }
 
@@ -735,6 +739,9 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_RAINBOW:
                 update_rainbow_system(vis, dt); 
                 break;
+            case VIS_PIPES_3D:
+                update_pipes_system(vis, dt);
+                break;
             default:
                 // No update function needed for other visualization types
                 break;
@@ -872,6 +879,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Minesweeper (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Monkey Drummer");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pipes");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
