@@ -535,6 +535,9 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
        case VIS_RAINBOW:
           draw_rainbow_system(vis, cr);
           break;       
+       case VIS_PIPES_3D:
+          draw_pipes_system(vis, cr);
+          break;          
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -543,9 +546,6 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
           break;          
        case VIS_KARAOKE_FLING:
           draw_karaoke_fling(vis, cr);
-          break;          
-       case VIS_PIPES_3D:
-          draw_pipes_system(vis, cr);
           break;          
 
     }

@@ -15,6 +15,7 @@
 #include "matrix.h"
 #include "bubble.h"
 #include "clock.h"
+#include "pipes.h"
 #include "robotchaser.h"
 #include "radialwave.h"
 #include "blockstack.h"
@@ -68,6 +69,7 @@ typedef enum {
     VIS_MINESWEEPER,
     VIS_MONKEY_DRUMMER,
     VIS_OSCILLOSCOPE,
+    VIS_PIPES_3D,
     VIS_PONG,
     VIS_RADIAL_BARS,
     VIS_RADIAL_WAVE,
@@ -184,6 +186,9 @@ typedef struct {
     double dna_time_offset;
     double dna_amplitude_multiplier;
     double dna_twist_rate;
+
+    PipesSystem pipes3d;
+
 
     // DNA 2
     DNASegment dna_segments[MAX_DNA_SEGMENTS];
@@ -584,6 +589,12 @@ void draw_karaoke_exciting(Visualizer *vis, cairo_t *cr);
 void draw_karaoke_boring(Visualizer *vis, cairo_t *cr);
 void draw_karaoke_fling(Visualizer *vis, cairo_t *cr);
 void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
+
+// Pipes
+void init_pipes_system(Visualizer *vis);
+void update_pipes_system(Visualizer *vis, double dt);
+void draw_pipes_system(Visualizer *vis, cairo_t *cr);
+
 
 // Parrot
 void draw_audio_bars_around_parrot(Visualizer *vis, cairo_t *cr, double cx, double cy, double scale);

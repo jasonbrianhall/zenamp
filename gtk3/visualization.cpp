@@ -91,6 +91,8 @@ Visualizer* visualizer_new(void) {
     init_fireworks_system(vis);
     init_dna_system(vis);
     init_dna2_system(vis);
+    init_pipes_system(vis);
+    
     init_sudoku_system(vis);
     init_ripple_system(vis);
     init_bouncy_ball_system(vis);
@@ -533,6 +535,9 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
        case VIS_RAINBOW:
           draw_rainbow_system(vis, cr);
           break;       
+       case VIS_PIPES_3D:
+          draw_pipes_system(vis, cr);
+          break;          
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -747,6 +752,9 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_RAINBOW:
                 update_rainbow_system(vis, dt); 
                 break;
+            case VIS_PIPES_3D:
+                update_pipes_system(vis, dt);
+                break;                
             default:
                 // No update function needed for other visualization types
                 break;
