@@ -207,6 +207,7 @@ static gboolean is_interactive_game(VisualizationType type) {
         case VIS_RABBITHARE:
         case VIS_RIPPLES:
         case VIS_ROBOT_CHASER:
+        case VIS_RUBIKS_CUBE:
             return TRUE;
         default:
             return FALSE;

@@ -5,14 +5,12 @@
 // simply replaying its own scramble in reverse, which is always correct and
 // reads just as well visually).
 //
-// Music reactivity:
-//   - Turn speed scales with overall volume (louder = snappier moves).
-//   - Each of the 6 sticker colors pulses with its own assigned
-//     VIS_FREQUENCY_BARS band.
-//   - The slow automatic camera orbit speeds up with mid-frequency energy,
-//     and distance "breathes" with volume — both mirroring pipes.cpp.
+// Interaction: click-drag spins the camera, scroll zooms — both work at any
+// time, even paused/no audio. Layer turns are a separate concern: they only
+// fire on a detected beat, so no music genuinely means no turning.
 
 #include "visualization.h"
+#include "audio_player.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,6 +187,34 @@ static void rubik_reset_cube(RubiksCubeSystem *sys) {
     sys->anim_progress = 0.0;
 }
 
+// Beat onset detector, in the same spirit as pong_detect_beat/blockstack's
+// beat detectors, but edge-triggered with a cooldown so a single sustained
+// loud passage doesn't fire a dozen turns back to back. Also hard-gated on
+// actual playback state, since stale frequency data can otherwise linger
+// briefly right at pause/stop.
+static bool rubik_detect_beat(Visualizer *vis, RubiksCubeSystem *sys, double dt) {
+    if (sys->beat_cooldown > 0.0) sys->beat_cooldown -= dt;
+
+    bool music_playing = player && player->is_playing && !player->is_paused;
+    if (!music_playing) {
+        sys->beat_energy_avg = 0.0;
+        return false;
+    }
+
+    double energy = 0.0;
+    for (int i = 0; i < VIS_FREQUENCY_BARS; i++) energy += vis->frequency_bands[i];
+    energy /= VIS_FREQUENCY_BARS;
+
+    bool onset = energy > 0.28 && energy > sys->beat_energy_avg * 1.25;
+    sys->beat_energy_avg += (energy - sys->beat_energy_avg) * 0.2;
+
+    if (onset && sys->beat_cooldown <= 0.0) {
+        sys->beat_cooldown = 0.18; // minimum spacing between turns
+        return true;
+    }
+    return false;
+}
+
 void init_rubiks_cube_system(Visualizer *vis) {
     RubiksCubeSystem *sys = &vis->rubiks_cube;
     memset(sys, 0, sizeof(*sys));
@@ -280,7 +306,13 @@ void update_rubiks_cube_system(Visualizer *vis, double dt) {
     sys->target_distance = RUBIK_CUBIE_SIZE * (8.0 - vis->volume_level * 1.2) * sys->user_zoom;
     sys->camera_distance += (sys->target_distance - sys->camera_distance) * fmin(1.0, dt * 2.5);
 
-    // Louder music -> faster turns. Clamped so it never looks like a jump-cut.
+    // Beat-synced layer turns: call once per frame regardless of phase so
+    // the cooldown/energy tracking stays consistent even during pauses.
+    bool beat_now = rubik_detect_beat(vis, sys, dt);
+
+    // Once a turn is triggered, how fast it visually completes still scales
+    // with volume (louder = snappier), it's only the *start* of each turn
+    // that's gated on the beat above.
     double base_duration = 0.42;
     double duration = base_duration / (0.7 + vis->volume_level * 1.6);
     if (duration < 0.14) duration = 0.14;
@@ -305,9 +337,14 @@ void update_rubiks_cube_system(Visualizer *vis, double dt) {
     switch (sys->phase) {
         case RUBIK_PHASE_SCRAMBLING:
             if (sys->move_index < sys->scramble_count) {
-                sys->current_move = sys->scramble_moves[sys->move_index];
-                sys->anim_duration = duration;
-                sys->animating = true;
+                if (beat_now) {
+                    sys->current_move = sys->scramble_moves[sys->move_index];
+                    sys->anim_duration = duration;
+                    sys->animating = true;
+                }
+                // else: no beat yet this frame — hold here. With no music
+                // playing, beat_now is never true, so the sections simply
+                // stop turning (camera dragging above is unaffected).
             } else {
                 sys->phase = RUBIK_PHASE_PAUSE;
                 sys->phase_timer = 1.2;
@@ -324,11 +361,13 @@ void update_rubiks_cube_system(Visualizer *vis, double dt) {
 
         case RUBIK_PHASE_SOLVING:
             if (sys->solve_index >= 0) {
-                RubikMove m = sys->scramble_moves[sys->solve_index];
-                m.dir = -m.dir; // undo, in reverse order
-                sys->current_move = m;
-                sys->anim_duration = duration;
-                sys->animating = true;
+                if (beat_now) {
+                    RubikMove m = sys->scramble_moves[sys->solve_index];
+                    m.dir = -m.dir; // undo, in reverse order
+                    sys->current_move = m;
+                    sys->anim_duration = duration;
+                    sys->animating = true;
+                }
             } else {
                 sys->phase = RUBIK_PHASE_SOLVED_PAUSE;
                 sys->phase_timer = 2.0;

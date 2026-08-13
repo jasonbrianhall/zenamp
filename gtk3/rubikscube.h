@@ -17,7 +17,9 @@
 //   - Left alone for a moment, it eases back into a gentle auto-orbit.
 //
 // Music reactivity:
-//   - Move speed scales with overall volume (louder = snappier turns).
+//   - Layer turns are strictly beat-synced: a turn only fires when a beat
+//     onset is detected in the audio, so silence/pause means the cube's
+//     sections simply stop turning (camera dragging is unaffected).
 //   - Each of the 6 sticker colors is tied to one VIS_FREQUENCY_BARS band
 //     and gets a brightness pulse from it.
 //   - Camera orbit speed follows mid-frequency energy, like pipes.cpp.
@@ -78,6 +80,10 @@ typedef struct {
     double yaw_velocity, pitch_velocity; // radians/sec, decays after a flick
     double idle_time;                    // seconds since the last user input
     double user_zoom;                    // persistent scroll-wheel zoom multiplier
+
+    // Beat detection for gating layer turns.
+    double beat_energy_avg;   // smoothed running energy, for onset comparison
+    double beat_cooldown;     // seconds until another beat trigger is allowed
 
     unsigned int rng_state;
 } RubiksCubeSystem;
