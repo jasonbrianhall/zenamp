@@ -92,7 +92,7 @@ Visualizer* visualizer_new(void) {
     init_dna_system(vis);
     init_dna2_system(vis);
     init_pipes_system(vis);
-    
+    init_rubiks_cube_system(vis);
     init_sudoku_system(vis);
     init_ripple_system(vis);
     init_bouncy_ball_system(vis);
@@ -211,6 +211,7 @@ static gboolean is_interactive_game(VisualizationType type) {
         case VIS_RABBITHARE:
         case VIS_RIPPLES:
         case VIS_ROBOT_CHASER:
+        case VIS_RUBIKS_CUBE:        
             return TRUE;
         default:
             return FALSE;
@@ -537,7 +538,10 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
           break;       
        case VIS_PIPES_3D:
           draw_pipes_system(vis, cr);
-          break;          
+          break;
+       case VIS_RUBIKS_CUBE:
+          draw_rubiks_cube_system(vis, cr);
+          break;                              
        case VIS_KARAOKE:
           draw_karaoke_boring(vis, cr);
           break;          
@@ -754,7 +758,10 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 break;
             case VIS_PIPES_3D:
                 update_pipes_system(vis, dt);
-                break;                
+                break;   
+            case VIS_RUBIKS_CUBE:
+                update_rubiks_cube_system(vis, dt);
+                break;                             
             default:
                 // No update function needed for other visualization types
                 break;
