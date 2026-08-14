@@ -595,6 +595,7 @@ void draw_karaoke_boring(Visualizer *vis, cairo_t *cr);
 void draw_karaoke_fling(Visualizer *vis, cairo_t *cr);
 void draw_cdg_overlay(Visualizer *vis, cairo_t *cr);
 
+// Pipes
 void init_pipes_system(Visualizer *vis);
 void update_pipes_system(Visualizer *vis, double dt);
 void draw_pipes_system(Visualizer *vis, cairo_t *cr);

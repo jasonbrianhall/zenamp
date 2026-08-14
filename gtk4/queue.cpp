@@ -78,6 +78,33 @@ static std::mutex g_queue_meta_mutex;
 static std::unordered_map<std::string, QueueMetaCacheEntry> g_queue_meta_cache;
 static std::atomic<bool> g_queue_meta_loader_running{false};
 
+// Coalesces display-refresh requests from the background metadata loader.
+// update_queue_display_with_filter() (grouped mode especially) does a full
+// O(queue size) rebuild of the tree store - it's not cheap. The loader used
+// to fire one unconditionally every 200 files, which is fine on a small
+// queue but on a 30k-file import can extract metadata for 200 files faster
+// than the main thread can finish one rebuild, so idle-callback requests
+// pile up faster than they drain, each one still costing O(30000) work -
+// that's what pegs the CPU and gets the window flagged "Not responding".
+// Gating on this flag means at most one refresh is ever in flight: the next
+// request is a no-op until the previous refresh has actually run, so the
+// redraw rate self-throttles to whatever the main thread can keep up with
+// instead of to how fast the background thread can chew through files.
+static std::atomic<bool> g_queue_display_refresh_pending{false};
+
+static void queue_metadata_loader_request_refresh(AudioPlayer *player) {
+    bool expected = false;
+    if (!g_queue_display_refresh_pending.compare_exchange_strong(expected, true)) {
+        return;  // a refresh is already queued/running - it'll pick up everything done so far
+    }
+    g_idle_add([](gpointer data) -> gboolean {
+        AudioPlayer *p = (AudioPlayer *)data;
+        if (p) update_queue_display_with_filter(p, false);
+        g_queue_display_refresh_pending = false;
+        return FALSE;
+    }, player);
+}
+
 // Forward declarations - these are defined further down in this file, but
 // extract_queue_item_metadata() (used by the background loader above the
 // point they're defined) needs them.
@@ -376,6 +403,7 @@ static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::stri
     SDL_Log("Queue metadata loader: extracting metadata for %zu file(s)...", paths.size());
 
     int since_last_refresh = 0;
+    size_t processed = 0;
     for (const auto &filepath : paths) {
         QueueMetaCacheEntry entry = extract_queue_item_metadata(filepath.c_str());
 
@@ -384,15 +412,20 @@ static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::stri
             g_queue_meta_cache[filepath] = entry;
         }
 
-        // Refresh the visible list every 200 files so progress is visible
-        // on very large queues, instead of blocking until everything is done.
+        processed++;
+        if (processed % 1000 == 0 || processed == paths.size()) {
+            int percent = (int)((processed * 100) / paths.size());
+            SDL_Log("  Metadata extracted for %zu / %zu files... (%d%%)", processed, paths.size(), percent);
+        }
+
+        // Ask for a refresh every 200 files so progress is visible on very
+        // large queues. queue_metadata_loader_request_refresh() coalesces
+        // these - if the main thread hasn't finished the previous redraw
+        // yet, this is a no-op instead of queueing up another expensive
+        // full rebuild on top of it.
         if (++since_last_refresh >= 200) {
             since_last_refresh = 0;
-            g_idle_add([](gpointer data) -> gboolean {
-                AudioPlayer *p = (AudioPlayer *)data;
-                if (p) update_queue_display_with_filter(p, false);
-                return FALSE;
-            }, player);
+            queue_metadata_loader_request_refresh(player);
         }
     }
 
@@ -403,11 +436,7 @@ static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::stri
     // that were added to the queue (and so became "pending") while this
     // loader was already running - that refresh will spawn a fresh loader
     // for them since the running flag is now clear.
-    g_idle_add([](gpointer data) -> gboolean {
-        AudioPlayer *p = (AudioPlayer *)data;
-        if (p) update_queue_display_with_filter(p, false);
-        return FALSE;
-    }, player);
+    queue_metadata_loader_request_refresh(player);
 }
 
 // Kicks off the background loader for `paths` if one isn't already running.

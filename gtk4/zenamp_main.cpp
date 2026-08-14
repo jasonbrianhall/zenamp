@@ -81,6 +81,15 @@ static std::string g_get_file_extension(const std::string& filepath);
 static bool g_is_supported_music_file(const std::string& filepath);
 static std::vector<std::string> g_scan_directory_recursive(const std::string& path);
 static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results);
+static void g_finish_bulk_import();
+
+// State for g_render_queue_chunk() below - needs a full definition here
+// (not just a forward declaration) since g_scan_thread_func() constructs
+// one before g_render_queue_chunk() itself is defined further down.
+struct QueueRenderState {
+    int next_index;
+};
+static gboolean g_render_queue_chunk(gpointer user_data);
 static gboolean g_on_scan_progress_update(gpointer user_data);
 static void g_scan_progress_callback(const std::string& current_file, int total_scanned);
 static gboolean g_on_scan_progress_delete(GtkWindow *window, gpointer user_data);
@@ -376,40 +385,26 @@ static gpointer g_scan_thread_func(gpointer user_data) {
 
         if (scan_data->results.size() > 0) {
             SDL_Log("Adding %zu files to queue (bulk import)...", scan_data->results.size());
-            
-            // Directly add to queue array without any UI updates or duplicate checks
-            // This matches the pattern used in load_m3u_playlist
+
+            // add_to_queue() owns growth (g_realloc) and allocation (g_strdup)
+            // for every other code path that touches the queue; the manual
+            // malloc()/realloc() duplicate that used to live here allocated
+            // with a different allocator than clear_queue()/remove_from_queue()
+            // free with (g_free), which is undefined behavior even where it
+            // happens to work. Routing through add_to_queue() keeps this path
+            // consistent with the rest of the queue's lifetime.
             for (size_t idx = 0; idx < scan_data->results.size(); idx++) {
                 const auto& file = scan_data->results[idx];
-                
-                if (player->queue.count >= player->queue.capacity) {
-                    // Resize queue if needed
-                    // If capacity is 0, start with 256; otherwise double it
-                    int new_capacity = (player->queue.capacity == 0) ? 256 : (player->queue.capacity * 2);
-                    SDL_Log("  Resizing queue from %d to %d", player->queue.capacity, new_capacity);
-                    
-                    char **new_files = (player->queue.files == NULL) 
-                        ? (char**)malloc(new_capacity * sizeof(char*))
-                        : (char**)realloc(player->queue.files, new_capacity * sizeof(char*));
-                    
-                    if (!new_files) {
-                        SDL_Log("ERROR: Failed to resize queue");
-                        break;
-                    }
-                    player->queue.files = new_files;
-                    player->queue.capacity = new_capacity;
+
+                if (!add_to_queue(&player->queue, file.c_str())) {
+                    SDL_Log("ERROR: Failed to grow queue, stopping import early");
+                    break;
                 }
-                
-                // Directly allocate and add file path
-                player->queue.files[player->queue.count] = (char*)malloc(file.length() + 1);
-                if (player->queue.files[player->queue.count]) {
-                    strcpy(player->queue.files[player->queue.count], file.c_str());
-                    player->queue.count++;
-                    
-                    // Print progress every 1000 files
-                    if ((idx + 1) % 1000 == 0) {
-                        SDL_Log("  Added %zu / %zu files...", idx + 1, scan_data->results.size());
-                    }
+
+                // Print progress every 1000 files
+                if ((idx + 1) % 1000 == 0) {
+                    int percent = (int)(((idx + 1) * 100) / scan_data->results.size());
+                    SDL_Log("  Added %zu / %zu files... (%d%%)", idx + 1, scan_data->results.size(), percent);
                 }
             }
 
@@ -421,71 +416,74 @@ static gpointer g_scan_thread_func(gpointer user_data) {
             // (slower, but grouping-aware) renderer instead.
             if (player->queue_group_mode != QUEUE_GROUP_NONE) {
                 update_queue_display_with_filter(player, false);
+                g_finish_bulk_import();
             } else if (player->queue_store) {
                 SDL_Log("Clearing queue store...");
                 gtk_list_store_clear(player->queue_store);
-                
-                SDL_Log("Rendering %d items to display...", player->queue.count);
-                for (int i = 0; i < player->queue.count; i++) {
-                    const char *filepath = player->queue.files[i];
-                    char *basename = g_path_get_basename(filepath);
-                    const char *ext = strrchr(filepath, '.');
-                    
-                    GtkTreeIter iter;
-                    gtk_list_store_append(player->queue_store, &iter);
-                    
-                    const char *indicator = (i == player->queue.current_index) ? "▶" : "";
-                    const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
-                    
-                    gtk_list_store_set(player->queue_store, &iter,
-                        COL_FILEPATH, filepath,
-                        COL_PLAYING, indicator,
-                        COL_FILENAME, basename,
-                        COL_TITLE, "(queued)",
-                        COL_ARTIST, "",
-                        COL_ALBUM, "",
-                        COL_GENRE, "",
-                        COL_DURATION, "",
-                        COL_CDGK, cdgk_indicator,
-                        COL_QUEUE_INDEX, i,
-                        -1);
-                    
-                    g_free(basename);
-                    
-                    // Keep UI responsive every 1000 items
-                    if ((i + 1) % 1000 == 0) {
-                        SDL_Log("  Rendered %d items...", i + 1);
-                        // GTK4 removed gtk_events_pending()/gtk_main_iteration();
-                        // pump the default GLib main context directly instead.
-                        while (g_main_context_pending(NULL)) {
-                            g_main_context_iteration(NULL, FALSE);
-                        }
-                    }
-                }
-                SDL_Log("Display rendering complete.");
-            }
-            
-            update_gui_state(player);
-            SDL_Log("GUI state updated.");
 
-            char msg[256];
-            snprintf(msg, sizeof(msg), "Successfully imported %d music files", player->queue.count);
-            SDL_Log("Showing completion dialog: %s", msg);
-            
-            GtkWidget *completion_dialog = gtk_message_dialog_new(
-                GTK_WINDOW(player->window),
-                GTK_DIALOG_MODAL,
-                GTK_MESSAGE_INFO,
-                GTK_BUTTONS_OK,
-                "%s", msg
-            );
-            g_signal_connect(completion_dialog, "response", G_CALLBACK(destroy_dialog_on_response), NULL);
-            gtk_window_present(GTK_WINDOW(completion_dialog));
-            SDL_Log("Completion dialog shown.");
-            
-            // Start deduplication in background thread
-            SDL_Log("Starting deduplication thread...");
-            std::thread dedup_thread([](AudioPlayer *p) {
+                // Render in chunks scheduled as their own idle-loop turns
+                // instead of looping straight through and periodically
+                // pumping the main context by hand. Reentering the main
+                // loop from inside an already-running idle callback lets
+                // OTHER pending sources fire mid-render - in particular the
+                // metadata background loader's own periodic
+                // update_queue_display_with_filter() refresh, which clears
+                // and rebuilds this same queue_store. On a small import the
+                // race window is tiny; on a large one (tens of thousands of
+                // files) it reliably gets hit, the model ends up being
+                // rebuilt out from under this loop's iterators, and the
+                // queue view stops updating with no crash and no error -
+                // it just silently "stops loading". Returning TRUE/FALSE
+                // from a real idle source avoids the reentrancy entirely.
+                QueueRenderState *render_state = new QueueRenderState{0};
+                g_idle_add(g_render_queue_chunk, render_state);
+                SDL_Log("Display rendering scheduled.");
+            } else {
+                g_finish_bulk_import();
+            }
+        } else {
+            show_info_dialog(GTK_WINDOW(player->window), "No music files found in directory");
+        }
+
+        delete scan_data;
+        if (g_scan_state) {
+            delete g_scan_state;
+            g_scan_state = nullptr;
+        }
+
+        return FALSE;
+    }, data);
+
+    return nullptr;
+}
+
+// Shared tail end of the bulk-import flow: refreshes the GUI, shows the
+// "Successfully imported N files" dialog, and kicks off the deduplication
+// pass. Called once rendering is actually complete, whether that's
+// immediately (grouped view / no queue_store) or after the last chunk of
+// g_render_queue_chunk().
+static void g_finish_bulk_import() {
+    update_gui_state(player);
+    SDL_Log("GUI state updated.");
+
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Successfully imported %d music files", player->queue.count);
+    SDL_Log("Showing completion dialog: %s", msg);
+
+    GtkWidget *completion_dialog = gtk_message_dialog_new(
+        GTK_WINDOW(player->window),
+        GTK_DIALOG_MODAL,
+        GTK_MESSAGE_INFO,
+        GTK_BUTTONS_OK,
+        "%s", msg
+    );
+    g_signal_connect(completion_dialog, "response", G_CALLBACK(destroy_dialog_on_response), NULL);
+    gtk_window_present(GTK_WINDOW(completion_dialog));
+    SDL_Log("Completion dialog shown.");
+
+    // Start deduplication in background thread
+    SDL_Log("Starting deduplication thread...");
+    std::thread dedup_thread([](AudioPlayer *p) {
                 if (!p || !p->queue.files || p->queue.count <= 1) {
                     SDL_Log("Deduplication skipped: queue too small or NULL");
                     return;
@@ -517,7 +515,8 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                     
                     // Progress update every 1000 files
                     if ((i + 1) % 1000 == 0) {
-                        SDL_Log("  Checked %d / %d files...", i + 1, p->queue.count);
+                        int percent = (int)(((i + 1) * 100) / p->queue.count);
+                        SDL_Log("  Checked %d / %d files... (%d%%)", i + 1, p->queue.count, percent);
                     }
                 }
                 
@@ -528,7 +527,10 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                 for (int i = (int)duplicates_to_remove.size() - 1; i >= 0; i--) {
                     int index = duplicates_to_remove[i];
                     if (index >= 0 && index < p->queue.count && p->queue.files[index]) {
-                        free(p->queue.files[index]);
+                        // add_to_queue() allocates with g_strdup(); free with
+                        // g_free() to match (was mismatched with malloc/free
+                        // back when the scan-import path bypassed add_to_queue()).
+                        g_free(p->queue.files[index]);
                         
                         // Shift remaining files down
                         for (int j = index; j < p->queue.count - 1; j++) {
@@ -570,22 +572,72 @@ static gpointer g_scan_thread_func(gpointer user_data) {
                         return FALSE;
                     }, p);
                 }, p).detach();
-            }, player);
-            dedup_thread.detach();
-        } else {
-            show_info_dialog(GTK_WINDOW(player->window), "No music files found in directory");
-        }
+    }, player);
+    dedup_thread.detach();
+}
 
-        delete scan_data;
-        if (g_scan_state) {
-            delete g_scan_state;
-            g_scan_state = nullptr;
-        }
+// Renders one chunk (up to QUEUE_RENDER_CHUNK_SIZE rows) of a bulk-imported
+// queue into player->queue_store, then either reschedules itself as a fresh
+// idle source for the next chunk or, once done, hands off to
+// g_finish_bulk_import(). Replaces the old approach of looping through the
+// whole queue in one go and periodically pumping the main context by hand
+// (g_main_context_iteration) to "stay responsive" - that pump reentered the
+// main loop from inside this same idle callback, letting other pending
+// sources (notably the metadata background loader's periodic display
+// refresh) rebuild/clear queue_store out from under the loop's iterators on
+// large imports. Scheduling real, separate idle turns avoids the reentrancy
+// instead of just narrowing the window.
+static const int QUEUE_RENDER_CHUNK_SIZE = 1000;
 
+static gboolean g_render_queue_chunk(gpointer user_data) {
+    QueueRenderState *state = static_cast<QueueRenderState *>(user_data);
+
+    if (!player || !player->queue_store) {
+        delete state;
         return FALSE;
-    }, data);
+    }
 
-    return nullptr;
+    int end = std::min(state->next_index + QUEUE_RENDER_CHUNK_SIZE, player->queue.count);
+
+    for (int i = state->next_index; i < end; i++) {
+        const char *filepath = player->queue.files[i];
+        char *basename = g_path_get_basename(filepath);
+        const char *ext = strrchr(filepath, '.');
+
+        GtkTreeIter iter;
+        gtk_list_store_append(player->queue_store, &iter);
+
+        const char *indicator = (i == player->queue.current_index) ? "▶" : "";
+        const char *cdgk_indicator = (ext && (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0)) ? "✓" : "";
+
+        gtk_list_store_set(player->queue_store, &iter,
+            COL_FILEPATH, filepath,
+            COL_PLAYING, indicator,
+            COL_FILENAME, basename,
+            COL_TITLE, "(queued)",
+            COL_ARTIST, "",
+            COL_ALBUM, "",
+            COL_GENRE, "",
+            COL_DURATION, "",
+            COL_CDGK, cdgk_indicator,
+            COL_QUEUE_INDEX, i,
+            -1);
+
+        g_free(basename);
+    }
+
+    int percent = (player->queue.count > 0) ? (int)((end * 100) / player->queue.count) : 100;
+    SDL_Log("  Rendered %d / %d items... (%d%%)", end, player->queue.count, percent);
+
+    if (end < player->queue.count) {
+        state->next_index = end;
+        return TRUE;  // keep this idle source; runs again on a later main-loop turn
+    }
+
+    SDL_Log("Display rendering complete.");
+    delete state;
+    g_finish_bulk_import();
+    return FALSE;
 }
 
 // GTK4's "close-request" replaces "delete-event": it hands back the window
