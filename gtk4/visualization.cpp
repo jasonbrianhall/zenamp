@@ -739,7 +739,6 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 update_mandelbrot(vis, dt);
                 break;
             case VIS_PONG:
-                // Game continues regardless of music playback
                 pong_update(vis, dt);
                 break;                                                                               
             case VIS_PSYCHEDELIC:
@@ -896,7 +895,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pipes");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Psychedelic Vortex");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Psychedelic Vortex (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Rainbow (i)");

@@ -107,6 +107,8 @@ Visualizer* visualizer_new(void) {
     init_maze3d_system(vis);
     init_minesweeper(vis);
     pong_init(vis);
+    init_psychedelic_system(vis);
+
     init_comet_buster_system(vis);
     init_monkey_system(vis);
 
@@ -529,7 +531,10 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
           break;
        case VIS_PONG:
           pong_draw(vis, cr);
-          break;    
+          break;  
+       case VIS_PSYCHEDELIC:
+          draw_psychedelic(vis, cr);
+          break;            
        case VIS_MINESWEEPER:
           minesweeper_draw(vis, cr);
           break;    
@@ -747,9 +752,11 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 update_mandelbrot(vis, dt);
                 break;
             case VIS_PONG:
-                // Game continues regardless of music playback
                 pong_update(vis, dt);
-                break;                                                                               
+                break;
+            case VIS_PSYCHEDELIC:
+                update_psychedelic(vis, dt);
+                break;                                                                                               
             case VIS_MINESWEEPER:
                 minesweeper_update(vis, dt);
                 break;
@@ -873,6 +880,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Oscilloscope (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pipes");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Pong (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Psychedelic Vortex (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Bars");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Radial Wave");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Rainbow (i)");

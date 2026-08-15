@@ -72,6 +72,7 @@ typedef enum {
     VIS_OSCILLOSCOPE,
     VIS_PIPES_3D,
     VIS_PONG,
+    VIS_PSYCHEDELIC,
     VIS_RADIAL_BARS,
     VIS_RADIAL_WAVE,
     VIS_RAINBOW,
@@ -513,6 +514,10 @@ void bouncy_ball_update_trail(BouncyBall *ball);
 void spawn_bouncy_ball_beat(Visualizer *vis, double x, double y);
 void spawn_bouncy_ball_at_position(Visualizer *vis, double x, double y, int click_type);
 
+// Psychedelic Vortex
+void init_psychedelic_system(Visualizer *vis);
+void update_psychedelic(Visualizer *vis, double dt);
+void draw_psychedelic(Visualizer *vis, cairo_t *cr);
 
 // Digital Clock
 void init_clock_system(Visualizer *vis);
