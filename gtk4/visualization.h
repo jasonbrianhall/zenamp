@@ -72,6 +72,7 @@ typedef enum {
     VIS_OSCILLOSCOPE,
     VIS_PIPES_3D,
     VIS_PONG,
+    VIS_PSYCHEDELIC,
     VIS_RADIAL_BARS,
     VIS_RADIAL_WAVE,
     VIS_RAINBOW,
@@ -795,5 +796,10 @@ bool comet_buster_check_ship_bomb_pickup(CometBusterGame *game, BombPickup *p, V
 void draw_rainbow_system(Visualizer *vis_ptr, cairo_t *cr);
 void init_rainbow_system(Visualizer *vis_ptr);
 void update_rainbow_system(Visualizer *vis, double dt);
+
+// Psychedelic Vortex
+void init_psychedelic_system(Visualizer *vis);
+void update_psychedelic(Visualizer *vis, double dt);
+void draw_psychedelic(Visualizer *vis, cairo_t *cr);
 
 #endif
