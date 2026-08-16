@@ -50,11 +50,14 @@ static double s_ff_bubble_phase = 0.0;
 static double s_ff_flap_anim = 0.0;  // tail-flap animation clock, ticks while playing
 static int s_ff_fish_palette = 0;    // random new color friend each game
 
-// Background critters: small fish drifting by, plus an octopus, purely
-// decorative and drawn behind the pipes so they never read as obstacles.
+// Background critters: small fish darting by at their own pace, plus an
+// octopus, purely decorative and drawn behind the pipes so they never read
+// as obstacles (and so they visibly vanish behind a pipe as they cross it).
 static double s_ff_bgfish_x[FF_BG_FISH_COUNT];
 static double s_ff_bgfish_y[FF_BG_FISH_COUNT];
+static double s_ff_bgfish_vy[FF_BG_FISH_COUNT];
 static double s_ff_bgfish_speed[FF_BG_FISH_COUNT];
+static int s_ff_bgfish_dir[FF_BG_FISH_COUNT];  // +1 = swims right, -1 = swims left
 static double s_ff_bgfish_scale[FF_BG_FISH_COUNT];
 static int s_ff_bgfish_palette[FF_BG_FISH_COUNT];
 static bool s_ff_bg_init = false;
@@ -62,10 +65,14 @@ static bool s_ff_bg_init = false;
 static double s_ff_octopus_x = 0.0;
 static double s_ff_octopus_y = 0.0;
 static double s_ff_octopus_speed = 0.0;
+static int s_ff_octopus_dir = -1;
 
 static const double FF_FISH_X_FRAC = 0.30;
 
 static void ff_reset(Visualizer *vis) {
+    // Only the player's own state resets here - background fish and the
+    // octopus keep swimming on their own independent cycles and are
+    // untouched by the player dying or restarting.
     s_ff_state = FF_READY;
     s_ff_fish_y = vis->height * 0.45;
     s_ff_fish_vel = 0.0;
@@ -76,6 +83,38 @@ static void ff_reset(Visualizer *vis) {
     for (int i = 0; i < FF_MAX_PIPES; i++) s_ff_pipes[i].active = false;
 }
 
+// (Re)launches one background fish from off-screen with a random direction,
+// speed, and vertical drift - independent of the player fish entirely.
+static void ff_spawn_bg_fish(Visualizer *vis, int i) {
+    int dir = (rand() % 2 == 0) ? 1 : -1;
+    s_ff_bgfish_dir[i] = dir;
+    s_ff_bgfish_speed[i] = vis->height * (0.45 + 0.85 * ((double)rand() / RAND_MAX));
+    s_ff_bgfish_vy[i] = vis->height * (-0.06 + 0.12 * ((double)rand() / RAND_MAX));
+    s_ff_bgfish_y[i] = vis->height * 0.10 + (double)rand() / RAND_MAX * vis->height * 0.58;
+    s_ff_bgfish_scale[i] = 0.30 + 0.35 * ((double)rand() / RAND_MAX);
+    s_ff_bgfish_palette[i] = rand() % FF_FISH_PALETTE_COUNT;
+    if (dir < 0) {
+        s_ff_bgfish_x[i] = vis->width * (1.05 + 0.3 * ((double)rand() / RAND_MAX));
+    } else {
+        s_ff_bgfish_x[i] = -vis->width * (0.05 + 0.3 * ((double)rand() / RAND_MAX));
+    }
+}
+
+// (Re)launches the octopus from off-screen - entirely separate cycle from
+// the small background fish and from the player fish, so it never resets
+// or freezes just because the player died or restarted.
+static void ff_spawn_octopus(Visualizer *vis) {
+    int dir = (rand() % 2 == 0) ? 1 : -1;
+    s_ff_octopus_dir = dir;
+    s_ff_octopus_speed = vis->height * (0.07 + 0.10 * ((double)rand() / RAND_MAX));
+    s_ff_octopus_y = vis->height * (0.42 + 0.28 * ((double)rand() / RAND_MAX));
+    if (dir < 0) {
+        s_ff_octopus_x = vis->width * (1.05 + 0.25 * ((double)rand() / RAND_MAX));
+    } else {
+        s_ff_octopus_x = -vis->width * (0.05 + 0.25 * ((double)rand() / RAND_MAX));
+    }
+}
+
 static void ff_init_background(Visualizer *vis) {
     if (s_ff_bg_init) return;
     // Called once at app startup before the canvas is sized, so width/height
@@ -83,15 +122,13 @@ static void ff_init_background(Visualizer *vis) {
     // zeroed-out positions and speeds that would freeze everything at (0,0).
     if (vis->width <= 0 || vis->height <= 0) return;
     for (int i = 0; i < FF_BG_FISH_COUNT; i++) {
+        ff_spawn_bg_fish(vis, i);
+        // Scatter the initial batch across the visible width instead of all
+        // starting off-screen, so the tank doesn't look empty on launch.
         s_ff_bgfish_x[i] = (double)rand() / RAND_MAX * vis->width;
-        s_ff_bgfish_y[i] = vis->height * 0.12 + (double)rand() / RAND_MAX * vis->height * 0.55;
-        s_ff_bgfish_speed[i] = vis->height * (0.05 + 0.06 * ((double)rand() / RAND_MAX));
-        s_ff_bgfish_scale[i] = 0.35 + 0.35 * ((double)rand() / RAND_MAX);
-        s_ff_bgfish_palette[i] = rand() % FF_FISH_PALETTE_COUNT;
     }
+    ff_spawn_octopus(vis);
     s_ff_octopus_x = (double)rand() / RAND_MAX * vis->width;
-    s_ff_octopus_y = vis->height * 0.60;
-    s_ff_octopus_speed = vis->height * 0.035;
     s_ff_bg_init = true;
 }
 
@@ -131,22 +168,27 @@ void update_flappy_fish(Visualizer *vis, double dt) {
     ff_init_background(vis);
     s_ff_bubble_phase += dt;
 
-    // Background critters swim by regardless of game state.
+    // Background critters dart around independently of the player fish.
+    double band_lo = vis->height * 0.08, band_hi = vis->height * 0.72;
     for (int i = 0; i < FF_BG_FISH_COUNT; i++) {
-        s_ff_bgfish_x[i] -= s_ff_bgfish_speed[i] * dt;
-        if (s_ff_bgfish_x[i] < -vis->width * 0.08) {
-            s_ff_bgfish_x[i] = vis->width * (1.05 + 0.1 * ((double)rand() / RAND_MAX));
-            s_ff_bgfish_y[i] = vis->height * 0.12 + (double)rand() / RAND_MAX * vis->height * 0.55;
-            s_ff_bgfish_speed[i] = vis->height * (0.05 + 0.06 * ((double)rand() / RAND_MAX));
-            s_ff_bgfish_scale[i] = 0.35 + 0.35 * ((double)rand() / RAND_MAX);
-            s_ff_bgfish_palette[i] = rand() % FF_FISH_PALETTE_COUNT;
+        s_ff_bgfish_x[i] += s_ff_bgfish_dir[i] * s_ff_bgfish_speed[i] * dt;
+        s_ff_bgfish_y[i] += s_ff_bgfish_vy[i] * dt;
+
+        // Gentle bounce so the vertical drift doesn't wander off the top/bottom.
+        if (s_ff_bgfish_y[i] < band_lo) { s_ff_bgfish_y[i] = band_lo; s_ff_bgfish_vy[i] *= -1; }
+        if (s_ff_bgfish_y[i] > band_hi) { s_ff_bgfish_y[i] = band_hi; s_ff_bgfish_vy[i] *= -1; }
+
+        bool off_left  = s_ff_bgfish_dir[i] < 0 && s_ff_bgfish_x[i] < -vis->width * 0.12;
+        bool off_right = s_ff_bgfish_dir[i] > 0 && s_ff_bgfish_x[i] > vis->width * 1.12;
+        if (off_left || off_right) {
+            ff_spawn_bg_fish(vis, i);
         }
     }
-    s_ff_octopus_x -= s_ff_octopus_speed * dt;
-    if (s_ff_octopus_x < -vis->width * 0.12) {
-        s_ff_octopus_x = vis->width * 1.1;
-        s_ff_octopus_y = vis->height * (0.5 + 0.18 * ((double)rand() / RAND_MAX));
-        s_ff_octopus_speed = vis->height * (0.03 + 0.03 * ((double)rand() / RAND_MAX));
+    s_ff_octopus_x += s_ff_octopus_dir * s_ff_octopus_speed * dt;
+    bool oct_off_left  = s_ff_octopus_dir < 0 && s_ff_octopus_x < -vis->width * 0.15;
+    bool oct_off_right = s_ff_octopus_dir > 0 && s_ff_octopus_x > vis->width * 1.15;
+    if (oct_off_left || oct_off_right) {
+        ff_spawn_octopus(vis);
     }
 
     double pipe_width = vis->height * 0.16;
@@ -306,11 +348,13 @@ static void ff_draw_fish(cairo_t *cr, double x, double y, double radius, double 
 }
 
 // Small, dim, background-layer fish - same silhouette as the player's fish
-// but simplified and translucent so they clearly read as scenery.
+// but simplified and translucent so they clearly read as scenery. Faces the
+// direction it's actually swimming.
 static void ff_draw_bg_fish(cairo_t *cr, double x, double y, double radius, double phase,
-                             const FFFishPalette *pal) {
+                             const FFFishPalette *pal, int dir) {
     cairo_save(cr);
     cairo_translate(cr, x, y);
+    cairo_scale(cr, (double)dir, 1.0);
     double tail_swing = sin(phase * 6.0) * 0.5;
     double alpha = 0.5;
 
@@ -340,12 +384,14 @@ static void ff_draw_bg_fish(cairo_t *cr, double x, double y, double radius, doub
 
 // A drifting octopus - round mantle plus wavy tentacles animated like the
 // wing-curves in drawtrippy.cpp, drawn dim and translucent as background.
-static void ff_draw_octopus(cairo_t *cr, double x, double y, double scale, double t) {
+// alpha_mult fades it out as it nears/crosses the screen edges.
+static void ff_draw_octopus(cairo_t *cr, double x, double y, double scale, double t, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
     cairo_save(cr);
     cairo_translate(cr, x, y);
     cairo_scale(cr, scale, scale);
 
-    double alpha = 0.45;
+    double alpha = 0.45 * alpha_mult;
     cairo_set_source_rgba(cr, 0.55, 0.35, 0.75, alpha);
 
     // Tentacles - wavy curves trailing below the mantle.
@@ -402,6 +448,18 @@ static void ff_draw_pipe_segment(cairo_t *cr, double x, double y0, double y1, do
     cairo_stroke(cr);
 }
 
+// Smoothly fades a critter to transparent as it nears/crosses either screen
+// edge, so it visibly dissolves instead of popping in/out at the boundary.
+static double ff_edge_fade(double x, double w) {
+    double fade_zone = w * 0.15;
+    double fade = 1.0;
+    if (x < fade_zone) fade = x / fade_zone;
+    else if (x > w - fade_zone) fade = (w - x) / fade_zone;
+    if (fade < 0.0) fade = 0.0;
+    if (fade > 1.0) fade = 1.0;
+    return fade;
+}
+
 void draw_flappy_fish(Visualizer *vis, cairo_t *cr) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
@@ -444,12 +502,13 @@ void draw_flappy_fish(Visualizer *vis, cairo_t *cr) {
 
     // Little background friends - fish and an octopus drifting behind the
     // pipes, purely decorative.
-    ff_draw_octopus(cr, s_ff_octopus_x, s_ff_octopus_y, 1.0, vis->time_offset);
+    ff_draw_octopus(cr, s_ff_octopus_x, s_ff_octopus_y, 1.0, vis->time_offset,
+                     ff_edge_fade(s_ff_octopus_x, w));
     for (int i = 0; i < FF_BG_FISH_COUNT; i++) {
         const FFFishPalette *bg_pal = &FF_FISH_PALETTES[s_ff_bgfish_palette[i]];
         double bg_radius = fish_radius * s_ff_bgfish_scale[i];
         ff_draw_bg_fish(cr, s_ff_bgfish_x[i], s_ff_bgfish_y[i], bg_radius,
-                         vis->time_offset + i * 1.3, bg_pal);
+                         vis->time_offset + i * 1.3, bg_pal, s_ff_bgfish_dir[i]);
     }
 
     // Pipes (coral/kelp tubes).
