@@ -279,6 +279,11 @@ void init_floppy_fish_system(Visualizer *vis) {
     s_ff_bg_init = false;
     ff_reset(vis);
     ff_init_background(vis);
+#ifdef FLOPPYSOUND
+    vis->sound_flap=false;
+    vis->sound_score=false;
+    vis->sound_dead=false;
+#endif
 }
 
 static void ff_flap(Visualizer *vis) {
@@ -325,6 +330,7 @@ void update_floppy_fish(Visualizer *vis, double dt) {
 #ifdef FLOPPYSOUND
     vis->sound_flap = false;
     vis->sound_score = false;
+    vis->sound_dead = false;  
 #endif
     ff_init_background(vis);
     s_ff_bubble_phase += dt;
@@ -454,7 +460,7 @@ void update_floppy_fish(Visualizer *vis, double dt) {
             }
 
             // Circle-vs-rect collision against the top and bottom coral
-            // columns. The coral is drawn scaled down to guarantee its jags
+            // columns. The corals is drawn scaled down to guarantee its jags
             // never reach past this exact box, so no padding is needed here.
             double gap = vis->height * 0.24;
             double top_rect_y0 = 0, top_rect_y1 = s_ff_pipes[i].gap_center - gap * 0.5;
@@ -486,6 +492,12 @@ void update_floppy_fish(Visualizer *vis, double dt) {
         s_ff_fish_y = fish_radius;
         if (s_ff_fish_vel < 0) s_ff_fish_vel = 0.0;
     }
+#ifdef FLOPPYSOUND
+    if(s_ff_state==FF_GAME_OVER) {
+        if(vis->deadcounter<2) vis->deadcounter++;
+        if(vis->deadcounter==1) vis->sound_dead=true;
+    }
+#endif
 }
 
 static void ff_draw_fish(cairo_t *cr, double x, double y, double radius, double rotation,
@@ -1506,7 +1518,11 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
         // Click to Start Text
         cairo_set_font_size(cr, h * 0.045);
         cairo_set_source_rgba(cr, 1.0, 0.0, 0.0, 0.95);
+#ifdef FLOPPYSOUND
+        const char *msg2 = "Click to Start or Escape to Exit";
+#else
         const char *msg2 = "Click to Start";
+#endif
         cairo_text_extents(cr, msg2, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.68);
         cairo_show_text(cr, msg2);
@@ -1527,13 +1543,17 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
         cairo_show_text(cr, msg);
 
         cairo_set_font_size(cr, h * 0.032);
-        char best_text[32];
+        char best_text[50];
         snprintf(best_text, sizeof(best_text), "Best: %d", s_ff_best_score);
         cairo_text_extents(cr, best_text, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.52);
         cairo_show_text(cr, best_text);
 
+#ifdef FLOPPYSOUND
+        snprintf(best_text, sizeof(best_text), "Left Click to Restart or Escape to Quit");
+#else
         snprintf(best_text, sizeof(best_text), "Left Click to Restart");
+#endif
         cairo_text_extents(cr, best_text, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.56);
         cairo_show_text(cr, best_text);
