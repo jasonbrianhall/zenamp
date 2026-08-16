@@ -132,7 +132,7 @@ static void ff_init_background(Visualizer *vis) {
     s_ff_bg_init = true;
 }
 
-void init_flappy_fish_system(Visualizer *vis) {
+void init_floppy_fish_system(Visualizer *vis) {
     s_ff_best_score = 0;
     s_ff_bg_init = false;
     ff_reset(vis);
@@ -162,7 +162,7 @@ static void ff_spawn_pipe(Visualizer *vis) {
     }
 }
 
-void update_flappy_fish(Visualizer *vis, double dt) {
+void update_floppy_fish(Visualizer *vis, double dt) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
     ff_init_background(vis);
@@ -460,7 +460,7 @@ static double ff_edge_fade(double x, double w) {
     return fade;
 }
 
-void draw_flappy_fish(Visualizer *vis, cairo_t *cr) {
+void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
     double w = vis->width, h = vis->height;

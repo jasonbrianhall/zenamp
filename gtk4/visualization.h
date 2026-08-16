@@ -61,7 +61,7 @@ typedef enum {
     VIS_PARROT,
     VIS_DIGITAL_CLOCK,
     VIS_FIREWORKS,
-    VIS_FLAPPY_FISH,
+    VIS_FLOPPY_FISH,
     VIS_FOURIER_TRANSFORM,
     VIS_FRACTAL_BLOOM,
     VIS_RABBITHARE,
@@ -803,9 +803,9 @@ void init_psychedelic_system(Visualizer *vis);
 void update_psychedelic(Visualizer *vis, double dt);
 void draw_psychedelic(Visualizer *vis, cairo_t *cr);
 
-// Flappy Fish
-void init_flappy_fish_system(Visualizer *vis);
-void update_flappy_fish(Visualizer *vis, double dt);
-void draw_flappy_fish(Visualizer *vis, cairo_t *cr);
+// Floppy Fish
+void init_floppy_fish_system(Visualizer *vis);
+void update_floppy_fish(Visualizer *vis, double dt);
+void draw_floppy_fish(Visualizer *vis, cairo_t *cr);
 
 #endif

@@ -108,7 +108,7 @@ Visualizer* visualizer_new(void) {
     init_minesweeper(vis);
     pong_init(vis);
     init_psychedelic_system(vis);
-    init_flappy_fish_system(vis);
+    init_floppy_fish_system(vis);
     init_comet_buster_system(vis);
     init_monkey_system(vis);
 
@@ -203,7 +203,7 @@ static gboolean is_interactive_game(VisualizationType type) {
         case VIS_BUBBLES:
         case VIS_COMET_BUSTER:
         case VIS_FIREWORKS:
-        case VIS_FLAPPY_FISH:
+        case VIS_FLOPPY_FISH:
         case VIS_MATRIX:
         case VIS_MINESWEEPER:
         case VIS_PONG:
@@ -537,8 +537,8 @@ void on_visualizer_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height
        case VIS_PSYCHEDELIC:
           draw_psychedelic(vis, cr);
           break;
-       case VIS_FLAPPY_FISH:
-          draw_flappy_fish(vis, cr);
+       case VIS_FLOPPY_FISH:
+          draw_floppy_fish(vis, cr);
           break;
        case VIS_MINESWEEPER:
           minesweeper_draw(vis, cr);
@@ -750,8 +750,8 @@ gboolean visualizer_timer_callback(gpointer user_data) {
             case VIS_PSYCHEDELIC:
                 update_psychedelic(vis, dt);
                 break;
-            case VIS_FLAPPY_FISH:
-                update_flappy_fish(vis, dt);
+            case VIS_FLOPPY_FISH:
+                update_floppy_fish(vis, dt);
                 break;
             case VIS_MINESWEEPER:
                 minesweeper_update(vis, dt);
@@ -893,7 +893,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Dancing Parrot");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Digital Clock");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fireworks (i)");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Flappy Fish (i)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Floppy Fish (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fourier Transform");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fractal Bloom (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Hare/Turtle Race (i)");
