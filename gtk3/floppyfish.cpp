@@ -18,6 +18,61 @@
 // is still guaranteed to be within the collision box.
 #define FF_CORAL_SCALE 0.55
 
+// Three visual themes the run cycles through as the fish travels: coral
+// reef, a sunken pirate ship, and a dark cave. s_ff_world_x is the total
+// scroll distance covered so far (reset each run, paused unless actively
+// playing) and picks which theme zone the camera is currently in. Zone
+// length and the crossfade band between zones are both in units of
+// vis->height, same as every other size in this file, so they scale with
+// resolution consistently.
+typedef enum { FF_THEME_REEF = 0, FF_THEME_SHIP = 1, FF_THEME_CAVE = 2, FF_THEME_COUNT = 3 } FFTheme;
+#define FF_ZONE_LEN_FRAC   18.0
+#define FF_ZONE_TRANS_FRAC  4.0
+
+static double s_ff_world_x = 0.0;
+
+// Which theme each zone index uses, generated lazily (and randomly) the
+// first time each index is reached rather than fixed in advance, then
+// cached forever after so revisiting the same index is stable. Wraps after
+// FF_ZONE_CACHE_MAX zones (~4 hours of continuous play at the default zone
+// length) and just reuses the same random order from there rather than
+// growing unboundedly.
+#define FF_ZONE_CACHE_MAX 256
+static int s_ff_zone_themes[FF_ZONE_CACHE_MAX];
+static int s_ff_zone_cache_count = 0;
+
+static int ff_zone_theme(int idx) {
+    int slot = ((idx % FF_ZONE_CACHE_MAX) + FF_ZONE_CACHE_MAX) % FF_ZONE_CACHE_MAX;
+    while (s_ff_zone_cache_count <= slot) {
+        int prev = (s_ff_zone_cache_count > 0) ? s_ff_zone_themes[s_ff_zone_cache_count - 1] : -1;
+        int pick;
+        do {
+            pick = rand() % FF_THEME_COUNT;
+        } while (pick == prev); // never the same theme twice in a row
+        s_ff_zone_themes[s_ff_zone_cache_count] = pick;
+        s_ff_zone_cache_count++;
+    }
+    return s_ff_zone_themes[slot];
+}
+
+// Works out which theme "zone" a world-scroll position falls in, the next
+// theme it's approaching, and how far into the crossfade band toward it
+// this position is (0 = fully theme_from, 1 = fully theme_to). Shared by
+// the background crossfade in draw_floppy_fish and by ff_spawn_pipe (to
+// decide what a newly-born obstacle looks like). The zone *order* is
+// randomized (see ff_zone_theme) - only each zone's own length is fixed.
+static void ff_theme_at(double world_x, double zone_len, double trans_len,
+                         int *theme_from, int *theme_to, double *blend_t) {
+    if (world_x < 0) world_x = 0;
+    int idx = (int)floor(world_x / zone_len);
+    double pos_in_zone = world_x - idx * zone_len;
+    *theme_from = ff_zone_theme(idx);
+    *theme_to = ff_zone_theme(idx + 1);
+    *blend_t = (pos_in_zone > zone_len - trans_len)
+                   ? (pos_in_zone - (zone_len - trans_len)) / trans_len
+                   : 0.0;
+}
+
 typedef enum { FF_READY, FF_PLAYING, FF_GAME_OVER } FFState;
 
 typedef struct {
@@ -25,6 +80,7 @@ typedef struct {
     double gap_center;
     bool scored;
     bool active;
+    int theme; // which zone this obstacle was spawned in (FFTheme) - fixed for its lifetime
 } FFPipe;
 
 // A handful of friendly color schemes so the player's fish looks different
@@ -109,6 +165,8 @@ static void ff_reset(Visualizer *vis) {
     s_ff_rotation = 0.0;
     s_ff_score = 0;
     s_ff_spawn_timer = 0.0;
+    s_ff_world_x = 0.0;
+    s_ff_zone_cache_count = 0;
     s_ff_fish_palette = rand() % FF_FISH_PALETTE_COUNT;
     for (int i = 0; i < FF_MAX_PIPES; i++) s_ff_pipes[i].active = false;
 }
@@ -225,6 +283,9 @@ void init_floppy_fish_system(Visualizer *vis) {
 
 static void ff_flap(Visualizer *vis) {
     s_ff_fish_vel = -vis->height * 0.62;
+#ifdef FLOPPYSOUND
+    vis->sound_flap = true;
+#endif
 }
 
 static void ff_spawn_pipe(Visualizer *vis) {
@@ -238,9 +299,19 @@ static void ff_spawn_pipe(Visualizer *vis) {
         if (hi < lo) hi = lo;
         double gap_center = lo + (double)rand() / RAND_MAX * (hi - lo);
 
+        // Theme is decided by where this obstacle spawns in world-space
+        // (the right edge, i.e. how far the camera has traveled plus one
+        // screen width ahead) so it matches whatever zone it scrolls into
+        // view from, and then never changes for the rest of its lifetime.
+        double zone_len = vis->height * FF_ZONE_LEN_FRAC;
+        double trans_len = vis->height * FF_ZONE_TRANS_FRAC;
+        int tf, tt; double bt;
+        ff_theme_at(s_ff_world_x + vis->width, zone_len, trans_len, &tf, &tt, &bt);
+
         s_ff_pipes[i].x = vis->width;
         s_ff_pipes[i].gap_center = gap_center;
         s_ff_pipes[i].scored = false;
+        s_ff_pipes[i].theme = (bt > 0.5) ? tt : tf;
         s_ff_pipes[i].active = true;
         return;
     }
@@ -249,6 +320,12 @@ static void ff_spawn_pipe(Visualizer *vis) {
 void update_floppy_fish(Visualizer *vis, double dt) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
+    // One-shot per-frame event flags for the host to pick up right after
+    // this call returns - reset here so each flap/score is a single pulse.
+#ifdef FLOPPYSOUND
+    vis->sound_flap = false;
+    vis->sound_score = false;
+#endif
     ff_init_background(vis);
     s_ff_bubble_phase += dt;
 
@@ -346,6 +423,11 @@ void update_floppy_fish(Visualizer *vis, double dt) {
     s_ff_rotation = tilt * 0.55;
 
     if (playing) {
+        // World-scroll distance drives which theme zone we're in - paused
+        // whenever the run isn't actively progressing (ready/game-over),
+        // same as the pipes themselves.
+        s_ff_world_x += pipe_speed * dt;
+
         // Scroll and recycle pipes.
         s_ff_spawn_timer -= dt;
         if (s_ff_spawn_timer <= 0.0) {
@@ -366,6 +448,9 @@ void update_floppy_fish(Visualizer *vis, double dt) {
                 s_ff_pipes[i].scored = true;
                 s_ff_score++;
                 if (s_ff_score > s_ff_best_score) s_ff_best_score = s_ff_score;
+#ifdef FLOPPYSOUND
+                vis->sound_score = true;
+#endif
             }
 
             // Circle-vs-rect collision against the top and bottom coral
@@ -595,20 +680,30 @@ static void ff_draw_shark(cairo_t *cr, double x, double y, double t, int dir, do
     cairo_restore(cr);
 }
 
-// A little cluster of swaying seaweed strands rooted at the floor. Each
-// strand sways on its own phase so the clump doesn't move as one rigid
-// piece. Drawn as open, dim, thick-stroked curves rather than filled shapes
-// so they read as thin fronds rather than solid blobs.
-static void ff_draw_seaweed(cairo_t *cr, double x, double base_y, double height, double t) {
+// A little cluster of swaying floor decoration strands, rooted at the
+// floor - reef seaweed fronds, ship rope/plank debris, or glowing cave
+// crystal shards depending on `theme`. Each strand sways on its own phase
+// so the clump doesn't move as one rigid piece (cave crystals sway only
+// slightly, reading as more rigid). `alpha_mult` lets the same slot draw
+// more than one theme's decoration at once, faded, to crossfade smoothly
+// as the zone changes.
+static void ff_draw_seaweed(cairo_t *cr, double x, double base_y, double height, double t,
+                             int theme, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
+    double r, g, b, a, sway_mult;
+    if (theme == FF_THEME_SHIP) { r = 0.30; g = 0.20; b = 0.10; a = 0.70; sway_mult = 0.8; }
+    else if (theme == FF_THEME_CAVE) { r = 0.55; g = 0.80; b = 0.95; a = 0.55; sway_mult = 0.25; }
+    else { r = 0.16; g = 0.42; b = 0.28; a = 0.55; sway_mult = 1.0; }
+
     int strands = 3;
     for (int i = 0; i < strands; i++) {
         double sx = x + (i - 1) * height * 0.14;
         double sh = height * (0.75 + 0.25 * (i % 2));
         double phase = t * 1.1 + i * 1.7;
-        double sway1 = sin(phase) * sh * 0.16;
-        double sway2 = sin(phase * 0.8 + 0.6) * sh * 0.30;
+        double sway1 = sin(phase) * sh * 0.16 * sway_mult;
+        double sway2 = sin(phase * 0.8 + 0.6) * sh * 0.30 * sway_mult;
 
-        cairo_set_source_rgba(cr, 0.16, 0.42, 0.28, 0.55);
+        cairo_set_source_rgba(cr, r, g, b, a * alpha_mult);
         cairo_set_line_width(cr, sh * 0.05);
         cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
         cairo_move_to(cr, sx, base_y);
@@ -806,6 +901,250 @@ static void ff_draw_coral_column(cairo_t *cr, double x, double y0, double y1,
     }
 }
 
+// --- Pirate ship theme -----------------------------------------------------
+
+typedef struct {
+    double wood_r, wood_g, wood_b;
+    double wood_dark_r, wood_dark_g, wood_dark_b;
+    double band_r, band_g, band_b;
+} FFShipPalette;
+
+static const FFShipPalette FF_SHIP_PALETTES[] = {
+    {0.55, 0.36, 0.18,  0.35, 0.22, 0.10,  0.18, 0.18, 0.20}, // oak / iron bands
+    {0.42, 0.26, 0.14,  0.26, 0.15, 0.08,  0.55, 0.45, 0.20}, // mahogany / brass bands
+    {0.48, 0.42, 0.34,  0.30, 0.26, 0.20,  0.14, 0.14, 0.16}, // weathered grey wood
+};
+#define FF_SHIP_PALETTE_COUNT (int)(sizeof(FF_SHIP_PALETTES) / sizeof(FF_SHIP_PALETTES[0]))
+
+// A rectangular wooden beam segment with plank seams and grain streaks.
+static void ff_draw_ship_beam(cairo_t *cr, double cx, double cy, double w, double h,
+                               double seed, const FFShipPalette *pal) {
+    double x0 = cx - w * 0.5, y0 = cy - h * 0.5;
+    cairo_set_source_rgb(cr, pal->wood_r, pal->wood_g, pal->wood_b);
+    cairo_rectangle(cr, x0, y0, w, h);
+    cairo_fill(cr);
+
+    cairo_set_source_rgba(cr, pal->wood_dark_r, pal->wood_dark_g, pal->wood_dark_b, 0.55);
+    cairo_set_line_width(cr, fmax(1.0, h * 0.05));
+    for (int i = 1; i < 3; i++) {
+        double py = y0 + h * i / 3.0;
+        cairo_move_to(cr, x0, py);
+        cairo_line_to(cr, x0 + w, py);
+        cairo_stroke(cr);
+    }
+    cairo_set_line_width(cr, fmax(1.0, w * 0.035));
+    for (int i = 0; i < 3; i++) {
+        double gx = x0 + w * (0.2 + 0.3 * i) + (ff_coral_hash(seed * 3.3 + i) - 0.5) * w * 0.08;
+        cairo_move_to(cr, gx, y0 + h * 0.08);
+        cairo_line_to(cr, gx, y0 + h * 0.92);
+        cairo_stroke(cr);
+    }
+
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+    cairo_set_line_width(cr, 2.0);
+    cairo_rectangle(cr, x0, y0, w, h);
+    cairo_stroke(cr);
+}
+
+// A barrel: an ellipse body plus two metal bands.
+static void ff_draw_ship_barrel(cairo_t *cr, double cx, double cy, double w, double h,
+                                 const FFShipPalette *pal) {
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy);
+    cairo_scale(cr, w * 0.5, h * 0.5);
+    cairo_set_source_rgb(cr, fmin(1.0, pal->wood_r * 1.08), fmin(1.0, pal->wood_g * 1.05), pal->wood_b);
+    cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.45);
+    cairo_set_line_width(cr, 2.0);
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy);
+    cairo_scale(cr, w * 0.5, h * 0.5);
+    cairo_arc(cr, 0, 0, 1.0, 0, 2 * M_PI);
+    cairo_restore(cr);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgb(cr, pal->band_r, pal->band_g, pal->band_b);
+    cairo_set_line_width(cr, fmax(1.0, h * 0.12));
+    cairo_move_to(cr, cx - w * 0.48, cy - h * 0.22);
+    cairo_line_to(cr, cx + w * 0.48, cy - h * 0.22);
+    cairo_stroke(cr);
+    cairo_move_to(cr, cx - w * 0.48, cy + h * 0.22);
+    cairo_line_to(cr, cx + w * 0.48, cy + h * 0.22);
+    cairo_stroke(cr);
+}
+
+// Draws one obstacle column as alternating wooden beams and barrels, with a
+// small mast/yard-arm-and-flag cluster at the gap-facing tip in place of the
+// coral head. Purely rectilinear (no random reach), so unlike coral it never
+// needs a safety scale-down to stay inside the collision box - beams/barrels
+// are sized directly from `width` and the yard arm/flag are hand-clamped to
+// stay well inside it.
+static void ff_draw_ship_column(cairo_t *cr, double x, double y0, double y1,
+                                 double width, double seed, bool tip_at_y1) {
+    if (y1 <= y0) return;
+    const FFShipPalette *pal =
+        &FF_SHIP_PALETTES[(int)(ff_coral_hash(seed * 41.0) * 97.0) % FF_SHIP_PALETTE_COUNT];
+
+    double cx = x + width * 0.5;
+    double total_h = y1 - y0;
+    double seg_h = width * 0.62;
+    int segs = (int)fmax(2.0, round(total_h / seg_h));
+    seg_h = total_h / segs;
+
+    for (int i = 0; i < segs; i++) {
+        double seg_y = y0 + (i + 0.5) * seg_h;
+        bool barrel = ((i % 2) == 0) == tip_at_y1;
+        double jitter = (ff_coral_hash(seed * 7.7 + i * 1.9) - 0.5) * width * 0.06;
+        double seg_w = width * 0.88;
+        double seg_hh = seg_h * 0.92;
+        if (barrel) {
+            ff_draw_ship_barrel(cr, cx + jitter, seg_y, seg_w, seg_hh, pal);
+        } else {
+            ff_draw_ship_beam(cr, cx + jitter, seg_y, seg_w, seg_hh, seed + i * 3.1, pal);
+        }
+    }
+
+    // Mast post + yard arm + flag right at the gap-facing tip, entirely on
+    // the rooted side of the boundary so nothing pokes into the gap itself.
+    double tip_y = tip_at_y1 ? y1 : y0;
+    double inward = tip_at_y1 ? -1.0 : 1.0;
+    double post_h = fmin(width * 0.5, total_h * 0.9);
+    double post_cy = tip_y + inward * post_h * 0.5;
+    ff_draw_ship_beam(cr, cx, post_cy, width * 0.28, post_h, seed * 13.0, pal);
+
+    double arm_y = tip_y + inward * width * 0.10;
+    double arm_len = width * 0.30;
+    cairo_set_source_rgb(cr, pal->wood_dark_r, pal->wood_dark_g, pal->wood_dark_b);
+    cairo_set_line_width(cr, fmax(1.0, width * 0.08));
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_move_to(cr, cx - arm_len, arm_y);
+    cairo_line_to(cr, cx + arm_len, arm_y);
+    cairo_stroke(cr);
+
+    // Jolly Roger - a black flag with a small skull-and-crossbones, the one
+    // symbol that unmistakably says "pirate" at a glance.
+    double flag_x = cx + arm_len;
+    double flag_w = width * 0.15, flag_h = width * 0.13;
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.08);
+    cairo_move_to(cr, flag_x, arm_y - flag_h * 0.5);
+    cairo_line_to(cr, flag_x + flag_w, arm_y);
+    cairo_line_to(cr, flag_x, arm_y + flag_h * 0.5);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    double skx = flag_x + flag_w * 0.38, sky = arm_y;
+    double skr = flag_h * 0.22;
+    cairo_set_line_width(cr, fmax(1.0, flag_h * 0.07));
+    cairo_set_source_rgb(cr, 0.94, 0.94, 0.90);
+    cairo_move_to(cr, skx - skr, sky + skr * 0.9);
+    cairo_line_to(cr, skx + skr, sky - skr * 0.9);
+    cairo_stroke(cr);
+    cairo_move_to(cr, skx - skr, sky - skr * 0.9);
+    cairo_line_to(cr, skx + skr, sky + skr * 0.9);
+    cairo_stroke(cr);
+    cairo_arc(cr, skx, sky, skr, 0, 2 * M_PI);
+    cairo_fill(cr);
+    cairo_set_source_rgb(cr, 0.08, 0.08, 0.08);
+    cairo_arc(cr, skx - skr * 0.35, sky - skr * 0.1, skr * 0.22, 0, 2 * M_PI);
+    cairo_fill(cr);
+    cairo_arc(cr, skx + skr * 0.35, sky - skr * 0.1, skr * 0.22, 0, 2 * M_PI);
+    cairo_fill(cr);
+}
+
+// --- Dark cave theme --------------------------------------------------------
+
+typedef struct {
+    double rock_r, rock_g, rock_b;
+    double crystal_r, crystal_g, crystal_b;
+} FFCavePalette;
+
+static const FFCavePalette FF_CAVE_PALETTES[] = {
+    {0.16, 0.15, 0.21,  0.45, 0.85, 0.95}, // dark slate / cyan crystal
+    {0.14, 0.11, 0.17,  0.75, 0.45, 0.95}, // near-black / purple crystal
+    {0.19, 0.13, 0.13,  0.95, 0.55, 0.30}, // dark red rock / amber crystal
+    {0.11, 0.16, 0.15,  0.50, 0.95, 0.65}, // dark green rock / green crystal
+};
+#define FF_CAVE_PALETTE_COUNT (int)(sizeof(FF_CAVE_PALETTES) / sizeof(FF_CAVE_PALETTES[0]))
+
+// A jagged stalactite/stalagmite: a polygon tapering from full width at the
+// rooted end down to a point at the gap-facing tip, with per-segment jitter
+// scaled to that segment's own remaining half-width - so however jagged it
+// gets, it can never reach past the pipe_width edges it started from, no
+// clipping or scale-down needed. A handful of small glowing crystal flecks
+// are studded along it for color and to sell the "cave" read.
+static void ff_draw_cave_column(cairo_t *cr, double x, double y0, double y1,
+                                 double width, double seed, bool tip_at_y1) {
+    if (y1 <= y0) return;
+    const FFCavePalette *pal =
+        &FF_CAVE_PALETTES[(int)(ff_coral_hash(seed * 53.0) * 97.0) % FF_CAVE_PALETTE_COUNT];
+
+    double cx = x + width * 0.5;
+    const int segs = 7;
+    double leftx[segs + 1], rightx[segs + 1], ys[segs + 1], halfs[segs + 1];
+    for (int i = 0; i <= segs; i++) {
+        double t = (double)i / segs;
+        double y = y0 + t * (y1 - y0);
+        double tip_t = tip_at_y1 ? t : 1.0 - t; // 0 at rooted end, 1 at the point
+        double half = width * 0.5 * (1.0 - tip_t);
+        double jl = 0.70 + 0.30 * ff_coral_hash(seed * 5.1 + i * 1.7);
+        double jr = 0.70 + 0.30 * ff_coral_hash(seed * 6.3 + i * 2.1);
+        leftx[i] = cx - half * jl;
+        rightx[i] = cx + half * jr;
+        ys[i] = y;
+        halfs[i] = half;
+    }
+
+    cairo_new_path(cr);
+    cairo_move_to(cr, leftx[0], ys[0]);
+    for (int i = 1; i <= segs; i++) cairo_line_to(cr, leftx[i], ys[i]);
+    for (int i = segs; i >= 0; i--) cairo_line_to(cr, rightx[i], ys[i]);
+    cairo_close_path(cr);
+    cairo_set_source_rgb(cr, pal->rock_r, pal->rock_g, pal->rock_b);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
+    cairo_set_line_width(cr, fmax(1.0, width * 0.03));
+    cairo_stroke(cr);
+
+    // Crack texture.
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.35);
+    cairo_set_line_width(cr, fmax(1.0, width * 0.025));
+    double seg_span = (y1 - y0) / segs;
+    for (int i = 1; i < segs; i += 2) {
+        double midx = (leftx[i] + rightx[i]) * 0.5;
+        cairo_move_to(cr, midx - halfs[i] * 0.3, ys[i] - seg_span * 0.3);
+        cairo_line_to(cr, midx + halfs[i] * 0.25, ys[i] + seg_span * 0.3);
+        cairo_stroke(cr);
+    }
+
+    // Glowing crystal flecks, kept well inside this segment's own bounds.
+    for (int i = 1; i < segs; i++) {
+        if (ff_coral_hash(seed * 8.8 + i * 2.3) < 0.55) continue;
+        if (halfs[i] < width * 0.04) continue;
+        double cxx = cx + (ff_coral_hash(seed * 9.9 + i * 3.1) - 0.5) * halfs[i];
+        double crad = width * 0.04 + width * 0.025 * ff_coral_hash(seed * 10.5 + i);
+        cairo_set_source_rgba(cr, pal->crystal_r, pal->crystal_g, pal->crystal_b, 0.25);
+        cairo_arc(cr, cxx, ys[i], crad * 2.0, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, pal->crystal_r, pal->crystal_g, pal->crystal_b, 0.95);
+        cairo_arc(cr, cxx, ys[i], crad, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+}
+
+// Picks which theme's obstacle art to draw - the one piece of code that
+// needs to know all three exist.
+static void ff_draw_obstacle_column(int theme, cairo_t *cr, double x, double y0, double y1,
+                                     double width, double seed, bool tip_at_y1) {
+    switch (theme) {
+        case FF_THEME_SHIP: ff_draw_ship_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_CAVE: ff_draw_cave_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        default: ff_draw_coral_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+    }
+}
+
 // Smoothly fades a critter to transparent as it nears/crosses either screen
 // edge, so it visibly dissolves instead of popping in/out at the boundary.
 static double ff_edge_fade(double x, double w) {
@@ -818,6 +1157,227 @@ static double ff_edge_fade(double x, double w) {
     return fade;
 }
 
+// The single biggest thing that makes the ship theme actually read as a
+// shipwreck rather than "some brown blobs underwater": one large, clearly
+// boat-shaped hull silhouette lying on the seabed, with rib-frame lines
+// showing through broken planking, a few portholes, and a broken mast with
+// a tattered sail leaning out of it.
+static void ff_draw_ship_hull_backdrop(cairo_t *cr, double w, double h, double base_y) {
+    double hull_w = w * 0.60;
+    double hull_x = w * 0.28;
+    double hull_h = h * 0.30;
+    double hull_top = base_y - hull_h;
+
+    cairo_set_source_rgba(cr, 0.05, 0.08, 0.09, 0.65);
+    cairo_move_to(cr, hull_x, base_y);
+    cairo_curve_to(cr, hull_x + hull_w * 0.05, hull_top + hull_h * 0.15,
+                        hull_x + hull_w * 0.30, hull_top,
+                        hull_x + hull_w * 0.5, hull_top);
+    cairo_curve_to(cr, hull_x + hull_w * 0.70, hull_top,
+                        hull_x + hull_w * 0.95, hull_top + hull_h * 0.15,
+                        hull_x + hull_w, base_y);
+    cairo_close_path(cr);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
+    cairo_set_line_width(cr, 3.0);
+    cairo_stroke(cr);
+
+    // Rib frame lines showing through broken planking - the detail that
+    // most says "wrecked hull" rather than a plain rounded mound.
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.4);
+    cairo_set_line_width(cr, 3.0);
+    for (int i = 1; i < 7; i++) {
+        double t = i / 7.0;
+        double rx = hull_x + hull_w * t;
+        double ry_top = hull_top + hull_h * (0.10 + 0.55 * fabs(sin(t * M_PI)));
+        cairo_move_to(cr, rx, base_y);
+        cairo_line_to(cr, rx, ry_top);
+        cairo_stroke(cr);
+    }
+
+    // Portholes.
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.55);
+    for (int i = 0; i < 3; i++) {
+        double px = hull_x + hull_w * (0.32 + 0.18 * i);
+        double py = hull_top + hull_h * 0.55;
+        cairo_arc(cr, px, py, hull_h * 0.085, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+    cairo_set_source_rgba(cr, 0.5, 0.75, 0.85, 0.35);
+    for (int i = 0; i < 3; i++) {
+        double px = hull_x + hull_w * (0.32 + 0.18 * i);
+        double py = hull_top + hull_h * 0.55;
+        cairo_arc(cr, px, py, hull_h * 0.05, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+
+    // Broken mast leaning out of the hull, with a tattered sail.
+    double mast_x = hull_x + hull_w * 0.66;
+    double mast_base_y = hull_top + hull_h * 0.30;
+    double mast_top_y = mast_base_y - hull_h * 1.15;
+    double mast_top_x = mast_x + hull_h * 0.18;
+    cairo_set_source_rgba(cr, 0.05, 0.08, 0.09, 0.65);
+    cairo_set_line_width(cr, fmax(2.0, hull_h * 0.045));
+    cairo_move_to(cr, mast_x, mast_base_y);
+    cairo_line_to(cr, mast_top_x, mast_top_y);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.15, 0.20, 0.20, 0.5);
+    cairo_move_to(cr, mast_top_x, mast_top_y);
+    cairo_line_to(cr, mast_top_x + hull_h * 0.48, mast_top_y + hull_h * 0.22);
+    cairo_line_to(cr, mast_top_x + hull_h * 0.10, mast_top_y + hull_h * 0.50);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Faint sunbeam shafts slanting down - classic sunken-wreck lighting.
+    cairo_set_source_rgba(cr, 1.0, 1.0, 0.9, 0.06);
+    for (int i = 0; i < 3; i++) {
+        double bx = w * (0.15 + 0.32 * i);
+        cairo_move_to(cr, bx, 0);
+        cairo_line_to(cr, bx + w * 0.10, 0);
+        cairo_line_to(cr, bx - w * 0.05, base_y);
+        cairo_line_to(cr, bx - w * 0.15, base_y);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+    }
+}
+
+// Sky gradient, ambient particles, and a distant skyline silhouette for one
+// theme. Meant to be composited via cairo_push_group/paint_with_alpha at
+// the call site to crossfade between two themes, so everything in here
+// just paints at full opacity as if it were the only thing on screen.
+static void ff_draw_theme_sky(cairo_t *cr, int theme, double w, double h, double bubble_phase) {
+    cairo_pattern_t *sky = cairo_pattern_create_linear(0, 0, 0, h);
+    if (theme == FF_THEME_SHIP) {
+        cairo_pattern_add_color_stop_rgb(sky, 0.0, 0.10, 0.32, 0.40);
+        cairo_pattern_add_color_stop_rgb(sky, 1.0, 0.16, 0.42, 0.46);
+    } else if (theme == FF_THEME_CAVE) {
+        cairo_pattern_add_color_stop_rgb(sky, 0.0, 0.04, 0.04, 0.09);
+        cairo_pattern_add_color_stop_rgb(sky, 1.0, 0.11, 0.09, 0.17);
+    } else {
+        cairo_pattern_add_color_stop_rgb(sky, 0.0, 0.35, 0.72, 0.85);
+        cairo_pattern_add_color_stop_rgb(sky, 1.0, 0.55, 0.85, 0.88);
+    }
+    cairo_set_source(cr, sky);
+    cairo_paint(cr);
+    cairo_pattern_destroy(sky);
+
+    // Ambient particles: rising bubbles for reef/ship, dim drifting motes
+    // for the cave.
+    for (int i = 0; i < 22; i++) {
+        double bx = fmod(i * 53.0 + w * 0.5, w);
+        double speed = 30.0 + (i % 5) * 10.0;
+        double by = h - fmod(bubble_phase * speed + i * 71.0, h + 40.0);
+        double size = 2.0 + (i % 4);
+        if (theme == FF_THEME_CAVE) cairo_set_source_rgba(cr, 0.55, 0.75, 0.95, 0.18);
+        else cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.25);
+        cairo_arc(cr, bx, by, size, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+
+    // Distant skyline silhouette: coral bumps, a real sunken-hull wreck, or
+    // jagged cave rock.
+    double floor_h = h * 0.10;
+    double base_y = h - floor_h;
+    if (theme == FF_THEME_SHIP) {
+        ff_draw_ship_hull_backdrop(cr, w, h, base_y);
+        return;
+    }
+    if (theme == FF_THEME_CAVE) cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.6);
+    else cairo_set_source_rgba(cr, 0.25, 0.55, 0.5, 0.55);
+
+    cairo_move_to(cr, 0, base_y);
+    if (theme == FF_THEME_CAVE) {
+        for (double x = 0; x <= w + 1; x += w / 18.0) {
+            double bump = 24.0 + 30.0 * fabs(sin(x * 0.045 + 2.3));
+            cairo_line_to(cr, x, base_y - bump);
+        }
+    } else {
+        for (double x = 0; x <= w + 1; x += w / 10.0) {
+            double bump = 18.0 + 14.0 * sin(x * 0.02 + 1.7);
+            cairo_line_to(cr, x, base_y - bump);
+        }
+    }
+    cairo_line_to(cr, w, base_y);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
+
+// Floor for one theme: sand, ship-deck planking, or dark rock with glowing
+// flecks. Same crossfade-via-compositing contract as ff_draw_theme_sky.
+static void ff_draw_theme_floor(cairo_t *cr, int theme, double w, double h, double floor_h,
+                                 double bubble_phase) {
+    if (theme == FF_THEME_SHIP) {
+        cairo_set_source_rgb(cr, 0.42, 0.28, 0.16);
+        cairo_rectangle(cr, 0, h - floor_h, w, floor_h);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.25, 0.15, 0.08, 0.7);
+        cairo_set_line_width(cr, 3.0);
+        for (double x = -fmod(bubble_phase * (h * 0.34), 60.0); x < w; x += 60.0) {
+            cairo_move_to(cr, x, h - floor_h);
+            cairo_line_to(cr, x, h);
+            cairo_stroke(cr);
+        }
+        cairo_set_source_rgba(cr, 0.2, 0.12, 0.06, 0.6);
+        cairo_set_line_width(cr, 2.0);
+        cairo_move_to(cr, 0, h - floor_h * 0.5);
+        cairo_line_to(cr, w, h - floor_h * 0.5);
+        cairo_stroke(cr);
+
+        // A scatter of half-buried gold coins/doubloons.
+        for (int i = 0; i < 10; i++) {
+            double cxx = fmod(i * 173.0 + 40.0, w);
+            double cyy = h - floor_h * (0.25 + 0.4 * ((i * 37) % 5) / 5.0);
+            double r = floor_h * 0.06;
+            cairo_set_source_rgb(cr, 0.85, 0.68, 0.20);
+            cairo_save(cr);
+            cairo_translate(cr, cxx, cyy);
+            cairo_scale(cr, 1.0, 0.55);
+            cairo_arc(cr, 0, 0, r, 0, 2 * M_PI);
+            cairo_restore(cr);
+            cairo_fill(cr);
+            cairo_set_source_rgba(cr, 0.55, 0.42, 0.08, 0.7);
+            cairo_save(cr);
+            cairo_translate(cr, cxx, cyy);
+            cairo_scale(cr, 1.0, 0.55);
+            cairo_arc(cr, 0, 0, r * 0.6, 0, 2 * M_PI);
+            cairo_restore(cr);
+            cairo_stroke(cr);
+        }
+    } else if (theme == FF_THEME_CAVE) {
+        cairo_set_source_rgb(cr, 0.10, 0.09, 0.13);
+        cairo_rectangle(cr, 0, h - floor_h, w, floor_h);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 0.16, 0.14, 0.20);
+        cairo_move_to(cr, 0, h - floor_h);
+        for (double x = 0; x <= w + 1; x += w / 24.0) {
+            double bump = 4.0 + 8.0 * fabs(sin(x * 0.09 + 1.1));
+            cairo_line_to(cr, x, h - floor_h - bump);
+        }
+        cairo_line_to(cr, w, h - floor_h);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+        for (int i = 0; i < 14; i++) {
+            double fx = fmod(i * 137.0, w);
+            double fy = h - floor_h * 0.4 + (i % 3) * floor_h * 0.15;
+            cairo_set_source_rgba(cr, 0.5, 0.8, 0.95, 0.5);
+            cairo_arc(cr, fx, fy, 2.0, 0, 2 * M_PI);
+            cairo_fill(cr);
+        }
+    } else {
+        cairo_set_source_rgb(cr, 0.87, 0.78, 0.55);
+        cairo_rectangle(cr, 0, h - floor_h, w, floor_h);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 0.75, 0.65, 0.35, 0.6);
+        for (double x = -fmod(bubble_phase * (h * 0.34), 24.0); x < w; x += 24.0) {
+            cairo_move_to(cr, x, h - floor_h);
+            cairo_line_to(cr, x + 12, h);
+            cairo_set_line_width(cr, 6.0);
+            cairo_stroke(cr);
+        }
+    }
+}
+
 void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
@@ -827,41 +1387,40 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     double fish_radius = h * 0.032;
     double fish_x = w * FF_FISH_X_FRAC;
 
-    // Underwater gradient backdrop.
-    cairo_pattern_t *sky = cairo_pattern_create_linear(0, 0, 0, h);
-    cairo_pattern_add_color_stop_rgb(sky, 0.0, 0.35, 0.72, 0.85);
-    cairo_pattern_add_color_stop_rgb(sky, 1.0, 0.55, 0.85, 0.88);
-    cairo_set_source(cr, sky);
-    cairo_paint(cr);
-    cairo_pattern_destroy(sky);
-
-    // Rising ambient bubbles.
-    for (int i = 0; i < 22; i++) {
-        double bx = fmod(i * 53.0 + w * 0.5, w);
-        double speed = 30.0 + (i % 5) * 10.0;
-        double by = h - fmod(s_ff_bubble_phase * speed + i * 71.0, h + 40.0);
-        double size = 2.0 + (i % 4);
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.25);
-        cairo_arc(cr, bx, by, size, 0, 2 * M_PI);
-        cairo_fill(cr);
-    }
-
-    // Distant coral-reef "skyline" silhouette.
-    cairo_set_source_rgba(cr, 0.25, 0.55, 0.5, 0.55);
+    // Which theme zone the camera is in right now, the next one it's
+    // approaching, and how far into the crossfade toward it we are. This
+    // one calculation drives every themed layer drawn below, so the fish
+    // travels between reef/ship/cave as one continuous blend rather than a
+    // set of independently-changing pieces.
+    double zone_len = h * FF_ZONE_LEN_FRAC;
+    double trans_len = h * FF_ZONE_TRANS_FRAC;
+    int theme_from, theme_to;
+    double blend_t;
+    ff_theme_at(s_ff_world_x, zone_len, trans_len, &theme_from, &theme_to, &blend_t);
     double base_y = h - floor_h;
-    cairo_move_to(cr, 0, base_y);
-    for (double x = 0; x <= w + 1; x += w / 10.0) {
-        double bump = 18.0 + 14.0 * sin(x * 0.02 + 1.7);
-        cairo_line_to(cr, x, base_y - bump);
-    }
-    cairo_line_to(cr, w, base_y);
-    cairo_close_path(cr);
-    cairo_fill(cr);
 
-    // Seaweed clumps swaying and drifting along the floor, behind pipes/fish.
+    // Sky/backdrop, crossfaded as a single composited layer so its internal
+    // bubbles/skyline never double-blend against each other mid-transition.
+    ff_draw_theme_sky(cr, theme_from, w, h, s_ff_bubble_phase);
+    if (blend_t > 0.0) {
+        cairo_push_group(cr);
+        ff_draw_theme_sky(cr, theme_to, w, h, s_ff_bubble_phase);
+        cairo_pop_group_to_source(cr);
+        cairo_paint_with_alpha(cr, blend_t);
+    }
+
+    // Floor decoration - reef seaweed, ship rope/plank debris, or glowing
+    // cave crystal shards - fades in/out with how "present" each theme
+    // currently is, so it blends right along with the sky/floor around it.
+    double reef_a = (theme_from == FF_THEME_REEF ? (1.0 - blend_t) : 0.0) + (theme_to == FF_THEME_REEF ? blend_t : 0.0);
+    double ship_a = (theme_from == FF_THEME_SHIP ? (1.0 - blend_t) : 0.0) + (theme_to == FF_THEME_SHIP ? blend_t : 0.0);
+    double cave_a = (theme_from == FF_THEME_CAVE ? (1.0 - blend_t) : 0.0) + (theme_to == FF_THEME_CAVE ? blend_t : 0.0);
     for (int i = 0; i < FF_SEAWEED_COUNT; i++) {
-        ff_draw_seaweed(cr, s_ff_seaweed_x[i], base_y, h * 0.16 * s_ff_seaweed_height_frac[i],
-                         vis->time_offset + s_ff_seaweed_phase[i]);
+        double t_phase = vis->time_offset + s_ff_seaweed_phase[i];
+        double sh = h * 0.16 * s_ff_seaweed_height_frac[i];
+        if (reef_a > 0.001) ff_draw_seaweed(cr, s_ff_seaweed_x[i], base_y, sh, t_phase, FF_THEME_REEF, reef_a);
+        if (ship_a > 0.001) ff_draw_seaweed(cr, s_ff_seaweed_x[i], base_y, sh, t_phase, FF_THEME_SHIP, ship_a);
+        if (cave_a > 0.001) ff_draw_seaweed(cr, s_ff_seaweed_x[i], base_y, sh, t_phase, FF_THEME_CAVE, cave_a);
     }
 
     // Little background friends - fish and an octopus drifting behind the
@@ -880,25 +1439,24 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
                          vis->time_offset + i * 1.3, bg_pal, s_ff_bgfish_dir[i]);
     }
 
-    // Obstacles: reef towers made of stacked coral lobes.
+    // Obstacles: each one keeps whichever theme's look it was born with, so
+    // individual columns don't morph mid-flight - it's the mix on screen
+    // that shifts smoothly as newly-spawned ones start matching the new zone.
     for (int i = 0; i < FF_MAX_PIPES; i++) {
         if (!s_ff_pipes[i].active) continue;
         double gap = h * 0.24;
         double gc = s_ff_pipes[i].gap_center;
-        ff_draw_coral_column(cr, s_ff_pipes[i].x, 0, gc - gap * 0.5, pipe_width, gc, true);
-        ff_draw_coral_column(cr, s_ff_pipes[i].x, gc + gap * 0.5, h - floor_h, pipe_width, gc, false);
+        ff_draw_obstacle_column(s_ff_pipes[i].theme, cr, s_ff_pipes[i].x, 0, gc - gap * 0.5, pipe_width, gc, true);
+        ff_draw_obstacle_column(s_ff_pipes[i].theme, cr, s_ff_pipes[i].x, gc + gap * 0.5, h - floor_h, pipe_width, gc, false);
     }
 
-    // Sandy floor.
-    cairo_set_source_rgb(cr, 0.87, 0.78, 0.55);
-    cairo_rectangle(cr, 0, h - floor_h, w, floor_h);
-    cairo_fill(cr);
-    cairo_set_source_rgba(cr, 0.75, 0.65, 0.35, 0.6);
-    for (double x = -fmod(s_ff_bubble_phase * (h * 0.34), 24.0); x < w; x += 24.0) {
-        cairo_move_to(cr, x, h - floor_h);
-        cairo_line_to(cr, x + 12, h);
-        cairo_set_line_width(cr, 6.0);
-        cairo_stroke(cr);
+    // Floor, crossfaded the same way as the sky.
+    ff_draw_theme_floor(cr, theme_from, w, h, floor_h, s_ff_bubble_phase);
+    if (blend_t > 0.0) {
+        cairo_push_group(cr);
+        ff_draw_theme_floor(cr, theme_to, w, h, floor_h, s_ff_bubble_phase);
+        cairo_pop_group_to_source(cr);
+        cairo_paint_with_alpha(cr, blend_t);
     }
 
     // Fish
@@ -922,12 +1480,40 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     cairo_show_text(cr, score_text);
 
     if (s_ff_state == FF_READY) {
+        // Welcome to Floppy Fish
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
         cairo_set_font_size(cr, h * 0.045);
-        const char *msg = "Click to Start";
+        const char *msg = "Welcome to Floppy Fish";
         cairo_text_extents(cr, msg, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.62);
         cairo_show_text(cr, msg);
+
+        // Help Text
+#ifdef FLOPPYSOUND
+        cairo_set_font_size(cr, h * 0.02);
+        const char *msg3 = "Press F11 to Toggle Fullscreen or S to toggle sound";
+        cairo_text_extents(cr, msg3, &ext);
+        cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.74);
+        cairo_show_text(cr, msg3);
+#endif
+
+        cairo_set_font_size(cr, h * 0.02);
+        const char *msg4 = "Keep Clicking to Swim Up and Avoid Obstacles; Not Clicking causes Floppy Fish to Sink";
+        cairo_text_extents(cr, msg4, &ext);
+        cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.78);
+        cairo_show_text(cr, msg4);
+
+        // Click to Start Text
+        cairo_set_font_size(cr, h * 0.045);
+        cairo_set_source_rgba(cr, 1.0, 0.0, 0.0, 0.95);
+        const char *msg2 = "Click to Start";
+        cairo_text_extents(cr, msg2, &ext);
+        cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.68);
+        cairo_show_text(cr, msg2);
+
+
+
+
     } else if (s_ff_state == FF_GAME_OVER) {
         cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.45);
         cairo_rectangle(cr, w * 0.12, h * 0.35, w * 0.76, h * 0.24);
@@ -942,9 +1528,16 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
 
         cairo_set_font_size(cr, h * 0.032);
         char best_text[32];
-        snprintf(best_text, sizeof(best_text), "Best: %d   Click to Restart", s_ff_best_score);
+        snprintf(best_text, sizeof(best_text), "Best: %d", s_ff_best_score);
         cairo_text_extents(cr, best_text, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.52);
         cairo_show_text(cr, best_text);
+
+        snprintf(best_text, sizeof(best_text), "Left Click to Restart");
+        cairo_text_extents(cr, best_text, &ext);
+        cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.56);
+        cairo_show_text(cr, best_text);
+
+
     }
 }
