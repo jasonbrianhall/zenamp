@@ -67,6 +67,27 @@ static double s_ff_octopus_y = 0.0;
 static double s_ff_octopus_speed = 0.0;
 static int s_ff_octopus_dir = -1;
 
+// Seaweed patches drift by with the rest of the floor scenery (slower than
+// the pipes) and are recycled off the left edge with fresh height/spacing.
+// Each patch moves independently, but spawn placement (initial and on
+// recycle) picks the most spread-out of a few random candidates so patches
+// don't clump together by chance and leave the rest of the floor bare.
+#define FF_SEAWEED_COUNT 6
+static double s_ff_seaweed_x[FF_SEAWEED_COUNT];
+static double s_ff_seaweed_height_frac[FF_SEAWEED_COUNT];
+static double s_ff_seaweed_phase[FF_SEAWEED_COUNT];
+
+// A shark that only occasionally cruises through, far behind everything
+// else - not a constant presence like the octopus/small fish. When absent,
+// s_ff_shark_active is false and s_ff_shark_wait counts down to its next
+// appearance.
+static bool s_ff_shark_active = false;
+static double s_ff_shark_wait = 0.0;
+static double s_ff_shark_x = 0.0;
+static double s_ff_shark_y = 0.0;
+static double s_ff_shark_speed = 0.0;
+static int s_ff_shark_dir = -1;
+
 static const double FF_FISH_X_FRAC = 0.30;
 
 static void ff_reset(Visualizer *vis) {
@@ -115,6 +136,53 @@ static void ff_spawn_octopus(Visualizer *vis) {
     }
 }
 
+// Sends the shark gliding across from one side to the other, well behind
+// the pipes and bigger/slower than the small background fish.
+static void ff_spawn_shark(Visualizer *vis) {
+    int dir = (rand() % 2 == 0) ? 1 : -1;
+    s_ff_shark_dir = dir;
+    s_ff_shark_speed = vis->height * (0.12 + 0.08 * ((double)rand() / RAND_MAX));
+    s_ff_shark_y = vis->height * (0.15 + 0.35 * ((double)rand() / RAND_MAX));
+    if (dir < 0) {
+        s_ff_shark_x = vis->width * (1.10 + 0.2 * ((double)rand() / RAND_MAX));
+    } else {
+        s_ff_shark_x = -vis->width * (0.10 + 0.2 * ((double)rand() / RAND_MAX));
+    }
+    s_ff_shark_active = true;
+}
+
+// Places one seaweed patch (used both for the initial scatter and for
+// recycling once a patch drifts off the left edge). Tries a handful of
+// random candidate x positions and keeps whichever is farthest from every
+// other current patch, so placement stays random-feeling but self-avoiding
+// - no more than a couple of tries usually needed to land somewhere that
+// isn't crowding an existing patch.
+static void ff_spawn_seaweed(Visualizer *vis, int i, bool initial) {
+    double best_x = 0.0;
+    double best_min_dist = -1.0;
+    for (int attempt = 0; attempt < 8; attempt++) {
+        double cand;
+        if (initial) {
+            cand = ((double)rand() / RAND_MAX) * vis->width;
+        } else {
+            cand = vis->width * (1.05 + 0.45 * ((double)rand() / RAND_MAX));
+        }
+        double min_dist = 1e18;
+        for (int j = 0; j < FF_SEAWEED_COUNT; j++) {
+            if (j == i) continue;
+            double d = fabs(cand - s_ff_seaweed_x[j]);
+            if (d < min_dist) min_dist = d;
+        }
+        if (min_dist > best_min_dist) {
+            best_min_dist = min_dist;
+            best_x = cand;
+        }
+    }
+    s_ff_seaweed_x[i] = best_x;
+    s_ff_seaweed_height_frac[i] = 0.55 + 0.45 * ((double)rand() / RAND_MAX);
+    s_ff_seaweed_phase[i] = ((double)rand() / RAND_MAX) * 6.28;
+}
+
 static void ff_init_background(Visualizer *vis) {
     if (s_ff_bg_init) return;
     // Called once at app startup before the canvas is sized, so width/height
@@ -129,6 +197,13 @@ static void ff_init_background(Visualizer *vis) {
     }
     ff_spawn_octopus(vis);
     s_ff_octopus_x = (double)rand() / RAND_MAX * vis->width;
+    // Shark stays off-screen for a while after launch before its first pass.
+    s_ff_shark_active = false;
+    s_ff_shark_wait = 12.0 + 15.0 * ((double)rand() / RAND_MAX);
+    // Place patches one at a time so each new one can avoid the ones
+    // already placed before it.
+    for (int i = 0; i < FF_SEAWEED_COUNT; i++) s_ff_seaweed_x[i] = -1e9;
+    for (int i = 0; i < FF_SEAWEED_COUNT; i++) ff_spawn_seaweed(vis, i, true);
     s_ff_bg_init = true;
 }
 
@@ -189,6 +264,34 @@ void update_floppy_fish(Visualizer *vis, double dt) {
     bool oct_off_right = s_ff_octopus_dir > 0 && s_ff_octopus_x > vis->width * 1.15;
     if (oct_off_left || oct_off_right) {
         ff_spawn_octopus(vis);
+    }
+
+    // Shark: rare guest, not a constant fixture. Counts down while absent,
+    // then does one slow pass across the tank before disappearing again.
+    if (s_ff_shark_active) {
+        s_ff_shark_x += s_ff_shark_dir * s_ff_shark_speed * dt;
+        bool shark_off_left  = s_ff_shark_dir < 0 && s_ff_shark_x < -vis->width * 0.20;
+        bool shark_off_right = s_ff_shark_dir > 0 && s_ff_shark_x > vis->width * 1.20;
+        if (shark_off_left || shark_off_right) {
+            s_ff_shark_active = false;
+            s_ff_shark_wait = 18.0 + 22.0 * ((double)rand() / RAND_MAX);
+        }
+    } else {
+        s_ff_shark_wait -= dt;
+        if (s_ff_shark_wait <= 0.0) {
+            ff_spawn_shark(vis);
+        }
+    }
+
+    // Seaweed drifts left with the floor at a slow, constant ambient pace
+    // (not gated on playing, like the bubbles/sand) and is recycled off the
+    // right edge once it scrolls past the left side.
+    double seaweed_speed = vis->height * 0.05;
+    for (int i = 0; i < FF_SEAWEED_COUNT; i++) {
+        s_ff_seaweed_x[i] -= seaweed_speed * dt;
+        if (s_ff_seaweed_x[i] < -vis->width * 0.08) {
+            ff_spawn_seaweed(vis, i, false);
+        }
     }
 
     double pipe_width = vis->height * 0.16;
@@ -427,6 +530,85 @@ static void ff_draw_octopus(cairo_t *cr, double x, double y, double scale, doubl
     cairo_restore(cr);
 }
 
+// A big, dim shark silhouette gliding through the far background - a single
+// torpedo-shaped body path (nose to the right, tail to the left) with fins
+// attached directly to its outline so they read as one animal rather than
+// floating shapes. dir flips it to face the direction it's actually
+// swimming.
+static void ff_draw_shark(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, (double)dir, 1.0);
+
+    double sway = sin(t * 1.4) * 0.05;
+    cairo_rotate(cr, sway);
+
+    double alpha = 0.32 * alpha_mult;
+    cairo_set_source_rgba(cr, 0.28, 0.34, 0.40, alpha);
+
+    double tail_swing = sin(t * 2.4) * 0.3;
+
+    // Tail fin, forked, attached at the tail end of the body.
+    cairo_move_to(cr, -52, 0);
+    cairo_curve_to(cr, -66, -6, -78, -20 + tail_swing * 10, -92, -26 + tail_swing * 14);
+    cairo_curve_to(cr, -78, -8, -70, -3, -60, 0);
+    cairo_curve_to(cr, -70, 3, -78, 8, -92, 22 + tail_swing * 14);
+    cairo_curve_to(cr, -78, 16, -66, 6, -52, 0);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Body - smooth torpedo shape, nose at +x, tapering to the tail.
+    cairo_move_to(cr, 58, 1);
+    cairo_curve_to(cr, 50, -14, 20, -20, -8, -17);
+    cairo_curve_to(cr, -28, -14, -45, -8, -55, -1);
+    cairo_curve_to(cr, -45, 8, -28, 15, -8, 17);
+    cairo_curve_to(cr, 20, 20, 50, 12, 58, 1);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Dorsal fin, rooted on the body's top edge.
+    cairo_move_to(cr, -14, -16);
+    cairo_curve_to(cr, -10, -32, 2, -38, 10, -40);
+    cairo_curve_to(cr, 4, -28, 6, -20, 12, -14);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Pectoral fin, swept back from the underside near the head.
+    cairo_move_to(cr, 14, 10);
+    cairo_curve_to(cr, 10, 24, 2, 34, -10, 38);
+    cairo_curve_to(cr, -2, 26, 4, 16, 10, 8);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    cairo_restore(cr);
+}
+
+// A little cluster of swaying seaweed strands rooted at the floor. Each
+// strand sways on its own phase so the clump doesn't move as one rigid
+// piece. Drawn as open, dim, thick-stroked curves rather than filled shapes
+// so they read as thin fronds rather than solid blobs.
+static void ff_draw_seaweed(cairo_t *cr, double x, double base_y, double height, double t) {
+    int strands = 3;
+    for (int i = 0; i < strands; i++) {
+        double sx = x + (i - 1) * height * 0.14;
+        double sh = height * (0.75 + 0.25 * (i % 2));
+        double phase = t * 1.1 + i * 1.7;
+        double sway1 = sin(phase) * sh * 0.16;
+        double sway2 = sin(phase * 0.8 + 0.6) * sh * 0.30;
+
+        cairo_set_source_rgba(cr, 0.16, 0.42, 0.28, 0.55);
+        cairo_set_line_width(cr, sh * 0.05);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_move_to(cr, sx, base_y);
+        cairo_curve_to(cr,
+                        sx + sway1, base_y - sh * 0.35,
+                        sx + sway2, base_y - sh * 0.7,
+                        sx + sway2 * 1.2, base_y - sh);
+        cairo_stroke(cr);
+    }
+}
+
 static void ff_draw_pipe_segment(cairo_t *cr, double x, double y0, double y1, double width, bool cap_at_bottom) {
     if (y1 <= y0) return;
     double cap_h = width * 0.28;
@@ -500,8 +682,19 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     cairo_close_path(cr);
     cairo_fill(cr);
 
+    // Seaweed clumps swaying and drifting along the floor, behind pipes/fish.
+    for (int i = 0; i < FF_SEAWEED_COUNT; i++) {
+        ff_draw_seaweed(cr, s_ff_seaweed_x[i], base_y, h * 0.16 * s_ff_seaweed_height_frac[i],
+                         vis->time_offset + s_ff_seaweed_phase[i]);
+    }
+
     // Little background friends - fish and an octopus drifting behind the
-    // pipes, purely decorative.
+    // pipes, purely decorative. The shark is a rare guest, drawn dim and
+    // furthest back of all so it never competes with the pipes/fish.
+    if (s_ff_shark_active) {
+        ff_draw_shark(cr, s_ff_shark_x, s_ff_shark_y, vis->time_offset, s_ff_shark_dir,
+                       ff_edge_fade(s_ff_shark_x, w));
+    }
     ff_draw_octopus(cr, s_ff_octopus_x, s_ff_octopus_y, 1.0, vis->time_offset,
                      ff_edge_fade(s_ff_octopus_x, w));
     for (int i = 0; i < FF_BG_FISH_COUNT; i++) {
