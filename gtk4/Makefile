@@ -109,25 +109,25 @@ CXXFLAGS_WIN_DEBUG = $(CXXFLAGS_WIN) $(DEBUG_FLAGS)
 CFLAGS_WIN_DEBUG = $(CFLAGS_WIN) $(DEBUG_FLAGS)
 
 # Common source files
-SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main.cpp midiplayer.cpp \
-	bubbles.cpp matrix.cpp fireworks.cpp dna.cpp dna2.cpp visualization.cpp \
+SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main_gtk4.cpp midiplayer.cpp \
+	bubbles.cpp matrix.cpp fireworks.cpp dna.cpp dna2.cpp visualization_gtk4.cpp \
 	cdg.cpp karaoke.cpp zip_support.cpp metadata.cpp parrot.cpp sauron.cpp \
 	convertmidi.cpp convertoggtowav.cpp convertopustowav.cpp convertmp3towav.cpp \
-	convertflactowav.cpp vfs.cpp cache.cpp aiff.cpp keyboard.cpp \
+	convertflactowav.cpp vfs.cpp cache.cpp aiff.cpp keyboard_gtk4.cpp \
 	instruments.cpp virtual_mixer.cpp wav_converter.cpp audioconverter.cpp \
-	equalizer.cpp m3u.cpp help.cpp layout.cpp sudoku.cpp generatepuzzle.cpp \
+	equalizer_gtk4.cpp m3u.cpp help_gtk4.cpp layout_gtk4.cpp sudoku.cpp generatepuzzle.cpp \
 	fourier.cpp ripples.cpp kaleidoscope.cpp bouncyball.cpp clock.cpp \
 	drawoscilloscope.cpp drawwaveform.cpp drawcircle.cpp blockstack.cpp \
 	robotchaser.cpp radialwave.cpp volume_meter.cpp drawbars.cpp \
-	hanoi.cpp beatchess.cpp beatcheckers.cpp queue.cpp drawfractalbloom.cpp \
+	hanoi.cpp beatchess.cpp beatcheckers.cpp queue_gtk4.cpp drawfractalbloom.cpp \
 	drawsymmetrycascade.cpp lrc2cdg.cpp drawtrippy.cpp drawwormhole.cpp \
 	drawbd.cpp drawrabbithare.cpp audio_cache.cpp maze3d.cpp drawradialbars.cpp \
-	icon.cpp bouncingcircle.cpp mandelbrot.cpp pong.cpp minesweeper.cpp cometbuster_spawn.cpp \
+	icon_gtk4.cpp bouncingcircle.cpp mandelbrot.cpp pong.cpp minesweeper.cpp cometbuster_spawn.cpp \
 	cometbuster_init.cpp cometbuster_physics.cpp cometbuster_collision.cpp \
 	cometbuster_boss.cpp cometbuster_render.cpp beatchess_draw.cpp \
 	cometbuster_util.cpp cometbuster_starboss.cpp cometbuster_bombs.cpp \
 	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp karafun.cpp \
-	kfn.cpp monkey.cpp directory_scanner.cpp kar.cpp pipes.cpp zenamp_playlist.cpp \
+	kfn.cpp monkey.cpp directory_scanner.cpp kar.cpp pipes.cpp zenamp_playlist_gtk4.cpp \
 	rubikscube.cpp psychedelic.cpp floppyfish.cpp floppyfish_atlantis.cpp \
 	floppyfish_cave.cpp floppyfish_common.cpp floppyfish_reef.cpp floppyfish_ship.cpp
 
