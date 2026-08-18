@@ -77,9 +77,10 @@ static std::string g_to_lower(const std::string& str);
 static std::string g_get_file_extension(const std::string& filepath);
 static bool g_is_supported_music_file(const std::string& filepath);
 static std::vector<std::string> g_scan_directory_recursive(const std::string& path);
-static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results);
+static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results,
+                                   std::vector<std::string>& pending_batch);
 static gboolean g_on_scan_progress_update(gpointer user_data);
-static void g_scan_progress_callback(const std::string& current_file, int total_scanned);
+static void g_scan_progress_callback(const std::vector<std::string>& batch, int total_scanned);
 static gint g_on_scan_progress_delete(GtkWidget *widget, GdkEvent *event, gpointer user_data);
 static void g_on_scan_cancel_clicked(GtkButton *button, gpointer user_data);
 static void g_create_and_show_scan_dialog(const std::string& directory, bool recursive);
@@ -230,7 +231,13 @@ static bool g_is_supported_music_file(const std::string& filepath) {
     return std::find(SUPPORTED_FORMATS.begin(), SUPPORTED_FORMATS.end(), ext) != SUPPORTED_FORMATS.end();
 }
 
-static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results) {
+// How many files to accumulate in the scan thread before handing a batch
+// off to the UI thread. Posting one g_idle_add + sleeping per file is what
+// caused the hangs/timeouts on large (1000s of files) libraries.
+static const size_t SCAN_UI_BATCH_SIZE = 1000;
+
+static void g_scan_directory_impl(const std::string& directory_path, bool recursive, std::vector<std::string>& results,
+                                   std::vector<std::string>& pending_batch) {
     DIR* dir = opendir(directory_path.c_str());
     if (!dir) {
         fprintf(stderr, "Failed to open directory: %s\n", directory_path.c_str());
@@ -243,6 +250,10 @@ static void g_scan_directory_impl(const std::string& directory_path, bool recurs
             continue;
         }
 
+        if (g_scan_state && g_scan_state->cancel_requested) {
+            break;
+        }
+
         std::string full_path = directory_path + "/" + entry->d_name;
         struct stat st;
 
@@ -252,12 +263,19 @@ static void g_scan_directory_impl(const std::string& directory_path, bool recurs
 
         if (S_ISDIR(st.st_mode)) {
             if (recursive) {
-                g_scan_directory_impl(full_path, recursive, results);
+                g_scan_directory_impl(full_path, recursive, results, pending_batch);
             }
         } else if (S_ISREG(st.st_mode)) {
             if (g_is_supported_music_file(full_path)) {
                 results.push_back(full_path);
-                g_scan_progress_callback(full_path, results.size());
+                pending_batch.push_back(full_path);
+
+                // Flush a batch to the UI thread instead of posting one
+                // idle callback (+ sleep) per file.
+                if (pending_batch.size() >= SCAN_UI_BATCH_SIZE) {
+                    g_scan_progress_callback(pending_batch, results.size());
+                    pending_batch.clear();
+                }
             }
         }
     }
@@ -266,7 +284,7 @@ static void g_scan_directory_impl(const std::string& directory_path, bool recurs
 }
 
 struct UpdateUIData {
-    std::string current_file;
+    std::vector<std::string> batch;
     int total_scanned;
 };
 
@@ -278,20 +296,27 @@ static gboolean g_on_scan_progress_update(gpointer user_data) {
         return FALSE;
     }
 
-    size_t last_slash = data->current_file.find_last_of("/\\");
-    std::string filename = (last_slash != std::string::npos)
-        ? data->current_file.substr(last_slash + 1)
-        : data->current_file;
+    // Add every file in the batch to the list store in one go, instead of
+    // one idle callback per file.
+    std::string last_filename;
+    for (const auto& current_file : data->batch) {
+        size_t last_slash = current_file.find_last_of("/\\");
+        last_filename = (last_slash != std::string::npos)
+            ? current_file.substr(last_slash + 1)
+            : current_file;
 
-    gtk_label_set_text(GTK_LABEL(g_scan_state->label), filename.c_str());
+        GtkTreeIter iter;
+        gtk_list_store_append(g_scan_state->file_store, &iter);
+        gtk_list_store_set(g_scan_state->file_store, &iter, 0, last_filename.c_str(), -1);
+    }
+
+    if (!last_filename.empty()) {
+        gtk_label_set_text(GTK_LABEL(g_scan_state->label), last_filename.c_str());
+    }
 
     char counter_text[64];
     snprintf(counter_text, sizeof(counter_text), "Found: %d files", data->total_scanned);
     gtk_label_set_text(GTK_LABEL(g_scan_state->counter_label), counter_text);
-
-    GtkTreeIter iter;
-    gtk_list_store_append(g_scan_state->file_store, &iter);
-    gtk_list_store_set(g_scan_state->file_store, &iter, 0, filename.c_str(), -1);
 
     g_scan_state->total_files = data->total_scanned;
 
@@ -299,15 +324,23 @@ static gboolean g_on_scan_progress_update(gpointer user_data) {
     return FALSE;
 }
 
-static void g_scan_progress_callback(const std::string& current_file, int total_scanned) {
-    if (!g_scan_state) return;
+// Hands a batch of newly-found files off to the UI thread in a single
+// idle callback, rather than one g_idle_add() + g_usleep() per file. That
+// per-file pattern was flooding the GTK main loop with thousands of
+// callbacks (and burning seconds in sleeps) on large libraries, which is
+// what produced the loading timeouts/hangs.
+static void g_scan_progress_callback(const std::vector<std::string>& batch, int total_scanned) {
+    if (!g_scan_state || batch.empty()) return;
 
     if (g_scan_state->cancel_requested) {
         return;
     }
 
-    UpdateUIData *data = new UpdateUIData{current_file, total_scanned};
+    UpdateUIData *data = new UpdateUIData{batch, total_scanned};
     g_idle_add(g_on_scan_progress_update, data);
+
+    // Brief yield so the scan thread doesn't starve the UI thread while
+    // producing batches; far cheaper than sleeping per file.
     g_usleep(1000);
 }
 
@@ -322,7 +355,13 @@ static gpointer g_scan_thread_func(gpointer user_data) {
 
     printf("Scan thread started for: %s\n", data->directory.c_str());
 
-    g_scan_directory_impl(data->directory, data->recursive, data->results);
+    std::vector<std::string> pending_batch;
+    g_scan_directory_impl(data->directory, data->recursive, data->results, pending_batch);
+
+    // Flush whatever's left in the last partial batch (< SCAN_UI_BATCH_SIZE files).
+    if (!pending_batch.empty()) {
+        g_scan_progress_callback(pending_batch, data->results.size());
+    }
 
     printf("Scan thread complete: found %zu files\n", data->results.size());
 

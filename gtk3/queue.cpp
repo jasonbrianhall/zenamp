@@ -4,8 +4,29 @@
 #include <glib.h>
 #include <string.h>
 #include <filesystem>
+#include <unordered_map>
+#include <string>
    
 namespace fs = std::filesystem;
+
+// update_queue_display()/update_queue_display_with_filter() used to call
+// extract_metadata()/get_file_duration() (disk + tag-parsing I/O) for every
+// file in the queue, EVERY time either function ran. Both are called very
+// often (after every add/remove/skip/filter keystroke), so on a queue of a
+// few thousand files this redid thousands of file reads on every refresh
+// and froze the UI thread for a long time ("Not Responding"). Cache the
+// extracted metadata per filepath so it's only computed once per file.
+struct CachedQueueMetadata {
+    std::string metadata;   // markup string from extract_metadata()/extract_kfn_metadata()
+    int duration_seconds;
+    bool file_accessible;
+};
+static std::unordered_map<std::string, CachedQueueMetadata> g_queue_metadata_cache;
+
+// Every ~N rows, pump the GTK event loop so a first-time build of a large
+// queue's metadata doesn't block the UI thread continuously and trip the
+// OS "not responding" watchdog.
+static const int QUEUE_DISPLAY_UI_FLUSH_INTERVAL = 200;
 
 // Karafun (.kfn) files aren't audio files, so extract_metadata()'s normal
 // tag-reading finds nothing for them. The real title/artist live in the
@@ -615,33 +636,59 @@ void update_queue_display(AudioPlayer *player) {
     for (int i = 0; i < player->queue.count; i++) {
         GtkTreeIter iter;
         gtk_list_store_append(player->queue_store, &iter);
-        
-        char *metadata = NULL;
-        int kfn_duration_seconds = -1;  // -1 = not a .kfn file
 
-        const char *ext = strrchr(player->queue.files[i], '.');
-        if (ext && strcasecmp(ext, ".zip") == 0) {
-            char *extracted_path = extract_audio_from_zip(player->queue.files[i]);
-            if (extracted_path) {
-                metadata = extract_metadata(extracted_path);
-                g_free(extracted_path);
-            } else {
-                metadata = g_strdup("No metadata available");
+        const char *filepath = player->queue.files[i];
+        const char *ext = strrchr(filepath, '.');
+        int kfn_duration_seconds = -1;  // -1 = not a .kfn file
+        std::string metadata_str;
+
+        // Reuse cached metadata (see update_queue_display_with_filter) so
+        // this doesn't re-read every file on disk each time it's called.
+        auto cache_it = g_queue_metadata_cache.find(filepath);
+        if (cache_it != g_queue_metadata_cache.end()) {
+            metadata_str = cache_it->second.metadata;
+            if (ext && strcasecmp(ext, ".kfn") == 0) {
+                kfn_duration_seconds = cache_it->second.duration_seconds;
             }
-        } else if (ext && strcasecmp(ext, ".kfn") == 0) {
-            metadata = extract_kfn_metadata(player->queue.files[i]);
-            if (!metadata || metadata[0] == '\0') {
-                g_free(metadata);
-                metadata = g_strdup("No metadata available");
-            }
-            kfn_duration_seconds = get_kfn_duration(player->queue.files[i]);
         } else {
-            metadata = extract_metadata(player->queue.files[i]);
+            char *metadata = NULL;
+
+            if (ext && strcasecmp(ext, ".zip") == 0) {
+                char *extracted_path = extract_audio_from_zip(filepath);
+                if (extracted_path) {
+                    metadata = extract_metadata(extracted_path);
+                    g_free(extracted_path);
+                } else {
+                    metadata = g_strdup("No metadata available");
+                }
+            } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+                metadata = extract_kfn_metadata(filepath);
+                if (!metadata || metadata[0] == '\0') {
+                    g_free(metadata);
+                    metadata = g_strdup("No metadata available");
+                }
+                kfn_duration_seconds = get_kfn_duration(filepath);
+            } else {
+                metadata = extract_metadata(filepath);
+            }
+
+            metadata_str = metadata ? metadata : "";
+            g_free(metadata);
+
+            g_queue_metadata_cache[filepath] = CachedQueueMetadata{
+                metadata_str, kfn_duration_seconds >= 0 ? kfn_duration_seconds : 0, true};
         }
+
         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
         int duration_seconds = 0;
-        
-        parse_metadata(metadata, title, artist, album, genre);
+
+        parse_metadata(metadata_str.c_str(), title, artist, album, genre);
+
+        if ((i + 1) % QUEUE_DISPLAY_UI_FLUSH_INTERVAL == 0) {
+            while (gtk_events_pending()) {
+                gtk_main_iteration();
+            }
+        }
 
         
         const char *duration_patterns[] = {
@@ -652,7 +699,7 @@ void update_queue_display(AudioPlayer *player) {
         };
         
         for (int j = 0; j < 4; j++) {
-            const char *duration_start = strstr(metadata, duration_patterns[j]);
+            const char *duration_start = strstr(metadata_str.c_str(), duration_patterns[j]);
             if (duration_start) {
                 duration_start = strchr(duration_start, ':');
                 if (duration_start) {
@@ -679,8 +726,6 @@ void update_queue_display(AudioPlayer *player) {
             duration_seconds = kfn_duration_seconds;
         }
 
-        g_free(metadata);
-        
         char *basename = g_path_get_basename(player->queue.files[i]);
         
         //const char *ext = strrchr(player->queue.files[i], '.');
@@ -1370,57 +1415,82 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
         const char *filepath = player->queue.files[i];
         const char *ext = strrchr(filepath, '.');
 
-        char *metadata = NULL;
         int duration_seconds = 0;
-        bool file_accessible = true;  // NEW: Track if file is accessible
+        bool file_accessible = true;
+        std::string metadata_str;
 
-        if (ext && strcasecmp(ext, ".zip") == 0) {
-            char *extracted_path = extract_audio_from_zip(filepath);
-            if (extracted_path) {
-                metadata = extract_metadata(extracted_path);
-                duration_seconds = get_file_duration(extracted_path);
-                unlink(extracted_path);
-                g_free(extracted_path);
-            } else {
-                // NEW: Handle inaccessible ZIP files - keep in queue with warning
-                metadata = g_strdup("(File not accessible)");
-                duration_seconds = 0;
-                file_accessible = false;
-                printf("Warning: ZIP file not accessible: %s\n", filepath);
-            }
-        } else if (ext && strcasecmp(ext, ".kfn") == 0) {
-            metadata = extract_kfn_metadata(filepath);
-
-            if (!metadata || strlen(metadata) == 0) {
-                g_free(metadata);
-                metadata = g_strdup("(File not accessible)");
-                duration_seconds = 0;
-                file_accessible = false;
-                printf("Warning: KFN file not accessible: %s\n", filepath);
-            } else {
-                duration_seconds = get_kfn_duration(filepath);
-            }
+        // Metadata extraction is disk/tag-parsing I/O, so only do it once
+        // per file and reuse the result on every later refresh (filter
+        // keystrokes, add/remove, song changes all call this function).
+        auto cache_it = g_queue_metadata_cache.find(filepath);
+        if (cache_it != g_queue_metadata_cache.end()) {
+            metadata_str = cache_it->second.metadata;
+            duration_seconds = cache_it->second.duration_seconds;
+            file_accessible = cache_it->second.file_accessible;
         } else {
-            // NEW: Explicit handling for inaccessible regular files
-            metadata = extract_metadata(filepath);
-            
-            // If metadata is empty/null, file is likely inaccessible
-            if (!metadata || strlen(metadata) == 0) {
-                // File is inaccessible but DON'T REMOVE IT!
-                g_free(metadata);
-                metadata = g_strdup("(File not accessible)");
-                duration_seconds = 0;
-                file_accessible = false;
-                printf("Warning: File not accessible: %s\n", filepath);
+            char *metadata = NULL;
+
+            if (ext && strcasecmp(ext, ".zip") == 0) {
+                char *extracted_path = extract_audio_from_zip(filepath);
+                if (extracted_path) {
+                    metadata = extract_metadata(extracted_path);
+                    duration_seconds = get_file_duration(extracted_path);
+                    unlink(extracted_path);
+                    g_free(extracted_path);
+                } else {
+                    // NEW: Handle inaccessible ZIP files - keep in queue with warning
+                    metadata = g_strdup("(File not accessible)");
+                    duration_seconds = 0;
+                    file_accessible = false;
+                    printf("Warning: ZIP file not accessible: %s\n", filepath);
+                }
+            } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+                metadata = extract_kfn_metadata(filepath);
+
+                if (!metadata || strlen(metadata) == 0) {
+                    g_free(metadata);
+                    metadata = g_strdup("(File not accessible)");
+                    duration_seconds = 0;
+                    file_accessible = false;
+                    printf("Warning: KFN file not accessible: %s\n", filepath);
+                } else {
+                    duration_seconds = get_kfn_duration(filepath);
+                }
             } else {
-                // File seems accessible, get duration
-                duration_seconds = get_file_duration(filepath);
+                // NEW: Explicit handling for inaccessible regular files
+                metadata = extract_metadata(filepath);
+
+                // If metadata is empty/null, file is likely inaccessible
+                if (!metadata || strlen(metadata) == 0) {
+                    // File is inaccessible but DON'T REMOVE IT!
+                    g_free(metadata);
+                    metadata = g_strdup("(File not accessible)");
+                    duration_seconds = 0;
+                    file_accessible = false;
+                    printf("Warning: File not accessible: %s\n", filepath);
+                } else {
+                    // File seems accessible, get duration
+                    duration_seconds = get_file_duration(filepath);
+                }
             }
+
+            metadata_str = metadata ? metadata : "";
+            g_free(metadata);
+
+            g_queue_metadata_cache[filepath] = CachedQueueMetadata{metadata_str, duration_seconds, file_accessible};
         }
 
         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-        parse_metadata(metadata, title, artist, album, genre);
-        g_free(metadata);
+        parse_metadata(metadata_str.c_str(), title, artist, album, genre);
+
+        // First-time population of a large queue still has to read every
+        // file once; pump pending GTK events periodically so the UI stays
+        // responsive instead of freezing until the whole loop finishes.
+        if ((i + 1) % QUEUE_DISPLAY_UI_FLUSH_INTERVAL == 0) {
+            while (gtk_events_pending()) {
+                gtk_main_iteration();
+            }
+        }
 
         char *basename = g_path_get_basename(filepath);
 
