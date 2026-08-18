@@ -61,6 +61,7 @@ typedef enum {
     VIS_PARROT,
     VIS_DIGITAL_CLOCK,
     VIS_FIREWORKS,
+    VIS_FLOPPY_FISH,
     VIS_FOURIER_TRANSFORM,
     VIS_FRACTAL_BLOOM,
     VIS_RABBITHARE,
@@ -190,6 +191,7 @@ typedef struct {
     double dna_amplitude_multiplier;
     double dna_twist_rate;
 
+    // 3D Pipes
     PipesSystem pipes3d;
     RubiksCubeSystem rubiks_cube;    
 
@@ -518,6 +520,11 @@ void spawn_bouncy_ball_at_position(Visualizer *vis, double x, double y, int clic
 void init_psychedelic_system(Visualizer *vis);
 void update_psychedelic(Visualizer *vis, double dt);
 void draw_psychedelic(Visualizer *vis, cairo_t *cr);
+
+// Floppy Fish
+void init_floppy_fish_system(Visualizer *vis);
+void update_floppy_fish(Visualizer *vis, double dt);
+void draw_floppy_fish(Visualizer *vis, cairo_t *cr);
 
 // Digital Clock
 void init_clock_system(Visualizer *vis);

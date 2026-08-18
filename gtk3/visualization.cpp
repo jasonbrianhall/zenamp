@@ -108,7 +108,7 @@ Visualizer* visualizer_new(void) {
     init_minesweeper(vis);
     pong_init(vis);
     init_psychedelic_system(vis);
-
+    init_floppy_fish_system(vis);
     init_comet_buster_system(vis);
     init_monkey_system(vis);
 
@@ -534,7 +534,10 @@ gboolean on_visualizer_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) 
           break;  
        case VIS_PSYCHEDELIC:
           draw_psychedelic(vis, cr);
-          break;            
+          break;
+       case VIS_FLOPPY_FISH:
+          draw_floppy_fish(vis, cr);
+          break;                      
        case VIS_MINESWEEPER:
           minesweeper_draw(vis, cr);
           break;    
@@ -756,7 +759,10 @@ gboolean visualizer_timer_callback(gpointer user_data) {
                 break;
             case VIS_PSYCHEDELIC:
                 update_psychedelic(vis, dt);
-                break;                                                                                               
+                break;
+            case VIS_FLOPPY_FISH:
+                update_floppy_fish(vis, dt);
+                break;                                                                                                               
             case VIS_MINESWEEPER:
                 minesweeper_update(vis, dt);
                 break;
@@ -870,6 +876,7 @@ GtkWidget* create_visualization_controls(Visualizer *vis) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Digital Clock");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fireworks (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fourier Transform");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Floppy Fish (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Fractal Bloom (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Hare/Turtle Race (i)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type_combo), "Kaleidoscope (i)");
