@@ -6,27 +6,444 @@
 #include <filesystem>
 #include <unordered_map>
 #include <string>
-   
+#include <vector>
+#include <mutex>
+#include <atomic>
+#include <thread>
+#include <ctime>
+#include <sys/stat.h>
+
 namespace fs = std::filesystem;
 
-// update_queue_display()/update_queue_display_with_filter() used to call
-// extract_metadata()/get_file_duration() (disk + tag-parsing I/O) for every
-// file in the queue, EVERY time either function ran. Both are called very
-// often (after every add/remove/skip/filter keystroke), so on a queue of a
-// few thousand files this redid thousands of file reads on every refresh
-// and froze the UI thread for a long time ("Not Responding"). Cache the
-// extracted metadata per filepath so it's only computed once per file.
-struct CachedQueueMetadata {
-    std::string metadata;   // markup string from extract_metadata()/extract_kfn_metadata()
-    int duration_seconds;
-    bool file_accessible;
-};
-static std::unordered_map<std::string, CachedQueueMetadata> g_queue_metadata_cache;
+// ---------------------------------------------------------------------------
+// Queue metadata cache + background loader
+//
+// update_queue_display_with_filter() used to extract tag metadata and decode
+// duration for EVERY file in the queue, synchronously, on the GTK main
+// thread, every time it ran (startup, filter keystrokes, add/remove, ...).
+// For large queues (thousands of files) that meant thousands of file
+// opens/decodes/zip-extractions blocking the UI thread at once - the app
+// would freeze on startup and on every keystroke in the filter box.
+//
+// Fix: cache extracted metadata per filepath (invalidated by mtime), and
+// only ever do the actual extraction work on a background thread. The
+// display always renders immediately from whatever's in the cache; files
+// not yet cached show a "(Loading...)" placeholder that gets refreshed as
+// the background loader fills the cache in.
+// ---------------------------------------------------------------------------
 
-// Every ~N rows, pump the GTK event loop so a first-time build of a large
-// queue's metadata doesn't block the UI thread continuously and trip the
-// OS "not responding" watchdog.
-static const int QUEUE_DISPLAY_UI_FLUSH_INTERVAL = 200;
+struct QueueMetaCacheEntry {
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string genre;
+    int duration_seconds = 0;
+    bool is_karaoke = false;
+    bool file_accessible = true;
+    time_t mtime = 0;
+    // Last time we actually confirmed (via a successful stat()) that this
+    // file exists - NOT the same as "last used this session". Only touched
+    // when the file is verified present, so a temporarily-unmounted
+    // external/network drive's entries just stop advancing rather than
+    // looking stale; they pick back up the next time the drive is back and
+    // the file gets looked at again. See queue_cache_max_age_seconds below.
+    time_t last_seen = 0;
+    bool loaded = false;  // false = placeholder only, not yet extracted
+};
+
+// How long a cache entry can go without being confirmed present before
+// save_queue_metadata_cache_to_disk() drops it instead of persisting it.
+// Generous on purpose: a removable/network drive that's only plugged in
+// occasionally should easily clear this bar, while files that are
+// genuinely gone for good (deleted, drive retired) eventually age out on
+// their own without needing any manual "clear cache" step.
+static const time_t queue_cache_max_age_seconds = 60 * 60 * 24 * 365;  // ~1 year
+
+static std::mutex g_queue_meta_mutex;
+static std::unordered_map<std::string, QueueMetaCacheEntry> g_queue_meta_cache;
+static std::atomic<bool> g_queue_meta_loader_running{false};
+
+// Coalesces display-refresh requests from the background metadata loader.
+// update_queue_display_with_filter() does a full O(queue size) rebuild of
+// the tree store - it's not cheap. Firing one unconditionally every 200
+// files is fine on a small queue but on a 30k-file import can extract
+// metadata for 200 files faster than the main thread can finish one
+// rebuild, so idle-callback requests would pile up faster than they drain.
+// Gating on this flag means at most one refresh is ever in flight: the next
+// request is a no-op until the previous refresh has actually run, so the
+// redraw rate self-throttles to whatever the main thread can keep up with
+// instead of to how fast the background thread can chew through files.
+static std::atomic<bool> g_queue_display_refresh_pending{false};
+
+static void queue_metadata_loader_request_refresh(AudioPlayer *player) {
+    bool expected = false;
+    if (!g_queue_display_refresh_pending.compare_exchange_strong(expected, true)) {
+        return;  // a refresh is already queued/running - it'll pick up everything done so far
+    }
+    g_idle_add([](gpointer data) -> gboolean {
+        AudioPlayer *p = (AudioPlayer *)data;
+        if (p) update_queue_display_with_filter(p, false);
+        g_queue_display_refresh_pending = false;
+        return FALSE;
+    }, player);
+}
+
+// Forward declarations - these are defined further down in this file, but
+// extract_queue_item_metadata() (used by the background loader above the
+// point they're defined) needs them.
+static char *extract_kfn_metadata(const char *kfn_path);
+static int get_kfn_duration(const char *kfn_path);
+char* extract_audio_from_zip(const char *zip_path);
+
+// Does the actual (potentially slow) per-file extraction work: tag reading,
+// duration decoding, zip/kfn handling, and the .cdg sidecar check. This is
+// exactly the logic that previously lived inline in the display loop - it
+// must only ever be called from the background loader thread, never from
+// the main thread.
+static QueueMetaCacheEntry extract_queue_item_metadata(const char *filepath) {
+    QueueMetaCacheEntry result;
+    result.loaded = true;
+
+    struct stat st;
+    if (stat(filepath, &st) == 0) {
+        result.mtime = st.st_mtime;
+        result.last_seen = time(nullptr);  // confirmed present right now
+    }
+
+    const char *ext = strrchr(filepath, '.');
+    char *metadata = NULL;
+    int duration_seconds = 0;
+    bool file_accessible = true;
+
+    if (ext && strcasecmp(ext, ".zip") == 0) {
+        char *extracted_path = extract_audio_from_zip(filepath);
+        if (extracted_path) {
+            metadata = extract_metadata(extracted_path);
+            duration_seconds = get_file_duration(extracted_path);
+            unlink(extracted_path);
+            g_free(extracted_path);
+        } else {
+            metadata = g_strdup("(File not accessible)");
+            duration_seconds = 0;
+            file_accessible = false;
+            printf("Warning: ZIP file not accessible: %s\n", filepath);
+        }
+    } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+        metadata = extract_kfn_metadata(filepath);
+
+        if (!metadata || strlen(metadata) == 0) {
+            g_free(metadata);
+            metadata = g_strdup("(File not accessible)");
+            duration_seconds = 0;
+            file_accessible = false;
+            printf("Warning: KFN file not accessible: %s\n", filepath);
+        } else {
+            duration_seconds = get_kfn_duration(filepath);
+        }
+    } else {
+        metadata = extract_metadata(filepath);
+
+        if (!metadata || strlen(metadata) == 0) {
+            g_free(metadata);
+            metadata = g_strdup("(File not accessible)");
+            duration_seconds = 0;
+            file_accessible = false;
+            printf("Warning: File not accessible: %s\n", filepath);
+        } else {
+            duration_seconds = get_file_duration(filepath);
+        }
+    }
+
+    char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
+    parse_metadata(metadata, title, artist, album, genre);
+    g_free(metadata);
+
+    // Karaoke indicator: .kfn/.zip/.kar, or an audio file with a matching .cdg
+    bool is_karaoke = false;
+    if (ext) {
+        if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0 || strcasecmp(ext, ".kar") == 0) {
+            is_karaoke = true;
+        } else {
+            std::string lower_ext = ext;
+            for (auto &c : lower_ext) c = tolower((unsigned char)c);
+            bool is_audio = (lower_ext == ".ogg" || lower_ext == ".mp3" || lower_ext == ".wav" ||
+                             lower_ext == ".m4a" || lower_ext == ".aac" || lower_ext == ".flac");
+
+            if (is_audio) {
+                std::string cdg_path = filepath;
+                size_t pos = cdg_path.rfind(ext);
+                if (pos != std::string::npos) {
+                    cdg_path.replace(pos, strlen(ext), ".cdg");
+                    if (fs::exists(cdg_path)) {
+                        is_karaoke = true;
+                    }
+                }
+            }
+        }
+    }
+
+    result.title = title;
+    result.artist = artist;
+    result.album = album;
+    result.genre = genre;
+    result.duration_seconds = duration_seconds;
+    result.is_karaoke = is_karaoke;
+    result.file_accessible = file_accessible;
+
+    return result;
+}
+
+// Looks up filepath in the cache. If it's missing, or present but stale
+// (source file's mtime has changed since it was cached), sets *needs_load
+// and returns whatever's available for immediate display (an empty
+// placeholder, or the stale-but-still-useful old values). Cheap: only a
+// stat() and a hash lookup, safe to call from the main thread.
+static QueueMetaCacheEntry get_cached_or_placeholder(const char *filepath, bool *needs_load) {
+    std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+
+    auto it = g_queue_meta_cache.find(filepath);
+    if (it == g_queue_meta_cache.end() || !it->second.loaded) {
+        *needs_load = true;
+        return QueueMetaCacheEntry{};
+    }
+
+    struct stat st;
+    bool exists_now = (stat(filepath, &st) == 0);
+    if (exists_now) {
+        // Confirmed present - keep this entry from aging out of the
+        // persisted cache (see queue_cache_max_age_seconds) regardless of
+        // whether its tags need re-reading below.
+        it->second.last_seen = time(nullptr);
+    }
+
+    if (exists_now && st.st_mtime != it->second.mtime) {
+        *needs_load = true;  // stale - reload in background, but use old values meanwhile
+        return it->second;
+    }
+
+    *needs_load = false;
+    return it->second;
+}
+
+// Runs on a background thread: extracts metadata for every path in
+// `paths` and stores it in the cache, periodically hopping back to the
+// main thread (via g_idle_add) to refresh the visible queue so long queues
+// fill in progressively instead of appearing frozen or empty.
+static void queue_metadata_loader_run(AudioPlayer *player, std::vector<std::string> paths) {
+    printf("Queue metadata loader: extracting metadata for %zu file(s)...\n", paths.size());
+
+    int since_last_refresh = 0;
+    size_t processed = 0;
+    for (const auto &filepath : paths) {
+        QueueMetaCacheEntry entry = extract_queue_item_metadata(filepath.c_str());
+
+        {
+            std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+            g_queue_meta_cache[filepath] = entry;
+        }
+
+        processed++;
+        if (processed % 1000 == 0 || processed == paths.size()) {
+            int percent = (int)((processed * 100) / paths.size());
+            printf("  Metadata extracted for %zu / %zu files... (%d%%)\n", processed, paths.size(), percent);
+        }
+
+        // Ask for a refresh every 200 files so progress is visible on very
+        // large queues. queue_metadata_loader_request_refresh() coalesces
+        // these - if the main thread hasn't finished the previous redraw
+        // yet, this is a no-op instead of queueing up another expensive
+        // full rebuild on top of it.
+        if (++since_last_refresh >= 200) {
+            since_last_refresh = 0;
+            queue_metadata_loader_request_refresh(player);
+        }
+    }
+
+    printf("Queue metadata loader: finished.\n");
+    g_queue_meta_loader_running = false;
+
+    // Final refresh to pick up the last batch, and to pick up any files
+    // that were added to the queue (and so became "pending") while this
+    // loader was already running - that refresh will spawn a fresh loader
+    // for them since the running flag is now clear.
+    queue_metadata_loader_request_refresh(player);
+}
+
+// Kicks off the background loader for `paths` if one isn't already running.
+// If a loader is already in flight, this is a no-op: that loader's own
+// completion callback will trigger a fresh display refresh, which will
+// pick up any still-pending files (including new ones added meanwhile)
+// and start a new loader for them.
+static void queue_metadata_loader_start(AudioPlayer *player, std::vector<std::string> paths) {
+    if (paths.empty()) return;
+
+    bool expected = false;
+    if (!g_queue_meta_loader_running.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
+    std::thread([player, paths = std::move(paths)]() mutable {
+        queue_metadata_loader_run(player, std::move(paths));
+    }).detach();
+}
+
+static bool get_queue_metadata_cache_path(char *path, size_t path_size) {
+#ifdef _WIN32
+    char app_data[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, app_data) != S_OK) {
+        return false;
+    }
+    char config_dir[512];
+    snprintf(config_dir, sizeof(config_dir), "%s\\Zenamp", app_data);
+    CreateDirectoryA(config_dir, NULL);
+    snprintf(path, path_size, "%s\\cache.txt", config_dir);
+#else
+    const char *home = getenv("HOME");
+    if (!home) {
+        return false;
+    }
+    char config_dir[512];
+    snprintf(config_dir, sizeof(config_dir), "%s/.zenamp", home);
+    mkdir(config_dir, 0755);
+    snprintf(path, path_size, "%s/cache.txt", config_dir);
+#endif
+    return true;
+}
+
+// Persists the metadata cache (title/artist/album/genre/duration/karaoke/
+// accessibility, keyed by filepath and validated by mtime) to a simple
+// tab-separated text file, so the *next* launch can skip re-extracting tags
+// and re-decoding durations for files it's already seen. One line per
+// file: filepath, title, artist, album, genre, duration_seconds,
+// is_karaoke, file_accessible, mtime, last_seen. Tabs/newlines inside
+// string fields are collapsed to spaces so the format stays a simple,
+// dependency-free split on '\t'.
+//
+// Entries that haven't been confirmed present (last_seen) in over
+// queue_cache_max_age_seconds are quietly dropped instead of persisted -
+// an entry only ages out after a full year of the file never once being
+// seen again, so a removable/network drive that's merely unplugged at the
+// moment easily survives, while files that are genuinely gone for good
+// eventually stop taking up space without anyone having to clean up.
+void save_queue_metadata_cache_to_disk() {
+    char path[1024];
+    if (!get_queue_metadata_cache_path(path, sizeof(path))) {
+        return;
+    }
+
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        printf("Failed to open metadata cache for writing: %s\n", path);
+        return;
+    }
+
+    fprintf(f, "# Zenamp metadata cache - auto-generated, do not edit by hand\n");
+
+    auto sanitize = [](std::string s) {
+        for (auto &c : s) {
+            if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+        }
+        return s;
+    };
+
+    time_t now = time(nullptr);
+    int written = 0;
+    int aged_out = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+        for (const auto &kv : g_queue_meta_cache) {
+            const QueueMetaCacheEntry &e = kv.second;
+            if (!e.loaded) continue;  // nothing useful to persist for a placeholder
+
+            if (e.last_seen != 0 && (now - e.last_seen) > queue_cache_max_age_seconds) {
+                aged_out++;
+                continue;
+            }
+
+            fprintf(f, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%ld\t%ld\n",
+                    sanitize(kv.first).c_str(),
+                    sanitize(e.title).c_str(),
+                    sanitize(e.artist).c_str(),
+                    sanitize(e.album).c_str(),
+                    sanitize(e.genre).c_str(),
+                    e.duration_seconds,
+                    e.is_karaoke ? 1 : 0,
+                    e.file_accessible ? 1 : 0,
+                    (long)e.mtime,
+                    (long)e.last_seen);
+            written++;
+        }
+    }
+
+    fclose(f);
+    printf("Saved %d metadata cache entries to: %s (%d aged out after 1+ year unseen)\n",
+           written, path, aged_out);
+}
+
+// Loads a previously-saved cache back into memory. Entries are still
+// mtime-checked the normal way (see get_cached_or_placeholder()) the first
+// time each file is looked up, so a file that changed on disk since the
+// cache was written gets transparently re-extracted in the background
+// rather than showing stale tags.
+void load_queue_metadata_cache_from_disk() {
+    char path[1024];
+    if (!get_queue_metadata_cache_path(path, sizeof(path))) {
+        return;
+    }
+
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        printf("No metadata cache file found: %s\n", path);
+        return;
+    }
+
+    char line[4096];
+    int loaded_count = 0;
+
+    std::lock_guard<std::mutex> lock(g_queue_meta_mutex);
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+
+        // Tab-separated: filepath, title, artist, album, genre,
+        // duration_seconds, is_karaoke, file_accessible, mtime, last_seen.
+        char *fields[10] = {nullptr};
+        int field_count = 0;
+        char *cursor = line;
+        fields[field_count++] = cursor;
+        while (field_count < 10 && (cursor = strchr(cursor, '\t')) != nullptr) {
+            *cursor = '\0';
+            cursor++;
+            fields[field_count++] = cursor;
+        }
+        if (field_count != 9 && field_count != 10) continue;  // malformed/truncated line - skip it
+
+        QueueMetaCacheEntry entry;
+        entry.title = fields[1];
+        entry.artist = fields[2];
+        entry.album = fields[3];
+        entry.genre = fields[4];
+        entry.duration_seconds = atoi(fields[5]);
+        entry.is_karaoke = atoi(fields[6]) != 0;
+        entry.file_accessible = atoi(fields[7]) != 0;
+        entry.mtime = (time_t)atol(fields[8]);
+        // Older cache files without a last_seen column: treat as "seen
+        // right now" rather than 0/never, so pre-existing entries get a
+        // full fresh year before they'd be eligible to age out.
+        entry.last_seen = (field_count == 10) ? (time_t)atol(fields[9]) : time(nullptr);
+        entry.loaded = true;
+
+        g_queue_meta_cache[fields[0]] = std::move(entry);
+        loaded_count++;
+    }
+
+    fclose(f);
+    printf("Loaded %d metadata cache entries from: %s\n", loaded_count, path);
+}
 
 // Karafun (.kfn) files aren't audio files, so extract_metadata()'s normal
 // tag-reading finds nothing for them. The real title/artist live in the
@@ -636,59 +1053,33 @@ void update_queue_display(AudioPlayer *player) {
     for (int i = 0; i < player->queue.count; i++) {
         GtkTreeIter iter;
         gtk_list_store_append(player->queue_store, &iter);
-
-        const char *filepath = player->queue.files[i];
-        const char *ext = strrchr(filepath, '.');
+        
+        char *metadata = NULL;
         int kfn_duration_seconds = -1;  // -1 = not a .kfn file
-        std::string metadata_str;
 
-        // Reuse cached metadata (see update_queue_display_with_filter) so
-        // this doesn't re-read every file on disk each time it's called.
-        auto cache_it = g_queue_metadata_cache.find(filepath);
-        if (cache_it != g_queue_metadata_cache.end()) {
-            metadata_str = cache_it->second.metadata;
-            if (ext && strcasecmp(ext, ".kfn") == 0) {
-                kfn_duration_seconds = cache_it->second.duration_seconds;
-            }
-        } else {
-            char *metadata = NULL;
-
-            if (ext && strcasecmp(ext, ".zip") == 0) {
-                char *extracted_path = extract_audio_from_zip(filepath);
-                if (extracted_path) {
-                    metadata = extract_metadata(extracted_path);
-                    g_free(extracted_path);
-                } else {
-                    metadata = g_strdup("No metadata available");
-                }
-            } else if (ext && strcasecmp(ext, ".kfn") == 0) {
-                metadata = extract_kfn_metadata(filepath);
-                if (!metadata || metadata[0] == '\0') {
-                    g_free(metadata);
-                    metadata = g_strdup("No metadata available");
-                }
-                kfn_duration_seconds = get_kfn_duration(filepath);
+        const char *ext = strrchr(player->queue.files[i], '.');
+        if (ext && strcasecmp(ext, ".zip") == 0) {
+            char *extracted_path = extract_audio_from_zip(player->queue.files[i]);
+            if (extracted_path) {
+                metadata = extract_metadata(extracted_path);
+                g_free(extracted_path);
             } else {
-                metadata = extract_metadata(filepath);
+                metadata = g_strdup("No metadata available");
             }
-
-            metadata_str = metadata ? metadata : "";
-            g_free(metadata);
-
-            g_queue_metadata_cache[filepath] = CachedQueueMetadata{
-                metadata_str, kfn_duration_seconds >= 0 ? kfn_duration_seconds : 0, true};
+        } else if (ext && strcasecmp(ext, ".kfn") == 0) {
+            metadata = extract_kfn_metadata(player->queue.files[i]);
+            if (!metadata || metadata[0] == '\0') {
+                g_free(metadata);
+                metadata = g_strdup("No metadata available");
+            }
+            kfn_duration_seconds = get_kfn_duration(player->queue.files[i]);
+        } else {
+            metadata = extract_metadata(player->queue.files[i]);
         }
-
         char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
         int duration_seconds = 0;
-
-        parse_metadata(metadata_str.c_str(), title, artist, album, genre);
-
-        if ((i + 1) % QUEUE_DISPLAY_UI_FLUSH_INTERVAL == 0) {
-            while (gtk_events_pending()) {
-                gtk_main_iteration();
-            }
-        }
+        
+        parse_metadata(metadata, title, artist, album, genre);
 
         
         const char *duration_patterns[] = {
@@ -699,7 +1090,7 @@ void update_queue_display(AudioPlayer *player) {
         };
         
         for (int j = 0; j < 4; j++) {
-            const char *duration_start = strstr(metadata_str.c_str(), duration_patterns[j]);
+            const char *duration_start = strstr(metadata, duration_patterns[j]);
             if (duration_start) {
                 duration_start = strchr(duration_start, ':');
                 if (duration_start) {
@@ -725,6 +1116,8 @@ void update_queue_display(AudioPlayer *player) {
         if (kfn_duration_seconds >= 0) {
             duration_seconds = kfn_duration_seconds;
         }
+
+        g_free(metadata);
 
         char *basename = g_path_get_basename(player->queue.files[i]);
         
@@ -1410,156 +1803,64 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
     bool has_filter = (filter && filter[0] != '\0');
 
     int visible_count = 0;
+    std::vector<std::string> pending_paths;  // files with no (fresh) cached metadata yet
 
     for (int i = 0; i < player->queue.count; i++) {
         const char *filepath = player->queue.files[i];
-        const char *ext = strrchr(filepath, '.');
 
-        int duration_seconds = 0;
-        bool file_accessible = true;
-        std::string metadata_str;
-
-        // Metadata extraction is disk/tag-parsing I/O, so only do it once
-        // per file and reuse the result on every later refresh (filter
-        // keystrokes, add/remove, song changes all call this function).
-        auto cache_it = g_queue_metadata_cache.find(filepath);
-        if (cache_it != g_queue_metadata_cache.end()) {
-            metadata_str = cache_it->second.metadata;
-            duration_seconds = cache_it->second.duration_seconds;
-            file_accessible = cache_it->second.file_accessible;
-        } else {
-            char *metadata = NULL;
-
-            if (ext && strcasecmp(ext, ".zip") == 0) {
-                char *extracted_path = extract_audio_from_zip(filepath);
-                if (extracted_path) {
-                    metadata = extract_metadata(extracted_path);
-                    duration_seconds = get_file_duration(extracted_path);
-                    unlink(extracted_path);
-                    g_free(extracted_path);
-                } else {
-                    // NEW: Handle inaccessible ZIP files - keep in queue with warning
-                    metadata = g_strdup("(File not accessible)");
-                    duration_seconds = 0;
-                    file_accessible = false;
-                    printf("Warning: ZIP file not accessible: %s\n", filepath);
-                }
-            } else if (ext && strcasecmp(ext, ".kfn") == 0) {
-                metadata = extract_kfn_metadata(filepath);
-
-                if (!metadata || strlen(metadata) == 0) {
-                    g_free(metadata);
-                    metadata = g_strdup("(File not accessible)");
-                    duration_seconds = 0;
-                    file_accessible = false;
-                    printf("Warning: KFN file not accessible: %s\n", filepath);
-                } else {
-                    duration_seconds = get_kfn_duration(filepath);
-                }
-            } else {
-                // NEW: Explicit handling for inaccessible regular files
-                metadata = extract_metadata(filepath);
-
-                // If metadata is empty/null, file is likely inaccessible
-                if (!metadata || strlen(metadata) == 0) {
-                    // File is inaccessible but DON'T REMOVE IT!
-                    g_free(metadata);
-                    metadata = g_strdup("(File not accessible)");
-                    duration_seconds = 0;
-                    file_accessible = false;
-                    printf("Warning: File not accessible: %s\n", filepath);
-                } else {
-                    // File seems accessible, get duration
-                    duration_seconds = get_file_duration(filepath);
-                }
-            }
-
-            metadata_str = metadata ? metadata : "";
-            g_free(metadata);
-
-            g_queue_metadata_cache[filepath] = CachedQueueMetadata{metadata_str, duration_seconds, file_accessible};
-        }
-
-        char title[256] = "", artist[256] = "", album[256] = "", genre[256] = "";
-        parse_metadata(metadata_str.c_str(), title, artist, album, genre);
-
-        // First-time population of a large queue still has to read every
-        // file once; pump pending GTK events periodically so the UI stays
-        // responsive instead of freezing until the whole loop finishes.
-        if ((i + 1) % QUEUE_DISPLAY_UI_FLUSH_INTERVAL == 0) {
-            while (gtk_events_pending()) {
-                gtk_main_iteration();
-            }
+        bool needs_load = false;
+        QueueMetaCacheEntry meta = get_cached_or_placeholder(filepath, &needs_load);
+        if (needs_load) {
+            pending_paths.push_back(filepath);
         }
 
         char *basename = g_path_get_basename(filepath);
 
+        // Files still awaiting extraction only have a filename to match on;
+        // once their metadata loads, the next refresh will re-filter them
+        // against title/artist/album/genre too, so nothing stays hidden.
         bool matches = true;
         if (has_filter) {
-            matches = matches_filter(basename, filter) ||
-                      matches_filter(title, filter) ||
-                      matches_filter(artist, filter) ||
-                      matches_filter(album, filter) ||
-                      matches_filter(genre, filter);
+            matches = matches_filter(basename, filter);
+            if (!matches && meta.loaded) {
+                matches = matches_filter(meta.title.c_str(), filter) ||
+                          matches_filter(meta.artist.c_str(), filter) ||
+                          matches_filter(meta.album.c_str(), filter) ||
+                          matches_filter(meta.genre.c_str(), filter);
+            }
         }
 
         if (matches) {
             GtkTreeIter iter;
             gtk_list_store_append(player->queue_store, &iter);
 
-            char duration_str[16];
-            if (duration_seconds > 0) {
-                snprintf(duration_str, sizeof(duration_str), "%d:%02d",
-                         duration_seconds / 60, duration_seconds % 60);
+            char duration_str[16] = "";
+            if (meta.loaded) {
+                if (meta.duration_seconds > 0) {
+                    snprintf(duration_str, sizeof(duration_str), "%d:%02d",
+                             meta.duration_seconds / 60, meta.duration_seconds % 60);
+                }
             } else {
-                strcpy(duration_str, "");
+                strcpy(duration_str, "…");
             }
 
-            // Check if file is karaoke: .kfn, .zip, or audio with associated .cdg
-            bool is_karaoke = false;
-            if (ext) {
-                if (strcasecmp(ext, ".zip") == 0 || strcasecmp(ext, ".kfn") == 0 || strcasecmp(ext, ".kar") == 0) {
-                    is_karaoke = true;
-                } else {
-                    // Check if it's an audio file with an associated .cdg
-                    std::string lower_ext = ext;
-                    for (auto &c : lower_ext) c = tolower((unsigned char)c);
-                    bool is_audio = (lower_ext == ".ogg" || lower_ext == ".mp3" || lower_ext == ".wav" ||
-                                     lower_ext == ".m4a" || lower_ext == ".aac" || lower_ext == ".flac");
-                    
-                    if (is_audio) {
-                        // Build the path to the corresponding .cdg file
-                        std::string cdg_path = filepath;
-                        size_t pos = cdg_path.rfind(ext);
-                        if (pos != std::string::npos) {
-                            cdg_path.replace(pos, strlen(ext), ".cdg");
-                            
-                            // Check if .cdg file exists
-                            if (fs::exists(cdg_path)) {
-                                is_karaoke = true;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            const char *cdgk_indicator = is_karaoke ? "✓" : "";
+            const char *cdgk_indicator = meta.is_karaoke ? "✓" : "";
             const char *indicator = (i == player->queue.current_index) ? "▶" : "";
-            
-            // NEW: Add visual indicator for inaccessible files
-            const char *accessibility_indicator = file_accessible ? "" : "⚠ ";
+
+            // Visual indicator for inaccessible files (only known once loaded)
+            const char *accessibility_indicator = (meta.loaded && !meta.file_accessible) ? "⚠ " : "";
             char display_filename[512];
-            snprintf(display_filename, sizeof(display_filename), "%s%s", 
+            snprintf(display_filename, sizeof(display_filename), "%s%s",
                      accessibility_indicator, basename);
 
             gtk_list_store_set(player->queue_store, &iter,
                 COL_FILEPATH, filepath,
                 COL_PLAYING, indicator,
-                COL_FILENAME, display_filename,  // Changed from 'basename'
-                COL_TITLE, title,
-                COL_ARTIST, artist,
-                COL_ALBUM, album,
-                COL_GENRE, genre,
+                COL_FILENAME, display_filename,
+                COL_TITLE, meta.loaded ? meta.title.c_str() : "(Loading…)",
+                COL_ARTIST, meta.loaded ? meta.artist.c_str() : "",
+                COL_ALBUM, meta.loaded ? meta.album.c_str() : "",
+                COL_GENRE, meta.loaded ? meta.genre.c_str() : "",
                 COL_DURATION, duration_str,
                 COL_CDGK, cdgk_indicator,
                 COL_QUEUE_INDEX, i,
@@ -1570,6 +1871,12 @@ void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_curren
 
         g_free(basename);
     }
+
+    // Metadata/duration extraction for anything not (freshly) cached happens
+    // off the main thread; queue_metadata_loader_start() is a no-op if a
+    // loader is already in flight, so rapid-fire calls (e.g. filter typing)
+    // don't spawn overlapping extraction threads.
+    queue_metadata_loader_start(player, std::move(pending_paths));
 
     // Restore scroll position or scroll to current
     if (scroll_to_current && player->queue.current_index >= 0 && player->queue_tree_view) {

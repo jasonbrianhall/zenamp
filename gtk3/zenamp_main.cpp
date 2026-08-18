@@ -3490,6 +3490,7 @@ gboolean on_window_delete_event(GtkWidget *widget, GdkEvent *event, gpointer use
     save_current_queue_on_exit(player);
 
     save_player_settings(player);
+    save_queue_metadata_cache_to_disk();
     
     stop_playback(player);
     clear_queue(&player->queue);
@@ -4363,6 +4364,11 @@ void cleanup_windows_single_instance(AudioPlayer *player) {
 
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
+
+    // Load the persistent per-file metadata cache before anything touches
+    // the queue, so the first display build can skip re-reading tags for
+    // files it already knows about.
+    load_queue_metadata_cache_from_disk();
     
 #ifndef _WIN32
     // Check if instance already running on Linux

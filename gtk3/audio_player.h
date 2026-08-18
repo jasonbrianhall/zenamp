@@ -322,6 +322,11 @@ GtkWidget* create_queue_search_bar(AudioPlayer *player);
 void update_queue_display_with_filter(AudioPlayer *player, bool scroll_to_current = true);
 void update_queue_display_minimal(AudioPlayer *player);
 void update_queue_display_debounced(AudioPlayer *player);
+
+// Persistent per-file metadata cache at ~/.zenamp/cache.txt, shared format
+// with the gtk4 build: filepath\ttitle\tartist\talbum\tgenre\tduration\treserved\taccessible\tcached_at\texpires_at
+void load_queue_metadata_cache_from_disk();
+void save_queue_metadata_cache_to_disk();
 bool matches_filter(const char *text, const char *filter);
 bool filename_exists_in_queue(PlayQueue *queue, const char *filepath);
 void on_toggle_queue_panel(GtkCheckMenuItem *check_item, gpointer user_data);
