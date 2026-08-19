@@ -27,6 +27,11 @@ void ff_draw_obstacle_column(int theme, cairo_t *cr, double x, double y0, double
         case FF_THEME_SHIP:     ff_draw_ship_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
         case FF_THEME_CAVE:     ff_draw_cave_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
         case FF_THEME_ATLANTIS: ff_draw_atlantis_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_RAINBOW:  ff_draw_rainbow_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_DINO:     ff_draw_dino_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_ANTARCTIC: ff_draw_antarctic_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_AQUARIUM: ff_draw_aquarium_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
+        case FF_THEME_GALAXY:   ff_draw_galaxy_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
         default:                ff_draw_coral_column(cr, x, y0, y1, width, seed, tip_at_y1); break;
     }
 }
@@ -41,6 +46,11 @@ void ff_draw_theme_sky_static(cairo_t *cr, int theme, double w, double h) {
         case FF_THEME_SHIP:     ff_ship_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
         case FF_THEME_CAVE:     ff_cave_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
         case FF_THEME_ATLANTIS: ff_atlantis_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
+        case FF_THEME_RAINBOW:  ff_rainbow_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
+        case FF_THEME_DINO:     ff_dino_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
+        case FF_THEME_ANTARCTIC: ff_antarctic_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
+        case FF_THEME_AQUARIUM: ff_aquarium_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
+        case FF_THEME_GALAXY:   ff_galaxy_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
         default:                ff_reef_sky_colors(&top_r, &top_g, &top_b, &bot_r, &bot_g, &bot_b); break;
     }
 
@@ -57,6 +67,11 @@ void ff_draw_theme_sky_static(cairo_t *cr, int theme, double w, double h) {
         case FF_THEME_SHIP:     ff_draw_ship_backdrop(cr, w, h, base_y); break;
         case FF_THEME_CAVE:     ff_draw_cave_backdrop(cr, w, h, base_y); break;
         case FF_THEME_ATLANTIS: ff_draw_atlantis_backdrop(cr, w, h, base_y); break;
+        case FF_THEME_RAINBOW:  ff_draw_rainbow_backdrop(cr, w, h, base_y); break;
+        case FF_THEME_DINO:     ff_draw_dino_backdrop(cr, w, h, base_y); break;
+        case FF_THEME_ANTARCTIC: ff_draw_antarctic_backdrop(cr, w, h, base_y); break;
+        case FF_THEME_AQUARIUM: ff_draw_aquarium_backdrop(cr, w, h, base_y); break;
+        case FF_THEME_GALAXY:   ff_draw_galaxy_backdrop(cr, w, h, base_y); break;
         default:                ff_draw_reef_backdrop(cr, w, h, base_y); break;
     }
 }
@@ -70,6 +85,11 @@ void ff_draw_theme_particles(cairo_t *cr, int theme, double w, double h, double 
         case FF_THEME_SHIP:     ff_ship_particle_color(&pr, &pg, &pb, &pa); break;
         case FF_THEME_CAVE:     ff_cave_particle_color(&pr, &pg, &pb, &pa); break;
         case FF_THEME_ATLANTIS: ff_atlantis_particle_color(&pr, &pg, &pb, &pa); break;
+        case FF_THEME_RAINBOW:  ff_rainbow_particle_color(&pr, &pg, &pb, &pa); break;
+        case FF_THEME_DINO:     ff_dino_particle_color(&pr, &pg, &pb, &pa); break;
+        case FF_THEME_ANTARCTIC: ff_antarctic_particle_color(&pr, &pg, &pb, &pa); break;
+        case FF_THEME_AQUARIUM: ff_aquarium_particle_color(&pr, &pg, &pb, &pa); break;
+        case FF_THEME_GALAXY:   ff_galaxy_particle_color(&pr, &pg, &pb, &pa); break;
         default:                ff_reef_particle_color(&pr, &pg, &pb, &pa); break;
     }
 
@@ -104,6 +124,11 @@ void ff_draw_theme_floor_static(cairo_t *cr, int theme, double w, double h, doub
         case FF_THEME_SHIP:     ff_draw_ship_floor_static(cr, w, h, floor_h); break;
         case FF_THEME_CAVE:     ff_draw_cave_floor_static(cr, w, h, floor_h); break;
         case FF_THEME_ATLANTIS: ff_draw_atlantis_floor_static(cr, w, h, floor_h); break;
+        case FF_THEME_RAINBOW:  ff_draw_rainbow_floor_static(cr, w, h, floor_h); break;
+        case FF_THEME_DINO:     ff_draw_dino_floor_static(cr, w, h, floor_h); break;
+        case FF_THEME_ANTARCTIC: ff_draw_antarctic_floor_static(cr, w, h, floor_h); break;
+        case FF_THEME_AQUARIUM: ff_draw_aquarium_floor_static(cr, w, h, floor_h); break;
+        case FF_THEME_GALAXY:   ff_draw_galaxy_floor_static(cr, w, h, floor_h); break;
         default:                ff_draw_reef_floor_static(cr, w, h, floor_h); break;
     }
 }
@@ -117,6 +142,11 @@ void ff_draw_theme_floor_scroll(cairo_t *cr, int theme, double w, double h, doub
         case FF_THEME_SHIP:     ff_draw_ship_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
         case FF_THEME_CAVE:     ff_draw_cave_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
         case FF_THEME_ATLANTIS: ff_draw_atlantis_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
+        case FF_THEME_RAINBOW:  ff_draw_rainbow_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
+        case FF_THEME_DINO:     ff_draw_dino_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
+        case FF_THEME_ANTARCTIC: ff_draw_antarctic_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
+        case FF_THEME_AQUARIUM: ff_draw_aquarium_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
+        case FF_THEME_GALAXY:   ff_draw_galaxy_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
         default:                ff_draw_reef_floor_scroll(cr, w, h, floor_h, bubble_phase); break;
     }
 }
@@ -137,6 +167,11 @@ void ff_draw_seaweed(cairo_t *cr, double x, double base_y, double height, double
         case FF_THEME_SHIP:     ff_draw_ship_seaweed(cr, x, base_y, height, t, alpha_mult); break;
         case FF_THEME_CAVE:     ff_draw_cave_seaweed(cr, x, base_y, height, t, alpha_mult); break;
         case FF_THEME_ATLANTIS: ff_draw_atlantis_seaweed(cr, x, base_y, height, t, alpha_mult); break;
+        case FF_THEME_RAINBOW:  ff_draw_rainbow_seaweed(cr, x, base_y, height, t, alpha_mult); break;
+        case FF_THEME_DINO:     ff_draw_dino_seaweed(cr, x, base_y, height, t, alpha_mult); break;
+        case FF_THEME_ANTARCTIC: ff_draw_antarctic_seaweed(cr, x, base_y, height, t, alpha_mult); break;
+        case FF_THEME_AQUARIUM: ff_draw_aquarium_seaweed(cr, x, base_y, height, t, alpha_mult); break;
+        case FF_THEME_GALAXY:   ff_draw_galaxy_seaweed(cr, x, base_y, height, t, alpha_mult); break;
         default:                ff_draw_reef_seaweed(cr, x, base_y, height, t, alpha_mult); break;
     }
 }

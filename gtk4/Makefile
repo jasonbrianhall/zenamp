@@ -129,7 +129,9 @@ SOURCES_CPP_COMMON = dbopl.cpp dbopl_wrapper.cpp zenamp_main_gtk4.cpp midiplayer
 	rainbow.cpp cometbuster_bossexplosion.cpp comet_haptics.cpp karafun.cpp \
 	kfn.cpp monkey.cpp directory_scanner.cpp kar.cpp pipes.cpp zenamp_playlist_gtk4.cpp \
 	rubikscube.cpp psychedelic.cpp floppyfish.cpp floppyfish_atlantis.cpp \
-	floppyfish_cave.cpp floppyfish_common.cpp floppyfish_reef.cpp floppyfish_ship.cpp
+	floppyfish_antarctic.cpp floppyfish_aquarium.cpp floppyfish_atlantis.cpp \
+	floppyfish_cave.cpp floppyfish_common.cpp floppyfish.cpp floppyfish_dino.cpp \
+	floppyfish_galaxy.cpp floppyfish_rainbow.cpp floppyfish_reef.cpp floppyfish_ship.cpp
 
 
 # Platform-specific source files
