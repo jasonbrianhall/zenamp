@@ -24,9 +24,16 @@
 // sky-high rainbow realm, a murky prehistoric bone-yard, the icy
 // Antarctic, a bright glass aquarium tank, and outer space.
 typedef enum {
-    FF_THEME_REEF = 0, FF_THEME_SHIP = 1, FF_THEME_CAVE = 2, FF_THEME_ATLANTIS = 3,
-    FF_THEME_RAINBOW = 4, FF_THEME_DINO = 5, FF_THEME_ANTARCTIC = 6, FF_THEME_AQUARIUM = 7,
-    FF_THEME_GALAXY = 8, FF_THEME_COUNT = 9
+    FF_THEME_REEF = 0, 
+    FF_THEME_SHIP = 1, 
+    FF_THEME_CAVE = 2, 
+    FF_THEME_ATLANTIS = 3,
+    FF_THEME_RAINBOW = 4, 
+    FF_THEME_DINO = 5, 
+    FF_THEME_ANTARCTIC = 6, 
+    FF_THEME_AQUARIUM = 7,
+    FF_THEME_GALAXY = 8, 
+    FF_THEME_COUNT = 9
 } FFTheme;
 
 // Cheap deterministic pseudo-random hash - same input always gives the same

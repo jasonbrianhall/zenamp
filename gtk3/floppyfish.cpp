@@ -64,6 +64,16 @@ static double s_ff_world_x = 0.0;
 static int s_ff_zone_themes[FF_ZONE_CACHE_MAX];
 static int s_ff_zone_cache_count = 0;
 
+static int ff_max_theme_for_score(int score) {
+    if (score < 40)  return FF_THEME_CAVE;       // 0–2
+    if (score < 60)  return FF_THEME_ATLANTIS;   // 0–3
+    if (score < 65)  return FF_THEME_DINO;       // 0–5
+    if (score < 70) return FF_THEME_ANTARCTIC;  // 0–6
+    if (score < 75) return FF_THEME_GALAXY;     // 0–8
+    return FF_THEME_RAINBOW;                     // 0–9 (all)
+}
+
+
 static int ff_zone_theme(int idx) {
     int slot = ((idx % FF_ZONE_CACHE_MAX) + FF_ZONE_CACHE_MAX) % FF_ZONE_CACHE_MAX;
     while (s_ff_zone_cache_count <= slot) {
