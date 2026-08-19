@@ -1,3 +1,5 @@
+// Help Menu for Zenamp/GTK4
+
 #ifndef HELPMENU_H
 #define HELPMENU_H
 
