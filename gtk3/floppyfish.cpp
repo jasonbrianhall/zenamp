@@ -1,5 +1,6 @@
 #include "visualization.h"
 #include "floppyfish_common.h"
+#include <SDL2/SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -143,6 +144,11 @@ static const FFFishPalette FF_FISH_PALETTES[] = {
 #define FF_FISH_PALETTE_COUNT (int)(sizeof(FF_FISH_PALETTES) / sizeof(FF_FISH_PALETTES[0]))
 
 static FFState s_ff_state = FF_READY;
+// Attract-mode: on boot the game plays itself (see the autopilot block in
+// update_floppy_fish) with the title screen drawn on top of it (see
+// draw_floppy_fish), like a classic arcade demo loop. Any keyboard key (or
+// a click) ends it and hands control back to the player.
+static bool s_ff_demo_mode = true;
 static double s_ff_fish_y = 0.0;
 static double s_ff_fish_vel = 0.0;
 static double s_ff_rotation = 0.0;
@@ -991,6 +997,77 @@ void update_floppy_fish(Visualizer *vis, double dt) {
     double fish_radius = vis->height * 0.032;
     double fish_x = vis->width * FF_FISH_X_FRAC;
 
+    // --- Attract-mode autopilot -------------------------------------------
+    // While s_ff_demo_mode is on, the game plays itself (title screen
+    // overlaid on top by draw_floppy_fish) until the player clicks - at
+    // which point it hands control back and drops to the normal "click to
+    // start" screen. Deliberately click-only: keys like F11/S/Escape still
+    // need to work as normal utility keys without ending the demo, so
+    // keyboard input is never treated as a dismissal. No dedicated toggle
+    // key either: demo mode only ever turns off, via a real click, never
+    // back on.
+    {
+        static double s_ff_demo_restart_delay = 0.0;
+
+        if (s_ff_demo_mode && (vis->mouse_left_pressed || vis->mouse_right_pressed)) {
+            s_ff_demo_mode = false;
+            ff_reset(vis);
+            s_ff_state = FF_READY;
+            // The dismissing click is left alone here and falls straight
+            // through into the ordinary click handling right below, so it
+            // both wakes the game up and takes the first flap in one
+            // motion.
+            printf("Floppy Fish attract-mode demo ended - over to you!\n");
+        }
+
+        if (s_ff_demo_mode) {
+            bool want_flap = false;
+
+            if (s_ff_state == FF_READY) {
+                want_flap = true; // auto-start
+            } else if (s_ff_state == FF_GAME_OVER) {
+                // Pause briefly on the game-over screen before looping back
+                // into another demo run.
+                s_ff_demo_restart_delay -= dt;
+                if (s_ff_demo_restart_delay <= 0.0) {
+                    want_flap = true;
+                    s_ff_demo_restart_delay = 1.4;
+                }
+            } else if (s_ff_state == FF_PLAYING) {
+                // Aim for the gap center of the nearest pipe still ahead of
+                // the fish; default to mid-screen when none is in view yet.
+                double target_y = vis->height * 0.45;
+                double best_dx = 1e18;
+                for (int i = 0; i < FF_MAX_PIPES; i++) {
+                    if (!s_ff_pipes[i].active) continue;
+                    double pipe_right = s_ff_pipes[i].x + pipe_width;
+                    if (pipe_right < fish_x) continue; // already passed
+                    double dx = s_ff_pipes[i].x - fish_x;
+                    if (dx < best_dx) {
+                        best_dx = dx;
+                        target_y = s_ff_pipes[i].gap_center;
+                    }
+                }
+
+                // A plain "flap while below target" bang-bang looks right
+                // but isn't: because ff_flap sets velocity to a fixed
+                // value rather than adding to it, one flap fired right at
+                // the target line still carries the fish on a full
+                // ballistic arc afterward - measured (by simulation) at a
+                // consistent ~0.043*height of extra overshoot past the
+                // trigger point before gravity brings it back down. Aiming
+                // this much *below* the true gap center cancels that
+                // overshoot out, so the fish's actual oscillation ends up
+                // centered on the gap instead of consistently clipping its
+                // ceiling.
+                double bias = vis->height * 0.043;
+                if (s_ff_fish_y > target_y + bias) want_flap = true;
+            }
+
+            if (want_flap) vis->mouse_left_pressed = true;
+        }
+    }
+
     // Click handling: flap, start, or restart depending on game state.
     if (vis->mouse_left_pressed || vis->mouse_right_pressed) {
         if (s_ff_state == FF_READY) {
@@ -1064,7 +1141,11 @@ void update_floppy_fish(Visualizer *vis, double dt) {
             if (!s_ff_pipes[i].scored && s_ff_pipes[i].x + pipe_width < fish_x) {
                 s_ff_pipes[i].scored = true;
                 s_ff_score++;
-                if (s_ff_score > s_ff_best_score) {
+                // Demo-mode runs still tick the on-screen score up (so the
+                // attract loop looks alive), but never touch the persisted
+                // daily/all-time records - those should only reflect a
+                // real player's runs.
+                if (!s_ff_demo_mode && s_ff_score > s_ff_best_score) {
                     s_ff_best_score = s_ff_score;
                     printf("New best score today: %d\n", s_ff_best_score);
 #ifdef FLOPPYSOUND
@@ -1072,7 +1153,7 @@ void update_floppy_fish(Visualizer *vis, double dt) {
 #endif
                 }
 #ifdef FLOPPYSOUND
-                if (s_ff_score > s_ff_alltime_best) {
+                if (!s_ff_demo_mode && s_ff_score > s_ff_alltime_best) {
                     s_ff_alltime_best = s_ff_score;
                     ff_save_alltime_best();
                     printf("New all-time high score: %d\n", s_ff_alltime_best);
@@ -1135,6 +1216,18 @@ void update_floppy_fish(Visualizer *vis, double dt) {
     if(s_ff_state==FF_GAME_OVER) {
         if(vis->deadcounter<2) vis->deadcounter++;
         if(vis->deadcounter==1) vis->sound_dead=true;
+    }
+#endif
+
+    // Attract-mode plays silently - the bot's flaps/scores/deaths
+    // shouldn't be heard before a real player has even touched anything.
+    // Cleared last so it overrides every sound flag set anywhere above,
+    // regardless of where in the frame they were raised.
+#ifdef FLOPPYSOUND
+    if (s_ff_demo_mode) {
+        vis->sound_flap = false;
+        vis->sound_score = false;
+        vis->sound_dead = false;
     }
 #endif
 }
@@ -2103,7 +2196,7 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     cairo_move_to(cr, sx, sy);
     cairo_show_text(cr, score_text);
 
-    if (s_ff_state == FF_READY) {
+    if (s_ff_demo_mode || s_ff_state == FF_READY) {
         // Welcome to Floppy Fish
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
         cairo_set_font_size(cr, h * 0.045);
