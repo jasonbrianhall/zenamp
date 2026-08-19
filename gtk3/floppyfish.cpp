@@ -1083,6 +1083,27 @@ void update_floppy_fish(Visualizer *vis, double dt) {
         vis->mouse_left_pressed = FALSE;
     }
 
+    // If a real player's run ends and they walk away without clicking to
+    // restart, drop back into the attract-mode demo after a few seconds -
+    // same idea as an arcade cabinet returning to its title loop. Only
+    // applies to a real game over (demo_mode already off); the demo's own
+    // game-over pause is handled separately above.
+    {
+        static double s_ff_post_gameover_idle = 0.0;
+        if (!s_ff_demo_mode && s_ff_state == FF_GAME_OVER) {
+            s_ff_post_gameover_idle += dt;
+            if (s_ff_post_gameover_idle >= 5.0) {
+                s_ff_post_gameover_idle = 0.0;
+                s_ff_demo_mode = true;
+                ff_reset(vis);
+                s_ff_state = FF_READY;
+                printf("Floppy Fish: idle after game over - back to attract mode\n");
+            }
+        } else {
+            s_ff_post_gameover_idle = 0.0;
+        }
+    }
+
     if (s_ff_state == FF_READY) {
         // Gentle idle bob so it doesn't look frozen while waiting for a click.
         s_ff_fish_y = vis->height * 0.45 + sin(vis->time_offset * 2.0) * vis->height * 0.02;
