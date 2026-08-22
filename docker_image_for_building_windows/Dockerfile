@@ -16,10 +16,6 @@ RUN dnf -y install \
         git which findutils \
         zip unzip
 
-        # Podman stack
-RUN dnf -y install  podman buildah skopeo fuse-overlayfs shadow-utils
-        # Native GTK4/SDL2 (for pkg-config introspection)
-
 RUN dnf -y install gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
         SDL2-devel SDL2_image-devel SDL2_ttf-devel SDL2_mixer-devel \
         openssl-devel taglib-devel \
