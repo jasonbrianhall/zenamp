@@ -14,7 +14,7 @@ RUN dnf -y install \
         autoconf automake libtool \
         cmake ninja-build \
         git which findutils \
-        zip unzip
+        zip unzip xxd
 
 RUN dnf -y install gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
         SDL2-devel SDL2_image-devel SDL2_ttf-devel SDL2_mixer-devel \
@@ -148,6 +148,34 @@ RUN dnf -y install \
 
 RUN dnf -y install \
        rsync
+
+RUN dnf -y install gcc gcc-c++ make \
+          SDL2-devel \
+          freetype-devel \
+          glew-devel \
+          pkg-config \
+          mingw64-gcc mingw64-gcc-c++ \
+          mingw64-SDL2 \
+          mingw64-freetype \
+          mingw64-glew \
+          mingw64-libssh2 \
+          mingw64-gtk3 mingw64-gtkmm30 \
+          mingw64-SDL2 mingw64-SDL2_mixer \
+          mingw64-libvorbis mingw64-flac \
+          mingw64-opus mingw64-opusfile \
+          mingw64-taglib.noarch \
+          mingw64-glew \
+          mingw64-gmp \
+          mingw64-gstreamer1 \
+          mingw64-gstreamer1-plugins-base \
+          wine \
+          zip unzip \
+          ImageMagick \
+          libssh2-devel \
+          libwebp-devel \
+          mingw64-libwebp \
+          mingw64-wxWidgets3 \
+          xxd
 
 RUN dnf clean all
 
