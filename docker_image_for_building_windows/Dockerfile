@@ -35,6 +35,9 @@ RUN dnf -y install gtk4-devel glib2-devel pango-devel gdk-pixbuf2-devel \
         meson
 
 RUN dnf -y install \
+        glew-devel freetype-devel libssh2-devel
+
+RUN dnf -y install \
         # MinGW cross toolchain
         mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
         mingw64-crt mingw64-headers \
