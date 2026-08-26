@@ -5,10 +5,12 @@
 // reef/ship/cave/atlantis/rainbow/dino. Obstacles are faceted glacier
 // blocks capped with a snow crown and a tiny penguin standing lookout, the
 // floor is packed ice scattered with bergy bits, and the backdrop carries
-// a row of icebergs, a sea lion hauled out on a floe, and a whale cruising
-// the deep background - penguins are the theme's real signature, though,
-// so they also get the dedicated swimming guest (see ff_draw_penguin_group
-// in floppyfish.cpp).
+// a row of icebergs and a sea lion hauled out on a floe, plus a whale
+// cruising the deep background (drawn live rather than baked into the
+// cached backdrop, so it actually swims - see
+// ff_draw_antarctic_whale_live) - penguins are the theme's real signature,
+// though, so they also get the dedicated swimming guest (see
+// ff_draw_penguin_group in floppyfish.cpp).
 
 void ff_antarctic_sky_colors(double *top_r, double *top_g, double *top_b,
                               double *bot_r, double *bot_g, double *bot_b) {
@@ -121,11 +123,10 @@ static void ff_draw_antarctic_sea_lion(cairo_t *cr, double x, double y, double s
 }
 
 // A whale cruising the deep background - drawn faint and far back so it
-// reads as a glimpse rather than competing with the pillars/fish.
-static void ff_draw_antarctic_whale(cairo_t *cr, double w, double h, double base_y) {
-    double wx = w * 0.72, wy = base_y - h * 0.42;
-    double scale = h * 0.0032;
-
+// reads as a glimpse rather than competing with the pillars/fish. Just the
+// shape at an explicit center/scale; see ff_draw_antarctic_whale_live below
+// for the part that actually moves it.
+static void ff_draw_antarctic_whale_shape(cairo_t *cr, double wx, double wy, double scale) {
     cairo_save(cr);
     cairo_translate(cr, wx, wy);
     cairo_scale(cr, scale, scale);
@@ -158,13 +159,36 @@ static void ff_draw_antarctic_whale(cairo_t *cr, double w, double h, double base
     cairo_restore(cr);
 }
 
-// Distant iceberg row - a jagged white/blue skyline along the floor line -
-// plus a sea lion on a low ledge and a whale further out. This theme's
-// equivalent of the ship's hull or Atlantis's temple: the one backdrop
-// that most says "Antarctic" at a glance.
-void ff_draw_antarctic_backdrop(cairo_t *cr, double w, double h, double base_y) {
-    ff_draw_antarctic_whale(cr, w, h, base_y);
+// The whale, actually swimming this time - called live every frame from
+// draw_floppy_fish (not baked into the cached backdrop below, which is
+// only ever painted once and blitted after that, so anything drawn there
+// is frozen in place). Cruises steadily nose-first (the shape above faces
+// -x) off the left edge and loops back in from the right, using
+// bubble_phase as its clock the same way the ambient bubbles in
+// ff_draw_theme_particles loop on a phase rather than a per-frame
+// timestep, so its motion is smooth and independent of frame rate. Not
+// part of the shared five-function theme contract (only this theme needs
+// it), so it's called directly from a theme check in draw_floppy_fish
+// rather than through a dispatcher.
+void ff_draw_antarctic_whale_live(cairo_t *cr, double w, double h, double base_y, double bubble_phase) {
+    double scale = h * 0.0032;
+    double margin = w * 0.18;
+    double travel = w + margin * 2.0;
+    double speed = h * 0.032;
+    double wx = w + margin - fmod(bubble_phase * speed, travel);
+    double wy = base_y - h * 0.42 + sin(bubble_phase * 0.6) * h * 0.015;
+    ff_draw_antarctic_whale_shape(cr, wx, wy, scale);
+}
 
+
+
+// Distant iceberg row - a jagged white/blue skyline along the floor line -
+// plus a sea lion on a low ledge. This theme's equivalent of the ship's
+// hull or Atlantis's temple: the one backdrop that most says "Antarctic"
+// at a glance. The whale used to be baked in here too, but that left it
+// frozen in place (this layer is cached and only ever painted once) - it
+// now swims live instead, see ff_draw_antarctic_whale_live above.
+void ff_draw_antarctic_backdrop(cairo_t *cr, double w, double h, double base_y) {
     cairo_set_source_rgba(cr, 0.78, 0.90, 0.97, 0.55);
     cairo_move_to(cr, 0, base_y);
     for (double x = 0; x <= w + 1; x += w / 9.0) {

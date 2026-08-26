@@ -33,18 +33,22 @@
 // All the per-theme obstacle art, sky, floor, and floor decoration live in
 // floppyfish_reef.cpp / floppyfish_ship.cpp / floppyfish_cave.cpp /
 // floppyfish_atlantis.cpp / floppyfish_rainbow.cpp / floppyfish_dino.cpp /
-// floppyfish_antarctic.cpp / floppyfish_aquarium.cpp / floppyfish_galaxy.cpp
-// (see floppyfish_common.h for the shared contract). This file owns
-// everything theme-agnostic: game state, physics, collision, background
-// critters, the player fish, and the UI.
+// floppyfish_antarctic.cpp / floppyfish_aquarium.cpp / floppyfish_galaxy.cpp /
+// floppyfish_swamp.cpp / floppyfish_party.cpp / floppyfish_volcanic.cpp /
+// floppyfish_shark.cpp (see floppyfish_common.h for the shared contract).
+// This file owns everything theme-agnostic: game
+// state, physics, collision, background critters, the player fish, and the
+// UI.
 
 #define FF_MAX_PIPES 8
 #define FF_BG_FISH_COUNT 7
 
-// Nine visual themes the run cycles through as the fish travels: coral
+// Thirteen visual themes the run cycles through as the fish travels: coral
 // reef, a sunken pirate ship, a dark cave, the ruins of Atlantis, a
 // sky-high rainbow realm, a murky prehistoric bone-yard, the icy
-// Antarctic, a bright glass aquarium tank, and outer space.
+// Antarctic, a bright glass aquarium tank, outer space, a mystical
+// mangrove swamp, a black-lit underwater dance party, a deep-sea volcanic
+// vent field, and a murky shark territory.
 // s_ff_world_x is the total scroll distance covered so far (reset each run,
 // paused unless actively playing) and picks which theme zone the camera is
 // currently in. Zone length and the crossfade band between zones are both
@@ -156,6 +160,7 @@ static FFPipe s_ff_pipes[FF_MAX_PIPES];
 static double s_ff_spawn_timer = 0.0;
 static int s_ff_score = 0;
 static int s_ff_best_score = 0;      // "today's" best - persisted, but expires at local midnight (see ff_load_daily_best)
+static int s_ff_session_best = 0;    // best score since this process launched - never persisted, resets on every restart
 
 // Score thresholds for the trinket shown on the Game Over screen - below
 // sea shell is "no trinket", then each tier takes real, escalating skill.
@@ -496,8 +501,8 @@ static cairo_font_face_t *s_ff_font_face = NULL;
 // ff_ensure_theme_caches. Everything that actually animates (bubbles, sand
 // ripples, etc.) still gets drawn live on top of these every frame; only
 // the expensive full-canvas painting gets reused instead of redone.
-static cairo_surface_t *s_ff_sky_cache[FF_THEME_COUNT] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
-static cairo_surface_t *s_ff_floor_cache[FF_THEME_COUNT] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static cairo_surface_t *s_ff_sky_cache[FF_THEME_COUNT] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static cairo_surface_t *s_ff_floor_cache[FF_THEME_COUNT] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 static double s_ff_cache_w = -1.0, s_ff_cache_h = -1.0; // canvas size the caches above were built for
 static void ff_free_theme_caches(); // defined near draw_floppy_fish, used by shutdown below
 
@@ -540,19 +545,37 @@ static double s_ff_shark_speed = 0.0;
 static int s_ff_shark_dir = -1;
 static double s_ff_shark_scale = 1.0; // most passes are medium-sized; occasionally much larger
 
+// A rare "jump scare" pass reserved for shark-territory zones: a massive
+// shark shape flashes across close to the camera, in front of the player
+// fish rather than behind the pipes like every other background critter.
+// It's purely decorative - never checked in collision - and crosses the
+// full screen width in well under a second (see ff_spawn_megashark), so it
+// can't linger over an upcoming gap long enough to cost the player a fair
+// look at it.
+static bool s_ff_megashark_active = false;
+static double s_ff_megashark_wait = 0.0;
+static double s_ff_megashark_x = 0.0;
+static double s_ff_megashark_y = 0.0;
+static double s_ff_megashark_speed = 0.0;
+static int s_ff_megashark_dir = -1;
+
 // Another rare guest, same cadence as the shark but themed to match
 // whatever's currently on screen: a mermaid drifts through during the
 // Atlantis zones, a unicorn during the rainbow zones, a mosasaurus during
 // the bone-yard zones, a group of penguins during the Antarctic zones, a
 // pair of lobsters scuttling along the gravel during the aquarium zones,
 // a pair of astronauts drifting on tethers during the galaxy zones, a
-// diver everywhere else (reef/ship/cave). Which one it is gets decided
+// pair of alligators cruising the murky water during the swamp zones, a
+// pair of vent crabs scuttling among the chimneys during the volcanic
+// zones, a pair of prowling dorsal fins during the shark-territory zones,
+// a diver everywhere else (reef/ship/cave). Which one it is gets decided
 // once, at spawn time (see ff_spawn_guest), and holds for that guest's
 // whole pass across the tank.
 typedef enum {
     FF_GUEST_DIVER = 0, FF_GUEST_MERMAID = 1, FF_GUEST_UNICORN = 2,
     FF_GUEST_MOSASAURUS = 3, FF_GUEST_PENGUINS = 4, FF_GUEST_LOBSTERS = 5,
-    FF_GUEST_ASTRONAUTS = 6
+    FF_GUEST_ASTRONAUTS = 6, FF_GUEST_ALLIGATORS = 7, FF_GUEST_VENTCRABS = 8,
+    FF_GUEST_SHARKPACK = 9
 } FFGuestKind;
 
 static bool s_ff_guest_active = false;
@@ -639,15 +662,37 @@ static void ff_spawn_shark(Visualizer *vis) {
     s_ff_shark_active = true;
 }
 
-// Sends the mermaid/diver/unicorn/mosasaurus/penguins/lobsters/astronauts
-// guest across, same way as the shark. Which silhouette it is gets picked
-// from whichever theme currently dominates the screen (s_ff_world_x, same
-// lookup ff_spawn_pipe uses for obstacles), so a diver never turns up over
-// the Atlantis ruins, the mermaid never turns up over a coral reef, the
-// unicorn only ever turns up over the rainbow realm, the mosasaurus only
-// over the bone yard, the penguins only over the Antarctic, the lobsters
-// only over the aquarium gravel, and the astronauts only out in the
-// galaxy.
+// Sends the megashark flashing across in front of the fish, close to the
+// camera - a single fast pass rather than the ordinary shark's slow prowl.
+// Only ever called while the dominant theme is shark-territory (see the
+// gating check in update_floppy_fish).
+static void ff_spawn_megashark(Visualizer *vis) {
+    int dir = (rand() % 2 == 0) ? 1 : -1;
+    s_ff_megashark_dir = dir;
+    // Crosses the full width in well under a second - a flash, not a
+    // cruise - so it can't sit in front of an upcoming pipe long enough to
+    // cost the player a fair look at it.
+    s_ff_megashark_speed = vis->width * (2.4 + 0.7 * ((double)rand() / RAND_MAX));
+    s_ff_megashark_y = vis->height * (0.28 + 0.32 * ((double)rand() / RAND_MAX));
+    if (dir < 0) {
+        s_ff_megashark_x = vis->width * 1.15;
+    } else {
+        s_ff_megashark_x = -vis->width * 0.15;
+    }
+    s_ff_megashark_active = true;
+}
+
+// Sends the mermaid/diver/unicorn/mosasaurus/penguins/lobsters/astronauts/
+// alligators guest across, same way as the shark. Which silhouette it is
+// gets picked from whichever theme currently dominates the screen
+// (s_ff_world_x, same lookup ff_spawn_pipe uses for obstacles), so a diver
+// never turns up over the Atlantis ruins, the mermaid never turns up over
+// a coral reef, the unicorn only ever turns up over the rainbow realm, the
+// mosasaurus only over the bone yard, the penguins only over the
+// Antarctic, the lobsters only over the aquarium gravel, the astronauts
+// only out in the galaxy, the alligators only over the swamp, the vent
+// crabs only over the volcanic field, and the dorsal fins only over
+// shark territory.
 static void ff_spawn_guest(Visualizer *vis) {
     int dir = (rand() % 2 == 0) ? 1 : -1;
     s_ff_guest_dir = dir;
@@ -668,16 +713,33 @@ static void ff_spawn_guest(Visualizer *vis) {
                      : (dominant == FF_THEME_ANTARCTIC) ? FF_GUEST_PENGUINS
                      : (dominant == FF_THEME_AQUARIUM)  ? FF_GUEST_LOBSTERS
                      : (dominant == FF_THEME_GALAXY)    ? FF_GUEST_ASTRONAUTS
+                     : (dominant == FF_THEME_SWAMP)     ? FF_GUEST_ALLIGATORS
+                     : (dominant == FF_THEME_VOLCANIC)  ? FF_GUEST_VENTCRABS
+                     : (dominant == FF_THEME_SHARK)     ? FF_GUEST_SHARKPACK
                                                         : FF_GUEST_DIVER;
 
 
-    // Lobsters scuttle along the gravel rather than drifting mid-tank like
-    // every other guest, so they get their own slower speed and a y pinned
-    // just above the floor line instead of the usual random spread.
+    // Lobsters and vent crabs scuttle along the floor and alligators
+    // cruise low through the murky water rather than drifting mid-tank
+    // like every other guest, so they get their own slower speed and a y
+    // pinned just above the floor line instead of the usual random spread.
     if (s_ff_guest_kind == FF_GUEST_LOBSTERS) {
         s_ff_guest_speed = vis->height * (0.045 + 0.03 * ((double)rand() / RAND_MAX));
         double floor_h = vis->height * 0.10;
         s_ff_guest_y = vis->height - floor_h - vis->height * (0.01 + 0.02 * ((double)rand() / RAND_MAX));
+    } else if (s_ff_guest_kind == FF_GUEST_ALLIGATORS) {
+        s_ff_guest_speed = vis->height * (0.06 + 0.05 * ((double)rand() / RAND_MAX));
+        double floor_h = vis->height * 0.10;
+        s_ff_guest_y = vis->height - floor_h - vis->height * (0.05 + 0.10 * ((double)rand() / RAND_MAX));
+    } else if (s_ff_guest_kind == FF_GUEST_VENTCRABS) {
+        s_ff_guest_speed = vis->height * (0.045 + 0.03 * ((double)rand() / RAND_MAX));
+        double floor_h = vis->height * 0.10;
+        s_ff_guest_y = vis->height - floor_h - vis->height * (0.01 + 0.02 * ((double)rand() / RAND_MAX));
+    } else if (s_ff_guest_kind == FF_GUEST_SHARKPACK) {
+        // Prowls a bit faster and closer to mid-tank than the rare
+        // standalone shark, so the two don't read as the same event.
+        s_ff_guest_speed = vis->height * (0.11 + 0.07 * ((double)rand() / RAND_MAX));
+        s_ff_guest_y = vis->height * (0.18 + 0.40 * ((double)rand() / RAND_MAX));
     } else {
         s_ff_guest_speed = vis->height * (0.09 + 0.09 * ((double)rand() / RAND_MAX));
         s_ff_guest_y = vis->height * (0.12 + 0.50 * ((double)rand() / RAND_MAX));
@@ -739,6 +801,12 @@ static void ff_init_background(Visualizer *vis) {
     // astronauts guest, on its own independent cadence.
     s_ff_guest_active = false;
     s_ff_guest_wait = 10.0 + 14.0 * ((double)rand() / RAND_MAX);
+    // The megashark only ever spawns over shark-territory zones (checked
+    // each frame against the current dominant theme), so its own wait timer
+    // just needs an initial value here - it'll keep re-arming itself in
+    // update_floppy_fish once the run gets going.
+    s_ff_megashark_active = false;
+    s_ff_megashark_wait = 6.0 + 10.0 * ((double)rand() / RAND_MAX);
     // Place patches one at a time so each new one can avoid the ones
     // already placed before it.
     for (int i = 0; i < FF_SEAWEED_COUNT; i++) s_ff_seaweed_x[i] = -1e9;
@@ -748,6 +816,7 @@ static void ff_init_background(Visualizer *vis) {
 
 void init_floppy_fish_system(Visualizer *vis) {
     s_ff_best_score = 0;
+    s_ff_session_best = 0;
 #ifdef FLOPPYSOUND
     ff_load_alltime_best();
     ff_load_daily_best(); // overrides s_ff_best_score above if today's save is still valid
@@ -1165,7 +1234,11 @@ void update_floppy_fish(Visualizer *vis, double dt) {
                 // Demo-mode runs still tick the on-screen score up (so the
                 // attract loop looks alive), but never touch the persisted
                 // daily/all-time records - those should only reflect a
-                // real player's runs.
+                // real player's runs. The session best is never persisted
+                // either way, but stays consistent with the same rule.
+                if (!s_ff_demo_mode && s_ff_score > s_ff_session_best) {
+                    s_ff_session_best = s_ff_score;
+                }
                 if (!s_ff_demo_mode && s_ff_score > s_ff_best_score) {
                     s_ff_best_score = s_ff_score;
                     printf("New best score today: %d\n", s_ff_best_score);
@@ -1220,6 +1293,30 @@ void update_floppy_fish(Visualizer *vis, double dt) {
                 s_ff_state = FF_GAME_OVER;
             }
         }
+
+        // Megashark: only while the fish is actually in a shark-territory
+        // zone. Ticks its wait timer down regardless, but only spawns (and
+        // only re-arms its timer) when the theme matches, so it never
+        // fires somewhere it wouldn't make sense.
+        double mega_zone_len = vis->height * FF_ZONE_LEN_FRAC;
+        double mega_trans_len = vis->height * FF_ZONE_TRANS_FRAC;
+        int mtf, mtt; double mbt;
+        ff_theme_at(s_ff_world_x, mega_zone_len, mega_trans_len, &mtf, &mtt, &mbt);
+        bool in_shark_zone = (mbt > 0.5 ? mtt : mtf) == FF_THEME_SHARK;
+        if (s_ff_megashark_active) {
+            s_ff_megashark_x += s_ff_megashark_dir * s_ff_megashark_speed * dt;
+            bool mega_off_left  = s_ff_megashark_dir < 0 && s_ff_megashark_x < -vis->width * 0.20;
+            bool mega_off_right = s_ff_megashark_dir > 0 && s_ff_megashark_x > vis->width * 1.20;
+            if (mega_off_left || mega_off_right) {
+                s_ff_megashark_active = false;
+                s_ff_megashark_wait = 10.0 + 14.0 * ((double)rand() / RAND_MAX);
+            }
+        } else if (in_shark_zone) {
+            s_ff_megashark_wait -= dt;
+            if (s_ff_megashark_wait <= 0.0) {
+                ff_spawn_megashark(vis);
+            }
+        }
     }
 
     // Hit the sandy floor - always ends the run, playing or already falling.
@@ -1253,9 +1350,72 @@ void update_floppy_fish(Visualizer *vis, double dt) {
 #endif
 }
 
+// A little birthday-style party hat: a striped cone with a fluffy pom-pom
+// tip and a scalloped brim, tilted rakishly forward over the eye. Drawn in
+// the fish's own local space (so it rides along with rotation/flap) by
+// ff_draw_fish, faded in/out by party_hat_amount as the fish crosses
+// into/out of a FF_THEME_PARTY zone (see draw_floppy_fish).
+static void ff_draw_party_hat_on_fish(cairo_t *cr, double radius, double alpha) {
+    if (alpha <= 0.0) return;
+    cairo_save(cr);
+    cairo_translate(cr, radius * 0.45, -radius * 0.92);
+    cairo_rotate(cr, -0.30);
+
+    double hh = radius * 1.15, hw = radius * 0.6;
+
+    // Cone, shaded top-to-bottom so it reads as a solid party hat rather
+    // than a flat triangle.
+    cairo_pattern_t *cone = cairo_pattern_create_linear(0, 0, 0, -hh);
+    cairo_pattern_add_color_stop_rgba(cone, 0.0, 0.98, 0.20, 0.55, alpha);
+    cairo_pattern_add_color_stop_rgba(cone, 1.0, 0.30, 0.80, 0.95, alpha);
+    cairo_move_to(cr, -hw * 0.5, 0);
+    cairo_line_to(cr, hw * 0.5, 0);
+    cairo_line_to(cr, 0, -hh);
+    cairo_close_path(cr);
+    cairo_set_source(cr, cone);
+    cairo_fill_preserve(cr);
+    cairo_pattern_destroy(cone);
+    cairo_set_source_rgba(cr, 0, 0, 0, 0.3 * alpha);
+    cairo_set_line_width(cr, fmax(1.0, radius * 0.03));
+    cairo_stroke(cr);
+
+    // A couple of rows of polka dots, clipped to the cone.
+    cairo_save(cr);
+    cairo_move_to(cr, -hw * 0.5, 0);
+    cairo_line_to(cr, hw * 0.5, 0);
+    cairo_line_to(cr, 0, -hh);
+    cairo_close_path(cr);
+    cairo_clip(cr);
+    cairo_set_source_rgba(cr, 1.0, 0.92, 0.55, 0.9 * alpha);
+    for (int i = 0; i < 3; i++) {
+        double yy = -hh * (0.22 + 0.24 * i);
+        double ww = hw * (1.0 - (double)i / 3.5) * 0.5;
+        cairo_arc(cr, -ww * 0.45, yy, hw * 0.08, 0, 2 * M_PI);
+        cairo_fill(cr);
+        cairo_arc(cr, ww * 0.45, yy, hw * 0.08, 0, 2 * M_PI);
+        cairo_fill(cr);
+    }
+    cairo_restore(cr);
+
+    // Scalloped brim at the base.
+    cairo_set_source_rgba(cr, 0.95, 0.95, 0.85, alpha);
+    cairo_save(cr);
+    cairo_scale(cr, 1.0, 0.35);
+    cairo_arc(cr, 0, 0, hw * 0.68, 0, 2 * M_PI);
+    cairo_restore(cr);
+    cairo_fill(cr);
+
+    // Fluffy pom-pom on top.
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, alpha);
+    cairo_arc(cr, 0, -hh, hw * 0.22, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    cairo_restore(cr);
+}
+
 static void ff_draw_fish(cairo_t *cr, double x, double y, double radius, double rotation,
                           double flap_phase, const FFFishPalette *pal, double alpha,
-                          double blink_amount) {
+                          double blink_amount, double party_hat_amount) {
     cairo_save(cr);
     cairo_translate(cr, x, y);
     cairo_rotate(cr, rotation);
@@ -1316,6 +1476,8 @@ static void ff_draw_fish(cairo_t *cr, double x, double y, double radius, double 
     cairo_arc(cr, radius * 0.10, 0, radius * 0.14, 0, 2 * M_PI);
     cairo_fill(cr);
     cairo_restore(cr);
+
+    ff_draw_party_hat_on_fish(cr, radius, party_hat_amount * alpha);
 
     cairo_restore(cr);
 }
@@ -1450,6 +1612,81 @@ static void ff_draw_shark(cairo_t *cr, double x, double y, double t, int dir, do
     cairo_curve_to(cr, -2, 26, 4, 16, 10, 8);
     cairo_close_path(cr);
     cairo_fill(cr);
+
+    cairo_restore(cr);
+}
+
+// The megashark: a bold, mostly-opaque, oversized shark silhouette meant
+// to read as a startling close pass rather than a background critter -
+// same basic body plan as ff_draw_shark above, scaled way up, drawn much
+// more solid, and with an eye and a hint of teeth for extra bite. Always
+// drawn after the player fish (see draw_floppy_fish) so it flashes across
+// in front of them rather than behind the scenery.
+static void ff_draw_megashark(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult, double scale) {
+    if (alpha_mult <= 0.0) return;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, (double)dir * scale, scale);
+
+    double sway = sin(t * 1.4) * 0.05;
+    cairo_rotate(cr, sway);
+
+    double alpha = 0.80 * alpha_mult;
+    double tail_swing = sin(t * 2.4) * 0.3;
+
+    cairo_set_source_rgba(cr, 0.10, 0.13, 0.15, alpha);
+
+    // Tail fin, forked, attached at the tail end of the body.
+    cairo_move_to(cr, -52, 0);
+    cairo_curve_to(cr, -66, -6, -78, -20 + tail_swing * 10, -92, -26 + tail_swing * 14);
+    cairo_curve_to(cr, -78, -8, -70, -3, -60, 0);
+    cairo_curve_to(cr, -70, 3, -78, 8, -92, 22 + tail_swing * 14);
+    cairo_curve_to(cr, -78, 16, -66, 6, -52, 0);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Body - smooth torpedo shape, nose at +x, tapering to the tail.
+    cairo_move_to(cr, 58, 1);
+    cairo_curve_to(cr, 50, -14, 20, -20, -8, -17);
+    cairo_curve_to(cr, -28, -14, -45, -8, -55, -1);
+    cairo_curve_to(cr, -45, 8, -28, 15, -8, 17);
+    cairo_curve_to(cr, 20, 20, 50, 12, 58, 1);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Dorsal fin, rooted on the body's top edge.
+    cairo_move_to(cr, -14, -16);
+    cairo_curve_to(cr, -10, -32, 2, -38, 10, -40);
+    cairo_curve_to(cr, 4, -28, 6, -20, 12, -14);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Pectoral fin, swept back from the underside near the head.
+    cairo_move_to(cr, 14, 10);
+    cairo_curve_to(cr, 10, 24, 2, 34, -10, 38);
+    cairo_curve_to(cr, -2, 26, 4, 16, 10, 8);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // A small pale eye and a hint of open jaw with a couple of teeth -
+    // just enough character to make the flash memorable without being
+    // gory.
+    cairo_set_source_rgba(cr, 0.85, 0.85, 0.80, alpha_mult * 0.9);
+    cairo_arc(cr, 44, -4, 2.4, 0, 2 * M_PI);
+    cairo_fill(cr);
+    cairo_set_source_rgba(cr, 0.10, 0.10, 0.10, alpha_mult * 0.9);
+    cairo_arc(cr, 44.6, -4, 1.1, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    cairo_set_source_rgba(cr, 0.92, 0.90, 0.85, alpha_mult * 0.85);
+    for (int k = 0; k < 3; k++) {
+        double tx = 40.0 - k * 5.0;
+        cairo_move_to(cr, tx, 6);
+        cairo_line_to(cr, tx + 1.5, 10);
+        cairo_line_to(cr, tx + 3.0, 6);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+    }
 
     cairo_restore(cr);
 }
@@ -2031,7 +2268,199 @@ static void ff_draw_astronaut_group(cairo_t *cr, double x, double y, double t, i
     }
 }
 
-// (Re)builds the cached static-layer surfaces for all nine themes if they
+// A single cruising alligator: a long low-slung body with a row of ridged
+// back bumps, a wide flat snout, eyes raised on top of the head, and a
+// tail sweeping side to side - head toward the swim direction (+x), riding
+// just under the surface the way a real gator does with only its eyes and
+// ridge line showing.
+static void ff_draw_alligator_single(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult, double scale) {
+    if (alpha_mult <= 0.0) return;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, (double)dir * scale, scale);
+
+    double swish = sin(t * 2.2) * 0.5;
+    double alpha = 0.6 * alpha_mult;
+
+    // Tail, sweeping side to side.
+    cairo_set_source_rgba(cr, 0.20, 0.32, 0.14, alpha);
+    cairo_move_to(cr, -14, 0);
+    cairo_curve_to(cr, -24, -3 + swish * 6, -34, -2 + swish * 10, -40, swish * 12);
+    cairo_curve_to(cr, -34, 3 + swish * 8, -24, 4 + swish * 4, -14, 4);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Long low body.
+    cairo_move_to(cr, -16, -3);
+    cairo_curve_to(cr, -10, -8, 10, -8, 20, -4);
+    cairo_curve_to(cr, 24, -2, 24, 2, 20, 4);
+    cairo_curve_to(cr, 10, 8, -10, 8, -16, 3);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Ridged back bumps.
+    for (int i = 0; i < 4; i++) {
+        double bx = -6.0 + i * 6.0;
+        cairo_move_to(cr, bx - 2, -6);
+        cairo_line_to(cr, bx, -9);
+        cairo_line_to(cr, bx + 2, -6);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+    }
+
+    // Wide flat snout.
+    cairo_move_to(cr, 18, -3);
+    cairo_curve_to(cr, 26, -4, 34, -2, 38, 0);
+    cairo_curve_to(cr, 34, 2, 26, 4, 18, 3);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Jawline and a couple of teeth glints.
+    cairo_set_source_rgba(cr, 0.96, 0.96, 0.92, alpha_mult * 0.7);
+    cairo_move_to(cr, 22, 0.5);
+    cairo_line_to(cr, 24, 2.5);
+    cairo_line_to(cr, 26, 0.5);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_move_to(cr, 30, -0.5);
+    cairo_line_to(cr, 32, -2.5);
+    cairo_line_to(cr, 34, -0.5);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // Eyes, raised on top of the head, breaking the surface.
+    cairo_set_source_rgba(cr, 0.20, 0.32, 0.14, alpha);
+    cairo_arc(cr, 14, -6, 2.6, 0, 2 * M_PI);
+    cairo_fill(cr);
+    cairo_set_source_rgba(cr, 0.85, 0.92, 0.30, alpha_mult * 0.85);
+    cairo_arc(cr, 14, -6, 1.3, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    cairo_restore(cr);
+}
+
+// The swamp-zone guest: a pair of alligators cruising through the murky
+// water together, so "alligators" reads as plural rather than a lone
+// straggler - same idea as the penguin waddle and lobster pair.
+static void ff_draw_alligator_group(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
+    static const double off_x[2] = {0.0, -62.0};
+    static const double off_y[2] = {0.0, 10.0};
+    static const double scale[2] = {1.0, 0.82};
+
+    for (int i = 0; i < 2; i++) {
+        double px = x + dir * off_x[i];
+        double py = y + off_y[i];
+        ff_draw_alligator_single(cr, px, py, t + i * 0.9, dir, alpha_mult, scale[i]);
+    }
+}
+
+// A single scuttling vent crab: a squat rounded shell, stubby fuzzy claws
+// (yeti-crab style rather than lobster-lean), and short walking legs, tinted
+// pale and picking up a faint ember glow from the vents rather than a
+// natural shell color - drawn close to the basalt floor rather than
+// mid-tank like every other guest (see ff_spawn_guest). Head/claws toward
+// the direction of travel (+x).
+static void ff_draw_ventcrab_single(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult, double scale) {
+    if (alpha_mult <= 0.0) return;
+    cairo_save(cr);
+    cairo_translate(cr, x, y);
+    cairo_scale(cr, (double)dir * scale, scale);
+
+    double alpha = 0.62 * alpha_mult;
+    cairo_set_source_rgba(cr, 0.82, 0.72, 0.62, alpha);
+
+    // Squat rounded shell.
+    cairo_move_to(cr, -16, 2);
+    cairo_curve_to(cr, -14, -10, 2, -14, 14, -8);
+    cairo_curve_to(cr, 20, -5, 20, 4, 14, 8);
+    cairo_curve_to(cr, 0, 12, -14, 10, -16, 2);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    // A faint ember-glow underlight, the theme's real signature detail.
+    cairo_set_source_rgba(cr, 1.0, 0.45, 0.15, 0.25 * alpha_mult);
+    cairo_arc(cr, 0, 6, 14, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    // Short stalked eyes.
+    cairo_set_source_rgba(cr, 0.82, 0.72, 0.62, alpha);
+    cairo_move_to(cr, 10, -8); cairo_line_to(cr, 14, -13); cairo_set_line_width(cr, 2.0); cairo_stroke(cr);
+    cairo_set_source_rgba(cr, 0.15, 0.10, 0.08, alpha_mult * 0.8);
+    cairo_arc(cr, 14, -13, 1.8, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    // Stubby fuzzy claws, snapping open and shut with the walk cycle.
+    double snap = 0.35 + 0.25 * sin(t * 4.5);
+    cairo_set_source_rgba(cr, 0.86, 0.78, 0.68, alpha);
+    for (int side = -1; side <= 1; side += 2) {
+        cairo_save(cr);
+        cairo_translate(cr, 14, side * 7);
+        cairo_rotate(cr, side * 0.25);
+        cairo_move_to(cr, 0, 0);
+        cairo_curve_to(cr, 5, -5, 11, -5, 14, -side * snap * 5);
+        cairo_curve_to(cr, 11, 5, 5, 5, 0, 0);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+        // A little fuzz texture along the claw edge.
+        for (int f = 0; f < 3; f++) {
+            double fx = 3 + f * 3.0;
+            cairo_move_to(cr, fx, -1);
+            cairo_line_to(cr, fx + 1.5, -4 - f * 0.5);
+            cairo_set_line_width(cr, 1.0);
+            cairo_stroke(cr);
+        }
+        cairo_restore(cr);
+    }
+
+    // Short walking legs, alternating.
+    cairo_set_source_rgba(cr, 0.80, 0.70, 0.60, alpha);
+    cairo_set_line_width(cr, 2.2);
+    for (int i = 0; i < 3; i++) {
+        double lx = -6 - i * 5.0;
+        double lift = sin(t * 7.0 + i * 2.0) * 2.5;
+        cairo_move_to(cr, lx, 5);
+        cairo_line_to(cr, lx - 3, 10 + lift);
+        cairo_stroke(cr);
+    }
+
+    cairo_restore(cr);
+}
+
+// The volcanic-zone guest: a pair of vent crabs scuttling among the
+// chimneys together, so "vent crabs" reads as plural rather than a lone
+// straggler - same idea as the penguin waddle and lobster pair.
+static void ff_draw_ventcrab_group(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
+    static const double off_x[2] = {0.0, -44.0};
+    static const double off_y[2] = {0.0, 4.0};
+    static const double scale[2] = {1.0, 0.85};
+
+    for (int i = 0; i < 2; i++) {
+        double px = x + dir * off_x[i];
+        double py = y + off_y[i];
+        ff_draw_ventcrab_single(cr, px, py, t + i * 0.4, dir, alpha_mult, scale[i]);
+    }
+}
+
+// The shark-territory guest: a pair of dorsal fins prowling past together
+// rather than a lone straggler, reusing the same shark silhouette as the
+// rare standalone cruiser above - same idea as the penguin waddle and
+// lobster pair, just with the theme's signature critter.
+static void ff_draw_shark_pack_group(cairo_t *cr, double x, double y, double t, int dir, double alpha_mult) {
+    if (alpha_mult <= 0.0) return;
+    static const double off_x[2] = {0.0, -110.0};
+    static const double off_y[2] = {0.0, 26.0};
+    static const double scale[2] = {1.0, 0.82};
+
+    for (int i = 0; i < 2; i++) {
+        double px = x + dir * off_x[i];
+        double py = y + off_y[i];
+        ff_draw_shark(cr, px, py, t + i * 0.6, dir, alpha_mult, scale[i]);
+    }
+}
+
+// (Re)builds the cached static-layer surfaces for all thirteen themes if they
 // haven't been built yet, or if the canvas size has changed since they
 // were (this file's canvas is normally a fixed GAME_W x GAME_H, but it's
 // also reused as-is by zenamp's visualizer, so this is a size check rather
@@ -2067,6 +2496,15 @@ static void ff_ensure_theme_caches(double w, double h, double floor_h) {
     s_ff_cache_h = h;
 }
 
+// Defined in floppyfish_shark.cpp. Not part of the shared per-theme
+// contract in floppyfish_common.h (no other theme needs a live-animated
+// backdrop layer), so it's declared directly here rather than dispatched.
+extern void ff_draw_shark_bg_shiver_live(cairo_t *cr, double w, double h, double base_y, double bubble_phase);
+// Defined in floppyfish_antarctic.cpp, same reasoning as the shark shiver
+// above - the whale needs to actually move, so it can't be baked into the
+// cached backdrop like the rest of that theme's scenery.
+extern void ff_draw_antarctic_whale_live(cairo_t *cr, double w, double h, double base_y, double bubble_phase);
+
 void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     if (vis->width <= 0 || vis->height <= 0) return;
 
@@ -2097,11 +2535,29 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
     cairo_set_source_surface(cr, s_ff_sky_cache[theme_from], 0, 0);
     cairo_paint(cr);
     ff_draw_theme_particles(cr, theme_from, w, h, s_ff_bubble_phase);
+    // The shark-territory background shiver is animated, unlike the cached
+    // skyline it sits in front of, so it's drawn live here too rather than
+    // baked into ff_draw_shark_backdrop - see ff_draw_shark_bg_shiver_live
+    // in floppyfish_shark.cpp. Same story for the Antarctic whale. Neither
+    // is part of the shared theme contract (only these two themes need
+    // it), hence the direct theme checks instead of a dispatcher call.
+    if (theme_from == FF_THEME_SHARK) {
+        ff_draw_shark_bg_shiver_live(cr, w, h, base_y, s_ff_bubble_phase);
+    }
+    if (theme_from == FF_THEME_ANTARCTIC) {
+        ff_draw_antarctic_whale_live(cr, w, h, base_y, s_ff_bubble_phase);
+    }
     if (blend_t > 0.0) {
         cairo_push_group(cr);
         cairo_set_source_surface(cr, s_ff_sky_cache[theme_to], 0, 0);
         cairo_paint(cr);
         ff_draw_theme_particles(cr, theme_to, w, h, s_ff_bubble_phase);
+        if (theme_to == FF_THEME_SHARK) {
+            ff_draw_shark_bg_shiver_live(cr, w, h, base_y, s_ff_bubble_phase);
+        }
+        if (theme_to == FF_THEME_ANTARCTIC) {
+            ff_draw_antarctic_whale_live(cr, w, h, base_y, s_ff_bubble_phase);
+        }
         cairo_pop_group_to_source(cr);
         cairo_paint_with_alpha(cr, blend_t);
     }
@@ -2151,6 +2607,15 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
             case FF_GUEST_ASTRONAUTS:
                 ff_draw_astronaut_group(cr, s_ff_guest_x, s_ff_guest_y, vis->time_offset, s_ff_guest_dir, guest_alpha);
                 break;
+            case FF_GUEST_ALLIGATORS:
+                ff_draw_alligator_group(cr, s_ff_guest_x, s_ff_guest_y, vis->time_offset, s_ff_guest_dir, guest_alpha);
+                break;
+            case FF_GUEST_VENTCRABS:
+                ff_draw_ventcrab_group(cr, s_ff_guest_x, s_ff_guest_y, vis->time_offset, s_ff_guest_dir, guest_alpha);
+                break;
+            case FF_GUEST_SHARKPACK:
+                ff_draw_shark_pack_group(cr, s_ff_guest_x, s_ff_guest_y, vis->time_offset, s_ff_guest_dir, guest_alpha);
+                break;
             default:
                 ff_draw_diver(cr, s_ff_guest_x, s_ff_guest_y, vis->time_offset, s_ff_guest_dir, guest_alpha);
                 break;
@@ -2189,9 +2654,22 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
         cairo_paint_with_alpha(cr, blend_t);
     }
 
-    // Fish
+    // Fish - wearing a party hat that fades in/out smoothly as the fish
+    // crosses into/out of a FF_THEME_PARTY zone, same crossfade weighting
+    // as everything else theme-dependent on screen.
+    double party_hat_amount = (theme_from == FF_THEME_PARTY ? (1.0 - blend_t) : 0.0)
+                             + (theme_to   == FF_THEME_PARTY ? blend_t        : 0.0);
     ff_draw_fish(cr, fish_x, s_ff_fish_y, fish_radius, s_ff_rotation, s_ff_flap_anim,
-                 &FF_FISH_PALETTES[s_ff_fish_palette], 1.0, s_ff_blink_progress);
+                 &FF_FISH_PALETTES[s_ff_fish_palette], 1.0, s_ff_blink_progress, party_hat_amount);
+
+    // Megashark - drawn after the fish (and everything else) so its rare,
+    // fast flash reads as passing right in front of the player rather than
+    // through the background scenery.
+    if (s_ff_megashark_active) {
+        double mega_scale = h * 0.0040;
+        ff_draw_megashark(cr, s_ff_megashark_x, s_ff_megashark_y, vis->time_offset, s_ff_megashark_dir,
+                           ff_edge_fade(s_ff_megashark_x, w), mega_scale);
+    }
 
     // Score
     cairo_set_source_rgba(cr, 0, 0, 0, 0.35);
@@ -2269,7 +2747,7 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
         cairo_show_text(cr, msg);
 
         cairo_set_font_size(cr, h * 0.032);
-        char best_text[64];
+        char best_text[128];
         const char *medal = ff_medal_for_score(s_ff_score);
         double score_y = h * 0.48;
         if (strcmp(medal, "None") == 0) {
@@ -2291,10 +2769,11 @@ void draw_floppy_fish(Visualizer *vis, cairo_t *cr) {
         }
 
 #ifdef FLOPPYSOUND
-        snprintf(best_text, sizeof(best_text), "Today's Best: %d   All-Time Best: %d",
-                 s_ff_best_score, s_ff_alltime_best);
+        snprintf(best_text, sizeof(best_text), "Session Best: %d   Today's Best: %d   All-Time Best: %d",
+                 s_ff_session_best, s_ff_best_score, s_ff_alltime_best);
 #else
-        snprintf(best_text, sizeof(best_text), "Today's Best: %d", s_ff_best_score);
+        snprintf(best_text, sizeof(best_text), "Session Best: %d   Today's Best: %d",
+                 s_ff_session_best, s_ff_best_score);
 #endif
         cairo_text_extents(cr, best_text, &ext);
         cairo_move_to(cr, w * 0.5 - ext.width * 0.5, h * 0.54);
