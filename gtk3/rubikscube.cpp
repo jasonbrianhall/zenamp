@@ -5,6 +5,10 @@
 // simply replaying its own scramble in reverse, which is always correct and
 // reads just as well visually).
 //
+// The screen shows the cube alongside a "permutation" diagram: 9 rings (one
+// per layer) and 54 dots (one per sticker). When a layer turns, its ring
+// lights up and its stickers slide around it in sync with the cube.
+//
 // Interaction: click-drag spins the camera, scroll zooms — both work at any
 // time, even paused/no audio. Layer turns are a separate concern: they only
 // fire on a detected beat, so no music genuinely means no turning.
@@ -13,6 +17,7 @@
 #include "audio_player.h"
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 // --- Small self-contained RNG (mirrors pipes.cpp's) ------------------------
@@ -436,7 +441,7 @@ static int rubik_quad_cmp(const void *a, const void *b) {
     return 0;
 }
 
-void draw_rubiks_cube_system(Visualizer *vis, cairo_t *cr) {
+static void rubik_draw_cube_3d(Visualizer *vis, cairo_t *cr) {
     RubiksCubeSystem *sys = &vis->rubiks_cube;
 
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
@@ -534,5 +539,350 @@ void draw_rubiks_cube_system(Visualizer *vis, cairo_t *cr) {
         cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.85);
         cairo_set_line_width(cr, 2.0);
         cairo_stroke(cr);
+    }
+}
+
+// --- Permutation view (what the visualization actually shows) ------------
+
+#define RPERM_C             0.30  // ring spacing on the sticker sphere
+#define RPERM_K             0.80  // 1.0 = pure stereographic; lower = more even
+#define RPERM_RING_SAMPLES  360
+#define RPERM_STICKERS      54
+#define RPERM_HISTORY       6
+
+static const double RPERM_ACCENT[3] = {0.62, 0.52, 0.98}; // title / current move
+
+// --- Small math ------------------------------------------------------------
+
+static void rperm_rotate(int axis, double ang, double v[3]) {
+    double c = cos(ang), s = sin(ang);
+    int a = (axis + 1) % 3, b = (axis + 2) % 3;
+    double va = v[a], vb = v[b];
+    v[a] = c * va - s * vb;
+    v[b] = s * va + c * vb;
+}
+
+// View basis for the flat map: the projection pole sits off a cube corner
+// (+x+y+z), well clear of every ring and dot, so nothing blows up.
+static void rperm_basis(double b[3][3]) {
+    const double r3 = 1.0 / sqrt(3.0), r2 = 1.0 / sqrt(2.0);
+    double e3[3] = {r3, r3, r3};
+    double e1[3] = {-r2, r2, 0.0};
+    double e2[3] = {e3[1]*e1[2] - e3[2]*e1[1],
+                    e3[2]*e1[0] - e3[0]*e1[2],
+                    e3[0]*e1[1] - e3[1]*e1[0]};
+    memcpy(b[0], e1, sizeof e1);
+    memcpy(b[1], e2, sizeof e2);
+    memcpy(b[2], e3, sizeof e3);
+}
+
+// Softened stereographic projection from the pole (b[2]).
+static void rperm_map(const double b[3][3], const double q[3], double *x, double *y) {
+    double e0 = b[0][0]*q[0] + b[0][1]*q[1] + b[0][2]*q[2];
+    double e1 = b[1][0]*q[0] + b[1][1]*q[1] + b[1][2]*q[2];
+    double e2 = b[2][0]*q[0] + b[2][1]*q[1] + b[2][2]*q[2];
+    double th = acos(fmax(-1.0, fmin(1.0, -e2)));  // angle from view center
+    double r = tan(th * 0.5 * RPERM_K);
+    double d = hypot(e0, e1);
+    if (d < 1e-9) { *x = 0.0; *y = 0.0; return; }
+    *x = e0 / d * r;
+    *y = e1 / d * r;
+}
+
+// --- Move sequence helpers --------------------------------------------------
+
+// Whole cycle as one list: scramble moves, then their inverses in reverse.
+static RubikMove rperm_step_move(const RubiksCubeSystem *sys, int step) {
+    int n = sys->scramble_count;
+    if (step < n) return sys->scramble_moves[step];
+    RubikMove m = sys->scramble_moves[2 * n - 1 - step];
+    m.dir = -m.dir;
+    return m;
+}
+
+static int rperm_steps_done(const RubiksCubeSystem *sys) {
+    int n = sys->scramble_count;
+    switch (sys->phase) {
+        case RUBIK_PHASE_SCRAMBLING: return sys->move_index;
+        case RUBIK_PHASE_PAUSE:      return n;
+        case RUBIK_PHASE_SOLVING:    return n + (n - 1 - sys->solve_index);
+        default:                     return 2 * n;
+    }
+}
+
+// Singmaster notation in the cube's world frame. dir +1 is a right-handed
+// (counter-clockwise from +axis) quarter turn, so R/U/F/S are dir -1 and
+// L/D/B/M/E are dir +1.
+static void rperm_move_name(RubikMove m, char *buf, size_t len) {
+    static const char *names[3][3] = {{"L", "M", "R"}, {"D", "E", "U"}, {"B", "S", "F"}};
+    bool cw_is_negative = (m.layer == 1) || (m.axis == 2 && m.layer == 0);
+    bool prime = cw_is_negative ? (m.dir == 1) : (m.dir == -1);
+    snprintf(buf, len, "%s%s", names[m.axis][m.layer + 1], prime ? "\xe2\x80\xb2" : "");
+}
+
+// --- Text helpers -----------------------------------------------------------
+
+static double rperm_text_width(cairo_t *cr, const char *s, double size) {
+    cairo_text_extents_t ext;
+    cairo_set_font_size(cr, size);
+    cairo_text_extents(cr, s, &ext);
+    return ext.x_advance;
+}
+
+// align: 0 = left edge at x, 0.5 = centered on x.
+static double rperm_text(cairo_t *cr, double x, double y, const char *s, double size,
+                         double r, double g, double b, double a, double align) {
+    double w = rperm_text_width(cr, s, size);
+    cairo_set_source_rgba(cr, r, g, b, a);
+    cairo_move_to(cr, x - w * align, y);
+    cairo_show_text(cr, s);
+    return w;
+}
+
+// --- Layout -------------------------------------------------------------
+
+typedef struct {
+    double fs;                          // base font size
+    double title_y;
+    double cube_cx, cube_cy, cube_size;
+    double label_x, label_y;
+    double diag_cx, diag_cy, diag_size;
+    double hist_x, hist_y;
+} RpermLayout;
+
+static RpermLayout rperm_layout(Visualizer *vis) {
+    double w = vis->width, h = vis->height;
+    RpermLayout L;
+    L.fs = fmin(w, h) * 0.035;
+    if (w < h * 1.1) {
+        // Portrait: stacked like the reel.
+        L.title_y = h * 0.07;
+        L.cube_cx = w * 0.45; L.cube_cy = h * 0.25; L.cube_size = fmin(h * 0.26, w * 0.55);
+        L.label_x = w * 0.80; L.label_y = h * 0.24;
+        L.diag_cx = w * 0.50; L.diag_cy = h * 0.64; L.diag_size = fmin(w * 0.88, h * 0.44);
+        L.hist_x = w * 0.08;  L.hist_y = h * 0.94;
+    } else {
+        // Landscape: cube left, diagram right.
+        L.title_y = h * 0.08;
+        L.cube_cx = w * 0.25; L.cube_cy = h * 0.42; L.cube_size = fmin(h * 0.42, w * 0.34);
+        L.label_x = w * 0.25; L.label_y = h * 0.76;
+        L.diag_cx = w * 0.66; L.diag_cy = h * 0.54; L.diag_size = fmin(w * 0.58, h * 0.80);
+        L.hist_x = w * 0.05;  L.hist_y = h * 0.93;
+    }
+    return L;
+}
+
+// --- Draw -------------------------------------------------------------------
+
+typedef struct { double x, y; int color; bool moving; } RpermDot;
+
+static double g_rperm_rings[9][RPERM_RING_SAMPLES][2];
+static RpermDot g_rperm_dots[RPERM_STICKERS];
+
+void draw_rubiks_cube_system(Visualizer *vis, cairo_t *cr) {
+    RubiksCubeSystem *sys = &vis->rubiks_cube;
+    RpermLayout L = rperm_layout(vis);
+
+    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+    cairo_paint(cr);
+
+    // ---- The 3D cube, scaled into its slot. Its own painter does a full
+    //      cairo_paint, so it's clipped to a box around the slot.
+    {
+        // On-screen width of the cube at default zoom, seen corner-on.
+        double native = 1.65 * 3.0 * RUBIK_CUBIE_SIZE * vis->height * 1.05 / (RUBIK_CUBIE_SIZE * 8.0);
+        double s = L.cube_size / native;
+        cairo_save(cr);
+        cairo_rectangle(cr, L.cube_cx - L.cube_size, L.cube_cy - L.cube_size * 0.9,
+                        L.cube_size * 2.0, L.cube_size * 1.8);
+        cairo_clip(cr);
+        cairo_translate(cr, L.cube_cx, L.cube_cy);
+        cairo_scale(cr, s, s);
+        cairo_translate(cr, -vis->width / 2.0, -vis->height / 2.0);
+        rubik_draw_cube_3d(vis, cr);
+        cairo_restore(cr);
+    }
+
+    // ---- Which move is current / last.
+    int done = rperm_steps_done(sys);
+    int total = 2 * sys->scramble_count;
+    int cur = sys->animating ? done : done - 1;   // step to highlight
+    bool have_cur = cur >= 0 && cur < total;
+    RubikMove cur_move = have_cur ? rperm_step_move(sys, cur) : RubikMove{0, 0, 0};
+    int active_ring = have_cur ? cur_move.axis * 3 + (cur_move.layer + 1) : -1;
+    double partial = sys->animating
+        ? sys->current_move.dir * (M_PI / 2.0) * sys->anim_progress : 0.0;
+
+    // ---- Build the flat diagram (in projection units).
+    double basis[3][3];
+    rperm_basis(basis);
+
+    double minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+    for (int a = 0; a < 3; a++)
+        for (int l = -1; l <= 1; l++) {
+            int ri = a * 3 + (l + 1);
+            double h = RPERM_C * l, rho = sqrt(1.0 - h * h);
+            for (int k = 0; k < RPERM_RING_SAMPLES; k++) {
+                double t = 2.0 * M_PI * k / RPERM_RING_SAMPLES;
+                double q[3];
+                q[a] = h;
+                q[(a + 1) % 3] = rho * cos(t);
+                q[(a + 2) % 3] = rho * sin(t);
+                double x, y;
+                rperm_map(basis, q, &x, &y);
+                g_rperm_rings[ri][k][0] = x;
+                g_rperm_rings[ri][k][1] = y;
+                minx = fmin(minx, x); maxx = fmax(maxx, x);
+                miny = fmin(miny, y); maxy = fmax(maxy, y);
+            }
+        }
+
+    int nd = 0;
+    for (int i = 0; i < RUBIK_CUBIE_COUNT; i++) {
+        RubikCubie *c = &sys->cubies[i];
+        int orig[3] = {c->orig_gx, c->orig_gy, c->orig_gz};
+        double pos[3] = {(double)c->gx, (double)c->gy, (double)c->gz};
+        int grid[3] = {c->gx, c->gy, c->gz};
+        bool moving = sys->animating &&
+            grid[sys->current_move.axis] == sys->current_move.layer;
+
+        for (int a = 0; a < 3; a++)
+            for (int s = -1; s <= 1; s += 2) {
+                if (orig[a] != s) continue;          // not a sticker face
+                double ln[3] = {0, 0, 0}, n[3];
+                ln[a] = s;
+                rubik_mat3_apply(&c->orient, ln[0], ln[1], ln[2], &n[0], &n[1], &n[2]);
+                for (int k = 0; k < 3; k++) n[k] = (double)lround(n[k]);
+
+                double pn = pos[0]*n[0] + pos[1]*n[1] + pos[2]*n[2];
+                double perp[3], pp = 0.0;
+                for (int k = 0; k < 3; k++) { perp[k] = pos[k] - pn * n[k]; pp += perp[k] * perp[k]; }
+                double out = sqrt(fmax(0.0, 1.0 - RPERM_C * RPERM_C * pp));
+                double q[3];
+                for (int k = 0; k < 3; k++) q[k] = RPERM_C * perp[k] + out * n[k];
+
+                // Mid-turn: rotate on the sphere, which slides it along its ring.
+                if (moving) rperm_rotate(sys->current_move.axis, partial, q);
+
+                if (nd < RPERM_STICKERS) {
+                    RpermDot *d = &g_rperm_dots[nd++];
+                    rperm_map(basis, q, &d->x, &d->y);
+                    d->color = a * 2 + (s < 0);
+                    d->moving = moving;
+                }
+            }
+    }
+
+    // ---- Fit to the diagram slot (gently "breathing" with volume).
+    double extent = fmax(maxx - minx, maxy - miny);
+    double scale = L.diag_size * (1.0 + vis->volume_level * 0.03) / extent;
+    double ox = L.diag_cx - (minx + maxx) * 0.5 * scale;
+    double oy = L.diag_cy - (miny + maxy) * 0.5 * scale;
+
+    double mid = 0.0;
+    for (int i = VIS_FREQUENCY_BARS / 4; i < 3 * VIS_FREQUENCY_BARS / 4; i++)
+        mid += vis->frequency_bands[i];
+    mid /= (VIS_FREQUENCY_BARS / 2);
+
+    // ---- Rings: dim gray, the active layer's ring bright white on top.
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    for (int pass = 0; pass < 2; pass++)
+        for (int ri = 0; ri < 9; ri++) {
+            bool active = ri == active_ring;
+            if (active != (pass == 1)) continue;
+            cairo_move_to(cr, ox + g_rperm_rings[ri][0][0] * scale, oy + g_rperm_rings[ri][0][1] * scale);
+            for (int k = 1; k < RPERM_RING_SAMPLES; k++)
+                cairo_line_to(cr, ox + g_rperm_rings[ri][k][0] * scale, oy + g_rperm_rings[ri][k][1] * scale);
+            cairo_close_path(cr);
+            if (active) {
+                double a = sys->animating ? 1.0 : 0.75;
+                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, a);
+                cairo_set_line_width(cr, fmax(2.0, L.diag_size * 0.0065));
+            } else {
+                cairo_set_source_rgba(cr, 0.58, 0.58, 0.66, fmin(0.85, 0.42 + mid * 0.35));
+                cairo_set_line_width(cr, fmax(1.0, L.diag_size * 0.0032));
+            }
+            cairo_stroke(cr);
+        }
+
+    // ---- Sticker dots (moving ones drawn last so they ride on top).
+    double dot_r = L.diag_size * 0.008;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < nd; i++) {
+            RpermDot *d = &g_rperm_dots[i];
+            if (d->moving != (pass == 1)) continue;
+            int band = (d->color * VIS_FREQUENCY_BARS) / 6;
+            double e = vis->frequency_bands[band];
+            double r = dot_r * (1.0 + e * 0.35) * (d->moving ? 1.12 : 1.0);
+            const double *col = RUBIK_COLOR_RGB[d->color];
+            double g = 1.0 + e * 0.4;
+            cairo_new_path(cr);
+            cairo_arc(cr, ox + d->x * scale, oy + d->y * scale, r, 0, 2.0 * M_PI);
+            cairo_set_source_rgb(cr, fmin(1.0, col[0] * g), fmin(1.0, col[1] * g), fmin(1.0, col[2] * g));
+            cairo_fill(cr);
+        }
+
+    // ---- Text (serif, like the reel's LaTeX look).
+    cairo_select_font_face(cr, "serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    double fs = L.fs;
+
+    // Title.
+    rperm_text(cr, vis->width * 0.5, L.title_y, "Rubik\xe2\x80\x99s Cube", fs * 1.3,
+               RPERM_ACCENT[0], RPERM_ACCENT[1], RPERM_ACCENT[2], 1.0, 0.5);
+
+    char name[16];
+
+    // Big current-move label + "k / N" counter + phase.
+    {
+        int n = sys->scramble_count;
+        bool solving = sys->phase == RUBIK_PHASE_SOLVING || sys->phase == RUBIK_PHASE_SOLVED_PAUSE;
+        int shown = have_cur ? (cur < n ? cur + 1 : cur - n + 1) : 0;
+        if (have_cur) {
+            rperm_move_name(cur_move, name, sizeof name);
+            rperm_text(cr, L.label_x, L.label_y, name, fs * 2.6,
+                       RPERM_ACCENT[0], RPERM_ACCENT[1], RPERM_ACCENT[2], 1.0, 0.5);
+        }
+        char counter[32];
+        snprintf(counter, sizeof counter, "%d / %d", shown, n);
+        rperm_text(cr, L.label_x, L.label_y + fs * 1.2, counter, fs * 0.7, 0.7, 0.7, 0.75, 0.9, 0.5);
+        const char *phase =
+            sys->phase == RUBIK_PHASE_SOLVED_PAUSE ? "solved" : (solving ? "solving" : "scrambling");
+        rperm_text(cr, L.label_x, L.label_y + fs * 2.1, phase, fs * 0.6, 0.55, 0.55, 0.6, 0.8, 0.5);
+    }
+
+    // Small tag on the left edge of the active ring.
+    if (active_ring >= 0) {
+        int best = 0;
+        for (int k = 1; k < RPERM_RING_SAMPLES; k++)
+            if (g_rperm_rings[active_ring][k][0] < g_rperm_rings[active_ring][best][0]) best = k;
+        double tx = ox + g_rperm_rings[active_ring][best][0] * scale - fs * 1.4;
+        double ty = oy + g_rperm_rings[active_ring][best][1] * scale;
+        cairo_new_path(cr);  // drop the current point left by show_text
+        cairo_arc(cr, tx, ty, fs * 0.85, 0, 2.0 * M_PI);
+        cairo_set_source_rgba(cr, 0.08, 0.08, 0.1, 0.9);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 0.6, 0.6, 0.66, 0.6);
+        cairo_set_line_width(cr, 1.0);
+        cairo_stroke(cr);
+        rperm_move_name(cur_move, name, sizeof name);
+        rperm_text(cr, tx, ty + fs * 0.32, name, fs * 0.9, 1.0, 1.0, 1.0, 1.0, 0.5);
+    }
+
+    // Recent move history, current one in the accent color.
+    if (have_cur) {
+        double x = L.hist_x;
+        int first = cur - (RPERM_HISTORY - 1);
+        if (first < 0) first = 0;
+        for (int st = first; st <= cur; st++) {
+            rperm_move_name(rperm_step_move(sys, st), name, sizeof name);
+            bool is_cur = st == cur;
+            double fade = 0.45 + 0.55 * (double)(st - first + 1) / (cur - first + 1);
+            x += rperm_text(cr, x, L.hist_y, name, fs,
+                            is_cur ? RPERM_ACCENT[0] : 1.0,
+                            is_cur ? RPERM_ACCENT[1] : 1.0,
+                            is_cur ? RPERM_ACCENT[2] : 1.0,
+                            is_cur ? 1.0 : fade * 0.8, 0.0);
+            x += fs * 0.45;
+        }
     }
 }
