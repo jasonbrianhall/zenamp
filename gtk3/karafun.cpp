@@ -373,15 +373,36 @@ static void parse_song_ini(const char *content, size_t content_len) {
         }
     }
     
-    // Find [eff6] section which contains the lyrics
-    char *eff6_start = strstr(ini_copy, "[eff6]");
-    if (!eff6_start) {
-        printf("KARAFUN: No [eff6] section found\n");
+    // The lyrics are in whichever [effN] section has the textN lines (the
+    // number varies from file to file: [eff6] in some, [Eff1] in others):
+    // find it, and read only it.
+    char *lyrics_start = NULL;
+    {
+        char *scan = ini_copy, *scan_end = ini_copy + content_len, *section = NULL;
+        while (scan && scan < scan_end && !lyrics_start) {
+            char *newline = strchr(scan, '\n');
+            if (!newline) newline = scan_end;
+            char *p = scan;
+            while (p < newline && isspace((unsigned char)*p)) p++;
+            if (*p == '[') {
+                section = (strncasecmp(p, "[eff", 4) == 0) ? scan : NULL;
+            } else if (section && strncasecmp(p, "text", 4) == 0 && isdigit((unsigned char)p[4])) {
+                const char *q = p + 4;
+                while (isdigit((unsigned char)*q)) q++;
+                while (*q == ' ' || *q == '\t') q++;
+                if (*q == '=') lyrics_start = section;
+            }
+            scan = newline + 1;
+        }
+    }
+    if (!lyrics_start) {
+        printf("KARAFUN: No lyrics section ([effN] with textN lines) found\n");
         free(ini_copy);
         return;
     }
-    
-    char *line_start = eff6_start;
+    bool in_lyrics_section = false;
+
+    char *line_start = lyrics_start;
     char *content_end = ini_copy + content_len;
     
     while (line_start && line_start < content_end) {
@@ -395,6 +416,10 @@ static void parse_song_ini(const char *content, size_t content_len) {
         strncpy(line, line_start, line_len);
         trim_string(line, strlen(line));
         
+        if (line[0] == '[') {                  // the lyrics' section, then the next: stop
+            if (in_lyrics_section) break;
+            in_lyrics_section = true;
+        }
         if (line[0] && line[0] != ';' && line[0] != '#' && line[0] != '[') {
             char *eq = strchr(line, '=');
             if (eq) {
@@ -410,99 +435,70 @@ static void parse_song_ini(const char *content, size_t content_len) {
                 
                 if (strncmp(key, "text", 4) == 0 && all_digits(key, 4)) {
                     // text0=Yan/kee Doo/dle went to town/_
-                    // Split on "/" and spaces to get syllables
-                    
-                    // Count syllables first (including underscores, which consume sync times)
-                    int syl_count = 0;
-                    char *count_copy = (char*)malloc(strlen(val) + 1);
-                    strcpy(count_copy, val);
-                    for (char *p = count_copy; *p; p++) {
-                        if (*p == '/') *p = ' ';
+                    // KaraFun's syllables: '/' and a space each end one (a run
+                    // of spaces counts once), and each takes the next sync
+                    // time, an empty one too: "/Whose" and "home/ of" have an
+                    // empty syllable, the end of the held note before. '_' is
+                    // a timed pause. Both are kept as placeholder words, so a
+                    // word's index is its sync's. (Turning '/' into spaces and
+                    // splitting lost the empty ones: from there every word had
+                    // the time of the one before.)
+                    std::vector<std::string> syls;
+                    {
+                        std::string cur;
+                        char prev = 0;
+                        for (const char *c = val; *c; c++) {
+                            if (*c == '/' || *c == ' ') {
+                                if (!(*c == ' ' && prev == ' ')) { syls.push_back(cur); cur.clear(); }
+                            } else {
+                                cur += *c;
+                            }
+                            prev = *c;
+                        }
+                        syls.push_back(cur);
                     }
-                    char *save_tmp = NULL;
-                    char *syl_tmp = strtok_r(count_copy, " ", &save_tmp);
-                    while (syl_tmp) {
-                        char syl_t[512] = {0};
-                        strncpy(syl_t, syl_tmp, sizeof(syl_t) - 1);
-                        trim_string(syl_t, strlen(syl_t));
-                        if (syl_t[0]) syl_count++;  // Count ALL syllables, including underscores
-                        syl_tmp = strtok_r(NULL, " ", &save_tmp);
-                    }
-                    free(count_copy);
-                    
-                    // Store line BEFORE adding syllables
+                    int syl_count = (int)syls.size();
+
                     if (syl_count > 0 && g_karafun.line_count < 1000) {
                         int line_start_idx = g_karafun.word_count;
-                        
                         KarafunLyricLine *new_lines = (KarafunLyricLine*)realloc(
                             g_karafun.lines,
                             sizeof(KarafunLyricLine) * (g_karafun.line_count + 1));
                         if (new_lines) {
                             g_karafun.lines = new_lines;
-                            
-                            // Reconstruct display text
-                            char display_text[2048] = {0};
-                            char *display_copy = (char*)malloc(strlen(val) + 1);
-                            strcpy(display_copy, val);
-                            for (char *p = display_copy; *p; p++) {
-                                if (*p == '/') *p = ' ';
+
+                            // The line as shown: syllables of a word together
+                            // ("proudly", not "prou dly"), no '_', one space
+                            std::string shown;
+                            for (const char *c = val; *c; c++) {
+                                if (*c == '/' || *c == '_') continue;
+                                if (*c == ' ' && (shown.empty() || shown.back() == ' ')) continue;
+                                shown += *c;
                             }
-                            char *save2 = NULL;
-                            char *syl = strtok_r(display_copy, " ", &save2);
-                            while (syl) {
-                                char syl_trim[512] = {0};
-                                strncpy(syl_trim, syl, sizeof(syl_trim) - 1);
-                                trim_string(syl_trim, strlen(syl_trim));
-                                if (syl_trim[0] && strcmp(syl_trim, "_") != 0) {
-                                    if (display_text[0]) strcat(display_text, " ");
-                                    strcat(display_text, syl_trim);
-                                }
-                                syl = strtok_r(NULL, " ", &save2);
-                            }
-                            free(display_copy);
-                            
+                            while (!shown.empty() && shown.back() == ' ') shown.pop_back();
+
                             g_karafun.lines[g_karafun.line_count].start_word_idx = line_start_idx;
                             g_karafun.lines[g_karafun.line_count].word_count = syl_count;
                             strncpy(g_karafun.lines[g_karafun.line_count].display_text,
-                                   display_text, sizeof(g_karafun.lines[0].display_text) - 1);
+                                   shown.c_str(), sizeof(g_karafun.lines[0].display_text) - 1);
                             g_karafun.line_count++;
-                            printf("KARAFUN: Line %d (words %d-%d): %s\n", g_karafun.line_count - 1, 
-                                   line_start_idx, line_start_idx + syl_count - 1, display_text);
+                            printf("KARAFUN: Line %d (words %d-%d): %s\n", g_karafun.line_count - 1,
+                                   line_start_idx, line_start_idx + syl_count - 1, shown.c_str());
                         }
                     }
-                    
-                    // NOW add syllables as words (including underscores as placeholders)
-                    char *val_copy = (char*)malloc(strlen(val) + 1);
-                    strcpy(val_copy, val);
-                    for (char *p = val_copy; *p; p++) {
-                        if (*p == '/') *p = ' ';
+
+                    // The syllables as words, placeholders ("", "_") included
+                    for (const std::string &syl : syls) {
+                        if (g_karafun.word_count >= 10000) break;
+                        char **new_words = (char**)realloc(g_karafun.words,
+                            sizeof(char*) * (g_karafun.word_count + 1));
+                        if (!new_words) break;
+                        g_karafun.words = new_words;
+                        char *word_dup = (char*)malloc(syl.size() + 1);
+                        if (!word_dup) break;
+                        strcpy(word_dup, syl.c_str());
+                        g_karafun.words[g_karafun.word_count++] = word_dup;
                     }
-                    char *saveptr = NULL;
-                    char *syllable = strtok_r(val_copy, " ", &saveptr);
-                    
-                    while (syllable) {
-                        char syl_trimmed[512] = {0};
-                        strncpy(syl_trimmed, syllable, sizeof(syl_trimmed) - 1);
-                        trim_string(syl_trimmed, strlen(syl_trimmed));
-                        
-                        if (syl_trimmed[0]) {  // Add ALL syllables, including underscores
-                            if (g_karafun.word_count < 10000) {
-                                char **new_words = (char**)realloc(g_karafun.words,
-                                    sizeof(char*) * (g_karafun.word_count + 1));
-                                if (new_words) {
-                                    g_karafun.words = new_words;
-                                    char *word_dup = (char*)malloc(strlen(syl_trimmed) + 1);
-                                    if (word_dup) {
-                                        strcpy(word_dup, syl_trimmed);
-                                        g_karafun.words[g_karafun.word_count++] = word_dup;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        syllable = strtok_r(NULL, " ", &saveptr);
-                    }
-                    free(val_copy);
                 } else if (strncmp(key, "sync", 4) == 0 && all_digits(key, 4)) {
                     // sync0=177,179,182,185,...  (centiseconds!)
                     // Convert to seconds: centiseconds / 100.0
@@ -891,7 +887,8 @@ void draw_karafun_lyrics(void *vis_ptr, void *cr_ptr)
             pos++;
     }
 
-    if (pos) {
+    // (no box for a placeholder: an empty syllable or a '_' pause)
+    if (pos && current_word[0] && strcmp(current_word, "_") != 0) {
         size_t before_len = pos - current_text;
 
         char before[2048];
@@ -1156,7 +1153,7 @@ void draw_karafun_lyrics_fling(void *vis_ptr, void *cr_ptr)
     }
 
     int highlight_start = -1, highlight_end = -1;
-    if (pos) {
+    if (pos && current_word[0] && strcmp(current_word, "_") != 0) {   // (not for a placeholder)
         highlight_start = (int)(pos - current_text);
         highlight_end = highlight_start + (int)strlen(current_word);
     }
@@ -1274,7 +1271,7 @@ void draw_karafun_lyrics_fling(void *vis_ptr, void *cr_ptr)
 
     // Highlight logic
     const char *current_word = g_karafun.words[current_word_idx];
-    const char *word_pos = strstr(current_text, current_word);
+    const char *word_pos = (current_word[0] && strcmp(current_word, "_") != 0) ? strstr(current_text, current_word) : NULL;
 
     if (word_pos) {
         size_t before_len = word_pos - current_text;
